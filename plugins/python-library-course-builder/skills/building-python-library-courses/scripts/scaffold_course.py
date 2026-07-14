@@ -34,6 +34,31 @@ TEXT_SUFFIXES = {
     ".yaml",
     ".yml",
 }
+TEMPLATE_IGNORE = shutil.ignore_patterns(
+    ".DS_Store",
+    ".coverage",
+    ".coursekit",
+    ".coursekit-artifacts.json",
+    ".mypy_cache",
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".uv-cache",
+    ".venv",
+    "*.egg-info",
+    "*.log",
+    "*.py[cod]",
+    "*.tmp",
+    "*.tsbuildinfo",
+    "__pycache__",
+    "build",
+    "coverage",
+    "coverage.xml",
+    "course-verification.json",
+    "dist",
+    "htmlcov",
+    "node_modules",
+)
 
 
 class ScaffoldError(RuntimeError):
@@ -72,14 +97,21 @@ def ensure_empty_target(target: Path) -> None:
 def copy_template(destination: Path) -> None:
     if not TEMPLATE_ROOT.is_dir():
         raise ScaffoldError(f"Skill template is missing: {TEMPLATE_ROOT}")
-    for source in TEMPLATE_ROOT.rglob("*"):
-        if source.is_symlink():
-            raise ScaffoldError(f"Skill template cannot contain symlinks: {source}")
+    for root, directory_names, file_names in os.walk(TEMPLATE_ROOT):
+        names = [*directory_names, *file_names]
+        ignored = TEMPLATE_IGNORE(root, names)
+        directory_names[:] = [name for name in directory_names if name not in ignored]
+        for name in names:
+            if name in ignored:
+                continue
+            source = Path(root, name)
+            if source.is_symlink():
+                raise ScaffoldError(f"Skill template cannot contain symlinks: {source}")
     shutil.copytree(
         TEMPLATE_ROOT,
         destination,
         dirs_exist_ok=True,
-        ignore=shutil.ignore_patterns("__pycache__", "*.py[cod]"),
+        ignore=TEMPLATE_IGNORE,
     )
 
 

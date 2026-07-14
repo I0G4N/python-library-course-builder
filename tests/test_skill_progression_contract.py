@@ -22,43 +22,117 @@ def _read(relative: str) -> str:
 def test_course_template_contains_no_runtime_generated_artifacts() -> None:
     template = SKILL_ROOT / "assets" / "course-template"
     forbidden_names = {
+        ".mypy_cache",
         ".next",
         ".pytest_cache",
+        ".ruff_cache",
         ".uv-cache",
         ".venv",
         "__pycache__",
+        "build",
+        "coverage",
         "dist",
+        "htmlcov",
+        "node_modules",
     }
+    forbidden_files = {".coverage", "coverage.xml", "course-verification.json"}
+    forbidden_suffixes = {".log", ".pyc", ".pyd", ".pyo", ".tmp", ".tsbuildinfo"}
 
-    polluted = [
+    polluted = sorted(
         path.relative_to(template).as_posix()
         for path in template.rglob("*")
-        if path.is_symlink() or path.name in forbidden_names or path.suffix == ".pyc"
-    ]
+        if (
+            path.is_symlink()
+            or path.name in forbidden_names
+            or path.name in forbidden_files
+            or path.name.endswith(".egg-info")
+            or path.suffix in forbidden_suffixes
+        )
+    )
 
     assert polluted == []
 
 
-def test_template_copy_excludes_python_bytecode_created_by_test_imports(
+def test_template_copy_excludes_runtime_and_build_residue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     template = tmp_path / "template"
     (template / "pkg/__pycache__").mkdir(parents=True)
+    (template / "platform/app").mkdir(parents=True)
     (template / "README.md").write_text("course\n", encoding="utf-8")
     (template / "pkg/module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (template / "platform/app/page.tsx").write_text(
+        "export default 1\n", encoding="utf-8"
+    )
     (template / "pkg/__pycache__/module.cpython-313.pyc").write_bytes(b"cache")
     (template / "stray.pyc").write_bytes(b"cache")
+    residue = {
+        ".mypy_cache/state.json": "{}\n",
+        ".pytest_cache/CACHEDIR.TAG": "cache\n",
+        ".ruff_cache/state.json": "{}\n",
+        ".uv-cache/archive-v0/file": "cache\n",
+        ".venv/bin/python": "binary\n",
+        "build/output.js": "compiled\n",
+        "coverage/lcov.info": "coverage\n",
+        "coverage.xml": "<coverage />\n",
+        "course-verification.json": "{}\n",
+        "htmlcov/index.html": "coverage\n",
+        "platform/.next/server/page.js": "compiled\n",
+        "platform/dist/bundle.js": "compiled\n",
+        "platform/node_modules/package/index.js": "dependency\n",
+        "platform/tsconfig.tsbuildinfo": "{}\n",
+        "pytest.log": "test output\n",
+        "scratch.tmp": "temporary\n",
+    }
+    for relative, content in residue.items():
+        path = template / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    (template / ".coverage").write_bytes(b"SQLite format 3\0")
     destination = tmp_path / "copied"
     monkeypatch.setattr(scaffold_course, "TEMPLATE_ROOT", template)
 
     scaffold_course.copy_template(destination)
 
-    assert (destination / "README.md").is_file()
-    assert (destination / "pkg/module.py").is_file()
-    assert not any(
-        path.name == "__pycache__" or path.suffix == ".pyc"
+    copied_files = {
+        path.relative_to(destination).as_posix()
         for path in destination.rglob("*")
-    )
+        if path.is_file()
+    }
+    assert copied_files == {"README.md", "pkg/module.py", "platform/app/page.tsx"}
+
+
+def test_template_copy_does_not_screen_symlinks_inside_ignored_dependencies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    template = tmp_path / "template"
+    dependency = template / "platform/node_modules/package"
+    dependency.mkdir(parents=True)
+    (template / "README.md").write_text("course\n", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    (dependency / "linked.js").symlink_to(outside)
+    destination = tmp_path / "copied"
+    monkeypatch.setattr(scaffold_course, "TEMPLATE_ROOT", template)
+
+    scaffold_course.copy_template(destination)
+
+    assert (destination / "README.md").read_text(encoding="utf-8") == "course\n"
+    assert not (destination / "platform/node_modules").exists()
+
+
+def test_template_copy_rejects_included_symlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    template = tmp_path / "template"
+    template.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    (template / "included-link.txt").symlink_to(outside)
+    monkeypatch.setattr(scaffold_course, "TEMPLATE_ROOT", template)
+
+    with pytest.raises(scaffold_course.ScaffoldError, match="cannot contain symlinks"):
+        scaffold_course.copy_template(tmp_path / "copied")
 
 
 def test_skill_and_rubrics_require_the_complete_three_gate_web_loop() -> None:
