@@ -72,6 +72,39 @@ CONCEPT_LIST_FIELDS = {
     "boundaries",
     "pitfalls",
 }
+ASSESSED_AUDIENCE_FIELDS = {"level", "prerequisite_profile"}
+PREREQUISITE_PROFILE_FIELDS = {"assessment", "capabilities"}
+CAPABILITY_FIELDS = {
+    "id",
+    "kind",
+    "subject",
+    "title",
+    "status",
+    "decision",
+    "basis",
+    "source_ids",
+    "first_used_in",
+    "foundation_concept_ids",
+}
+OPERATIONAL_CONTRACT_FIELDS = {
+    "kind",
+    "forms",
+    "inputs",
+    "outputs",
+    "effects",
+    "failure_modes",
+}
+OPERATIONAL_INPUT_FIELDS = {"name", "meaning", "form", "example", "constraints"}
+OPERATIONAL_OUTPUT_FIELDS = {"name", "meaning", "form", "example"}
+OPERATIONAL_FAILURE_FIELDS = {"condition", "observable", "recovery"}
+TRACE_STEP_FIELDS = {
+    "id",
+    "concept_ids",
+    "input_state",
+    "operation",
+    "output_state",
+    "explanation",
+}
 
 
 class SpecValidationError(ValueError):
@@ -383,21 +416,348 @@ def _stable_id(mapping: dict[str, Any], label: str) -> str:
     return value
 
 
-def _validate_audience(course: dict[str, Any]) -> None:
-    audience = _object(course.get("audience"), "course.audience")
-    if _text(audience, "level", "course.audience") != "basic-python":
-        raise SpecValidationError("course.audience.level must be basic-python")
-    _string_array(audience.get("assumes"), "course.audience.assumes")
-    _string_array(
-        audience.get("does_not_assume"), "course.audience.does_not_assume"
-    )
-    duration = _object(
-        audience.get("lab_minutes"), "course.audience.lab_minutes"
-    )
-    if duration.get("min") != 30 or duration.get("max") != 45:
+def _require_exact_fields(
+    mapping: dict[str, Any], expected: set[str], label: str
+) -> None:
+    missing = sorted(expected - set(mapping))
+    unknown = sorted(set(mapping) - expected)
+    if missing:
         raise SpecValidationError(
-            "course.audience.lab_minutes must declare the 30-45 minute range"
+            f"{label} is missing required field(s): {', '.join(missing)}"
         )
+    if unknown:
+        raise SpecValidationError(
+            f"{label} has unknown field(s): {', '.join(unknown)}"
+        )
+
+
+def _validate_audience(course: dict[str, Any]) -> dict[str, Any] | None:
+    audience = _object(course.get("audience"), "course.audience")
+    level = _text(audience, "level", "course.audience")
+    if level == "basic-python":
+        _string_array(audience.get("assumes"), "course.audience.assumes")
+        _string_array(
+            audience.get("does_not_assume"), "course.audience.does_not_assume"
+        )
+        duration = _object(
+            audience.get("lab_minutes"), "course.audience.lab_minutes"
+        )
+        if duration.get("min") != 30 or duration.get("max") != 45:
+            raise SpecValidationError(
+                "course.audience.lab_minutes must declare the 30-45 minute range"
+            )
+        return None
+    if level != "assessed":
+        raise SpecValidationError(
+            "course.audience.level must be basic-python or assessed"
+        )
+    _require_exact_fields(audience, ASSESSED_AUDIENCE_FIELDS, "course.audience")
+    profile = _object(
+        audience.get("prerequisite_profile"),
+        "course.audience.prerequisite_profile",
+    )
+    profile_label = "course.audience.prerequisite_profile"
+    _require_exact_fields(profile, PREREQUISITE_PROFILE_FIELDS, profile_label)
+    if profile.get("assessment") != "learner-self-report":
+        raise SpecValidationError(
+            f"{profile_label}.assessment must be learner-self-report"
+        )
+    capabilities = _array(
+        profile.get("capabilities"), f"{profile_label}.capabilities"
+    )
+    if not capabilities:
+        raise SpecValidationError(f"{profile_label}.capabilities must not be empty")
+    capability_ids: set[str] = set()
+    for index, raw in enumerate(capabilities):
+        label = f"{profile_label}.capabilities[{index}]"
+        capability = _object(raw, label)
+        _require_exact_fields(capability, CAPABILITY_FIELDS, label)
+        capability_id = _stable_id(capability, label)
+        if capability_id in capability_ids:
+            raise SpecValidationError(f"duplicate capability id: {capability_id}")
+        capability_ids.add(capability_id)
+        for key in ("subject", "title"):
+            _text(capability, key, label)
+        if capability.get("kind") not in {"python", "library", "domain"}:
+            raise SpecValidationError(f"{label}.kind must be python, library, or domain")
+        status = capability.get("status")
+        if status not in {"known", "partial", "missing", "unsure"}:
+            raise SpecValidationError(
+                f"{label}.status must be known, partial, missing, or unsure"
+            )
+        decision = capability.get("decision")
+        if decision not in {"assume", "foundation"}:
+            raise SpecValidationError(f"{label}.decision must be assume or foundation")
+        if capability.get("basis") not in {
+            "explicit-prerequisite",
+            "selected-route-usage",
+        }:
+            raise SpecValidationError(
+                f"{label}.basis must be explicit-prerequisite or selected-route-usage"
+            )
+        source_ids = _string_array(capability.get("source_ids"), f"{label}.source_ids")
+        if len(source_ids) != len(set(source_ids)):
+            raise SpecValidationError(f"{label}.source_ids must be unique")
+        _text(capability, "first_used_in", label)
+        foundation_ids = _array(
+            capability.get("foundation_concept_ids"),
+            f"{label}.foundation_concept_ids",
+        )
+        if not all(
+            isinstance(value, str)
+            and value.strip()
+            and ID_PATTERN.fullmatch(value.replace(".", "-"))
+            for value in foundation_ids
+        ) or len(foundation_ids) != len(set(foundation_ids)):
+            raise SpecValidationError(
+                f"{label}.foundation_concept_ids must contain unique stable ids"
+            )
+        if status == "known":
+            if decision != "assume" or foundation_ids:
+                raise SpecValidationError(
+                    f"{label}.decision must be assume and foundation_concept_ids must be empty when status is known"
+                )
+        elif decision != "foundation" or not foundation_ids:
+            raise SpecValidationError(
+                f"{label}.decision must be foundation with non-empty foundation_concept_ids when status is {status}"
+            )
+    return profile
+
+
+def _validate_assessed_profile_references(
+    profile: dict[str, Any],
+    *,
+    source_ids: set[str],
+    lab_ids: set[str],
+    foundation_concept_ids: set[str],
+    foundation_concept_sources: dict[str, set[str]],
+) -> None:
+    capabilities = profile["capabilities"]
+    for index, capability in enumerate(capabilities):
+        label = f"course.audience.prerequisite_profile.capabilities[{index}]"
+        unknown_sources = sorted(set(capability["source_ids"]) - source_ids)
+        if unknown_sources:
+            raise SpecValidationError(
+                f"{label}.source_ids reference unknown official source(s): {', '.join(unknown_sources)}"
+            )
+        first_used_in = capability["first_used_in"]
+        if first_used_in not in lab_ids:
+            raise SpecValidationError(
+                f"{label}.first_used_in must resolve to a graded Lab id"
+            )
+        unknown_concepts = sorted(
+            set(capability["foundation_concept_ids"]) - foundation_concept_ids
+        )
+        if unknown_concepts:
+            raise SpecValidationError(
+                f"{label}.foundation_concept_ids reference unknown Lab 00 concept(s): {', '.join(unknown_concepts)}"
+            )
+        if capability["decision"] == "foundation":
+            cited_sources = {
+                source_id
+                for concept_id in capability["foundation_concept_ids"]
+                for source_id in foundation_concept_sources[concept_id]
+            }
+            if not cited_sources.intersection(capability["source_ids"]):
+                raise SpecValidationError(
+                    f"capability {capability['id']} foundation_concept_ids must cite at least one capability source_ids value"
+                )
+
+
+def _validate_study_minutes(value: Any, *, label: str, foundation: bool) -> None:
+    minutes = _object(value, label)
+    tier = minutes.get("tier")
+    numeric_values_are_ints = type(minutes.get("min")) is int and type(
+        minutes.get("max")
+    ) is int
+    if foundation:
+        _require_exact_fields(minutes, {"tier", "min", "max", "reason"}, label)
+        if (
+            not numeric_values_are_ints
+            or tier != "foundation"
+            or minutes.get("min") != 45
+            or minutes.get("max") != 60
+        ):
+            raise SpecValidationError(
+                f"{label} must be foundation tier with the exact 45-60 minute range"
+            )
+        _text(minutes, "reason", label)
+        return
+    if tier == "standard":
+        _require_exact_fields(minutes, {"tier", "min", "max"}, label)
+        if (
+            not numeric_values_are_ints
+            or minutes.get("min") != 30
+            or minutes.get("max") != 45
+        ):
+            raise SpecValidationError(
+                f"{label} standard tier must use the exact 30-45 minute range"
+            )
+        return
+    if tier == "extended":
+        _require_exact_fields(minutes, {"tier", "min", "max", "reason"}, label)
+        if (
+            not numeric_values_are_ints
+            or minutes.get("min") != 45
+            or minutes.get("max") != 60
+        ):
+            raise SpecValidationError(
+                f"{label} extended tier must use the exact 45-60 minute range"
+            )
+        _text(minutes, "reason", label)
+        return
+    raise SpecValidationError(f"{label}.tier must be standard or extended")
+
+
+def _validate_operational_contract(concept: dict[str, Any], *, label: str) -> None:
+    contract_label = f"{label}.operational_contract"
+    contract = _object(concept.get("operational_contract"), contract_label)
+    _require_exact_fields(contract, OPERATIONAL_CONTRACT_FIELDS, contract_label)
+    if contract.get("kind") not in {
+        "api",
+        "mechanism",
+        "formula",
+        "lifecycle",
+        "data-model",
+    }:
+        raise SpecValidationError(
+            f"{contract_label}.kind must be api, mechanism, formula, lifecycle, or data-model"
+        )
+    for key in ("forms", "effects"):
+        _string_array(contract.get(key), f"{contract_label}.{key}")
+
+    inputs = _array(contract.get("inputs"), f"{contract_label}.inputs")
+    if not inputs:
+        raise SpecValidationError(f"{contract_label}.inputs must not be empty")
+    for index, raw in enumerate(inputs):
+        item_label = f"{contract_label}.inputs[{index}]"
+        item = _object(raw, item_label)
+        _require_exact_fields(item, OPERATIONAL_INPUT_FIELDS, item_label)
+        for key in ("name", "meaning", "form", "example"):
+            _text(item, key, item_label)
+        _string_array(item.get("constraints"), f"{item_label}.constraints")
+
+    outputs = _array(contract.get("outputs"), f"{contract_label}.outputs")
+    if not outputs:
+        raise SpecValidationError(f"{contract_label}.outputs must not be empty")
+    for index, raw in enumerate(outputs):
+        item_label = f"{contract_label}.outputs[{index}]"
+        item = _object(raw, item_label)
+        _require_exact_fields(item, OPERATIONAL_OUTPUT_FIELDS, item_label)
+        for key in ("name", "meaning", "form", "example"):
+            _text(item, key, item_label)
+
+    failures = _array(
+        contract.get("failure_modes"), f"{contract_label}.failure_modes"
+    )
+    if not failures:
+        raise SpecValidationError(f"{contract_label}.failure_modes must not be empty")
+    for index, raw in enumerate(failures):
+        item_label = f"{contract_label}.failure_modes[{index}]"
+        item = _object(raw, item_label)
+        _require_exact_fields(item, OPERATIONAL_FAILURE_FIELDS, item_label)
+        for key in ("condition", "observable", "recovery"):
+            _text(item, key, item_label)
+
+
+def _validate_trace(
+    example: dict[str, Any], *, label: str, concept_ids: set[str]
+) -> None:
+    trace_label = f"{label}.trace"
+    trace = _array(example.get("trace"), trace_label)
+    if len(trace) < 2:
+        raise SpecValidationError(f"{trace_label} must contain at least two steps")
+    example_concepts = set(example["concept_ids"])
+    step_ids: set[str] = set()
+    for index, raw in enumerate(trace):
+        step_label = f"{trace_label}[{index}]"
+        step = _object(raw, step_label)
+        _require_exact_fields(step, TRACE_STEP_FIELDS, step_label)
+        step_id = _stable_id(step, step_label)
+        if step_id in step_ids:
+            raise SpecValidationError(f"{trace_label} has duplicate step id: {step_id}")
+        step_ids.add(step_id)
+        mapped = set(_string_array(step.get("concept_ids"), f"{step_label}.concept_ids"))
+        if not mapped <= concept_ids or not mapped <= example_concepts:
+            raise SpecValidationError(
+                f"{trace_label} concept_ids must belong to the lesson and be a subset of the runnable example concept_ids"
+            )
+        for key in ("input_state", "operation", "output_state", "explanation"):
+            _text(step, key, step_label)
+
+
+def _validate_assessed_coverage(
+    section: dict[str, Any],
+    *,
+    label: str,
+    concept_ids: set[str],
+    outcome_ids: set[str],
+    quiz: list[dict[str, Any]],
+    questions: list[dict[str, Any]] | None,
+) -> None:
+    lesson = section["lesson"]
+    examples = lesson["examples"]
+    runnable_trace_concepts = {
+        concept_id
+        for example in examples
+        if example["kind"] == "runnable"
+        for step in example["trace"]
+        for concept_id in step["concept_ids"]
+    }
+    quiz_concepts = {
+        concept_id for item in quiz for concept_id in item["concept_ids"]
+    }
+    diagnostic_concepts = {
+        concept_id
+        for example in examples
+        if example["kind"] == "diagnostic"
+        for concept_id in example["concept_ids"]
+    } | {
+        concept_id
+        for item in quiz
+        if item["kind"] == "diagnostic"
+        for concept_id in item["concept_ids"]
+    }
+    surfaces = [
+        ("runnable trace", runnable_trace_concepts),
+        ("quiz", quiz_concepts),
+    ]
+    if questions is not None:
+        coding_concepts = {
+            concept_id
+            for question in questions
+            for concept_id in question["concept_ids"]
+        }
+        surfaces.append(("coding question", coding_concepts))
+    surfaces.append(("diagnostic", diagnostic_concepts))
+    for concept_id in sorted(concept_ids):
+        for surface, covered in surfaces:
+            if concept_id not in covered:
+                raise SpecValidationError(
+                    f"{label} concept {concept_id} is missing {surface} coverage"
+                )
+
+    example_outcomes = {
+        outcome_id for example in examples for outcome_id in example["outcome_ids"]
+    }
+    assessment_outcomes = {
+        outcome_id for item in quiz for outcome_id in item["outcome_ids"]
+    }
+    if questions is not None:
+        assessment_outcomes.update(
+            outcome_id
+            for question in questions
+            for outcome_id in question["outcome_ids"]
+        )
+    for outcome_id in sorted(outcome_ids):
+        if outcome_id not in example_outcomes:
+            raise SpecValidationError(
+                f"{label} outcome {outcome_id} is missing example coverage"
+            )
+        if outcome_id not in assessment_outcomes:
+            raise SpecValidationError(
+                f"{label} outcome {outcome_id} is missing quiz or coding question coverage"
+            )
 
 
 def _validate_lesson(
@@ -405,6 +765,7 @@ def _validate_lesson(
     *,
     label: str,
     source_ids: set[str],
+    assessed: bool = False,
 ) -> tuple[set[str], set[str]]:
     lesson = _object(value, label)
     prerequisites = _array(lesson.get("prerequisites"), f"{label}.prerequisites")
@@ -471,6 +832,8 @@ def _validate_lesson(
                 raise SpecValidationError(
                     f"{claim_label}.status must be documented or implementation"
                 )
+        if assessed:
+            _validate_operational_contract(concept, label=item_label)
 
     examples = _array(lesson.get("examples"), f"{label}.examples")
     if len(examples) < 2:
@@ -508,6 +871,8 @@ def _validate_lesson(
             outcome_ids=outcome_ids,
         )
         if kind == "runnable":
+            if assessed:
+                _validate_trace(example, label=item_label, concept_ids=concept_ids)
             path = _safe_path(_text(example, "path", item_label), f"{item_label}.path")
             if path.suffix != ".py" or path.as_posix() in example_paths:
                 raise SpecValidationError(
@@ -666,7 +1031,7 @@ def validate_spec(payload: Any) -> dict[str, Any]:
     size = _text(course, "size", "course")
     if size not in LAB_BOUNDS:
         raise SpecValidationError("course.size must be small, medium, or large")
-    _validate_audience(course)
+    assessed_profile = _validate_audience(course)
 
     target = _object(spec.get("target"), "target")
     for key in ("name", "kind", "version", "breadth"):
@@ -716,9 +1081,24 @@ def validate_spec(payload: Any) -> dict[str, Any]:
     if _text(foundation, "id", "foundation") != "lab00":
         raise SpecValidationError("foundation.id must be lab00")
     _text(foundation, "title", "foundation")
+    if assessed_profile is not None:
+        _validate_study_minutes(
+            foundation.get("study_minutes"),
+            label="foundation.study_minutes",
+            foundation=True,
+        )
     foundation_concepts, foundation_outcomes = _validate_lesson(
-        foundation.get("lesson"), label="foundation.lesson", source_ids=source_ids
+        foundation.get("lesson"),
+        label="foundation.lesson",
+        source_ids=source_ids,
+        assessed=assessed_profile is not None,
     )
+    foundation_concept_sources = {
+        str(concept["id"]): {
+            str(claim["source_id"]) for claim in concept["source_claims"]
+        }
+        for concept in foundation["lesson"]["concepts"]
+    }
     quiz_ids: set[str] = set()
     quiz_positions = _validate_quiz(
         foundation.get("quiz"),
@@ -727,6 +1107,15 @@ def validate_spec(payload: Any) -> dict[str, Any]:
         outcome_ids=foundation_outcomes,
         quiz_ids=quiz_ids,
     )
+    if assessed_profile is not None:
+        _validate_assessed_coverage(
+            foundation,
+            label="lab00",
+            concept_ids=foundation_concepts,
+            outcome_ids=foundation_outcomes,
+            quiz=foundation["quiz"],
+            questions=None,
+        )
 
     labs = _array(spec.get("labs"), "labs")
     lower, upper = LAB_BOUNDS[size]
@@ -740,6 +1129,7 @@ def validate_spec(payload: Any) -> dict[str, Any]:
     prior_course_roots: list[str] = []
     previous_target_symbols: list[str] | None = None
     previous = "lab00"
+    graded_lab_ids: set[str] = set()
     for offset, raw in enumerate(labs, start=1):
         label = f"labs[{offset - 1}]"
         lab = _object(raw, label)
@@ -747,14 +1137,24 @@ def validate_spec(payload: Any) -> dict[str, Any]:
         expected_id = f"lab{offset:02d}"
         if lab_id != expected_id or not LAB_PATTERN.fullmatch(lab_id):
             raise SpecValidationError(f"labs must be ordered linearly as {expected_id}")
+        graded_lab_ids.add(lab_id)
         if _text(lab, "depends_on", label) != previous:
             raise SpecValidationError(f"{lab_id} must depend on {previous}")
         _text(lab, "title", label)
+        if assessed_profile is not None:
+            _validate_study_minutes(
+                lab.get("study_minutes"),
+                label=f"{label}.study_minutes",
+                foundation=False,
+            )
         lab_sources = _array(lab.get("sources"), f"{label}.sources")
         if not lab_sources or any(str(item) not in source_ids for item in lab_sources):
             raise SpecValidationError(f"{label}.sources must reference official source ids")
         concept_ids, outcome_ids = _validate_lesson(
-            lab.get("lesson"), label=f"{label}.lesson", source_ids=source_ids
+            lab.get("lesson"),
+            label=f"{label}.lesson",
+            source_ids=source_ids,
+            assessed=assessed_profile is not None,
         )
 
         declared_files: dict[str, tuple[ast.Module, ast.Module]] = {}
@@ -853,6 +1253,15 @@ def validate_spec(payload: Any) -> dict[str, Any]:
                 quiz_ids=quiz_ids,
             )
         )
+        if assessed_profile is not None:
+            _validate_assessed_coverage(
+                lab,
+                label=lab_id,
+                concept_ids=concept_ids,
+                outcome_ids=outcome_ids,
+                quiz=lab["quiz"],
+                questions=questions,
+            )
 
         module_cycle = _object(lab.get("module_cycle"), f"{label}.module_cycle")
         reimplementation = _object(
@@ -1064,6 +1473,15 @@ def validate_spec(payload: Any) -> dict[str, Any]:
         prior_course_roots.append(lab_id)
         previous_target_symbols = target_symbols
         previous = lab_id
+
+    if assessed_profile is not None:
+        _validate_assessed_profile_references(
+            assessed_profile,
+            source_ids=source_ids,
+            lab_ids=graded_lab_ids,
+            foundation_concept_ids=foundation_concepts,
+            foundation_concept_sources=foundation_concept_sources,
+        )
 
     if quiz_positions:
         maximum_choices = max(choice_count for _, choice_count in quiz_positions)

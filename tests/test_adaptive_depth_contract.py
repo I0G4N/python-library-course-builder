@@ -234,6 +234,22 @@ def test_assessed_profile_rejects_inconsistent_capability_provenance(
     _rejects(spec, fragment)
 
 
+def test_foundation_capability_has_source_evidence_in_a_mapped_lab00_concept() -> None:
+    spec = make_assessed_spec()
+    spec["target"]["official_sources"].append(  # type: ignore[index]
+        {
+            "id": "python-language",
+            "title": "Python language reference",
+            "url": "https://docs.python.org/3.13/reference/",
+            "kind": "documentation",
+            "version": "3.13",
+        }
+    )
+    _capability(spec, "json-data-model")["source_ids"] = ["python-language"]
+
+    _rejects(spec, "json-data-model", "foundation_concept_ids", "source_ids")
+
+
 @pytest.mark.parametrize(
     ("section_id", "payload"),
     (
@@ -485,11 +501,13 @@ def test_forward_fixture_uses_chinese_json_prose_and_a_concrete_main_trace() -> 
     for expected_phrase in ("解析 JSON 文本", "Python 字典", "输入", "输出"):
         assert expected_phrase in learner_prose
 
-    representative = json.dumps({"lesson": lesson, "runnable": runnable}, ensure_ascii=False)
+    representative = json.dumps(spec, ensure_ascii=False)
     for generic_english in (
         "Teaching mechanism",
         "Execute one deterministic operation",
         "value = 1 + 1",
+        "plain Python values",
+        "The returned scalar.",
     ):
         assert generic_english not in representative
 

@@ -88,6 +88,39 @@ CONCEPT_LIST_FIELDS = {
     "boundaries",
     "pitfalls",
 }
+ASSESSED_AUDIENCE_FIELDS = {"level", "prerequisite_profile"}
+PREREQUISITE_PROFILE_FIELDS = {"assessment", "capabilities"}
+CAPABILITY_FIELDS = {
+    "id",
+    "kind",
+    "subject",
+    "title",
+    "status",
+    "decision",
+    "basis",
+    "source_ids",
+    "first_used_in",
+    "foundation_concept_ids",
+}
+OPERATIONAL_CONTRACT_FIELDS = {
+    "kind",
+    "forms",
+    "inputs",
+    "outputs",
+    "effects",
+    "failure_modes",
+}
+OPERATIONAL_INPUT_FIELDS = {"name", "meaning", "form", "example", "constraints"}
+OPERATIONAL_OUTPUT_FIELDS = {"name", "meaning", "form", "example"}
+OPERATIONAL_FAILURE_FIELDS = {"condition", "observable", "recovery"}
+TRACE_STEP_FIELDS = {
+    "id",
+    "concept_ids",
+    "input_state",
+    "operation",
+    "output_state",
+    "explanation",
+}
 
 
 def _mapping(payload: Any, *, label: str) -> dict[str, Any]:
@@ -409,23 +442,216 @@ def _validate_reimplementation_closure(
                 pending.append(helper)
 
 
+def _require_exact_fields(
+    payload: dict[str, Any], expected: set[str], *, label: str
+) -> None:
+    missing = sorted(expected - set(payload))
+    unknown = sorted(set(payload) - expected)
+    if missing:
+        raise SourceValidationError(
+            f"{label} is missing required field(s): {', '.join(missing)}"
+        )
+    if unknown:
+        raise SourceValidationError(
+            f"{label} has unknown field(s): {', '.join(unknown)}"
+        )
+
+
 def _validate_audience(payload: dict[str, Any]) -> dict[str, Any]:
     audience = _mapping(payload.get("audience"), label="course.audience")
-    if _text(audience, "level", label="course.audience") != "basic-python":
-        raise SourceValidationError("course.audience.level must be basic-python")
-    _strings(audience.get("assumes"), label="course.audience.assumes")
-    _strings(
-        audience.get("does_not_assume"),
-        label="course.audience.does_not_assume",
-    )
-    duration = _mapping(
-        audience.get("lab_minutes"), label="course.audience.lab_minutes"
-    )
-    if duration.get("min") != 30 or duration.get("max") != 45:
-        raise SourceValidationError(
-            "course.audience.lab_minutes must declare the 30-45 minute range"
+    level = _text(audience, "level", label="course.audience")
+    if level == "basic-python":
+        _strings(audience.get("assumes"), label="course.audience.assumes")
+        _strings(
+            audience.get("does_not_assume"),
+            label="course.audience.does_not_assume",
         )
+        duration = _mapping(
+            audience.get("lab_minutes"), label="course.audience.lab_minutes"
+        )
+        if duration.get("min") != 30 or duration.get("max") != 45:
+            raise SourceValidationError(
+                "course.audience.lab_minutes must declare the 30-45 minute range"
+            )
+        return copy.deepcopy(audience)
+    if level != "assessed":
+        raise SourceValidationError(
+            "course.audience.level must be basic-python or assessed"
+        )
+
+    _require_exact_fields(
+        audience, ASSESSED_AUDIENCE_FIELDS, label="course.audience"
+    )
+    profile_label = "course.audience.prerequisite_profile"
+    profile = _mapping(
+        audience.get("prerequisite_profile"), label=profile_label
+    )
+    _require_exact_fields(
+        profile, PREREQUISITE_PROFILE_FIELDS, label=profile_label
+    )
+    if profile.get("assessment") != "learner-self-report":
+        raise SourceValidationError(
+            f"{profile_label}.assessment must be learner-self-report"
+        )
+    capabilities = _list(
+        profile.get("capabilities"), label=f"{profile_label}.capabilities"
+    )
+    if not capabilities:
+        raise SourceValidationError(f"{profile_label}.capabilities must not be empty")
+
+    capability_ids: set[str] = set()
+    for index, raw in enumerate(capabilities):
+        item_label = f"{profile_label}.capabilities[{index}]"
+        capability = _mapping(raw, label=item_label)
+        _require_exact_fields(capability, CAPABILITY_FIELDS, label=item_label)
+        capability_id = _stable_id(capability, label=item_label)
+        if capability_id in capability_ids:
+            raise SourceValidationError(f"duplicate capability id: {capability_id}")
+        capability_ids.add(capability_id)
+        for key in ("subject", "title"):
+            _text(capability, key, label=item_label)
+        if capability.get("kind") not in {"python", "library", "domain"}:
+            raise SourceValidationError(
+                f"{item_label}.kind must be python, library, or domain"
+            )
+        status = capability.get("status")
+        if status not in {"known", "partial", "missing", "unsure"}:
+            raise SourceValidationError(
+                f"{item_label}.status must be known, partial, missing, or unsure"
+            )
+        decision = capability.get("decision")
+        if decision not in {"assume", "foundation"}:
+            raise SourceValidationError(
+                f"{item_label}.decision must be assume or foundation"
+            )
+        if capability.get("basis") not in {
+            "explicit-prerequisite",
+            "selected-route-usage",
+        }:
+            raise SourceValidationError(
+                f"{item_label}.basis must be explicit-prerequisite or selected-route-usage"
+            )
+        source_ids = _strings(
+            capability.get("source_ids"), label=f"{item_label}.source_ids"
+        )
+        if len(source_ids) != len(set(source_ids)):
+            raise SourceValidationError(f"{item_label}.source_ids must be unique")
+        _text(capability, "first_used_in", label=item_label)
+        foundation_ids = _list(
+            capability.get("foundation_concept_ids"),
+            label=f"{item_label}.foundation_concept_ids",
+        )
+        if not all(
+            isinstance(value, str)
+            and value.strip()
+            and IDENTIFIER_PATTERN.fullmatch(value.replace(".", "-"))
+            for value in foundation_ids
+        ) or len(foundation_ids) != len(set(foundation_ids)):
+            raise SourceValidationError(
+                f"{item_label}.foundation_concept_ids must contain unique stable ids"
+            )
+        if status == "known":
+            if decision != "assume" or foundation_ids:
+                raise SourceValidationError(
+                    f"{item_label}.decision must be assume and foundation_concept_ids must be empty when status is known"
+                )
+        elif decision != "foundation" or not foundation_ids:
+            raise SourceValidationError(
+                f"{item_label}.decision must be foundation with non-empty foundation_concept_ids when status is {status}"
+            )
     return copy.deepcopy(audience)
+
+
+def _validate_assessed_profile_references(
+    profile: dict[str, Any],
+    *,
+    source_ids: set[str],
+    lab_ids: set[str],
+    foundation_concept_ids: set[str],
+    foundation_concept_sources: dict[str, set[str]],
+) -> None:
+    capabilities = profile["capabilities"]
+    for index, capability in enumerate(capabilities):
+        item_label = (
+            f"course.audience.prerequisite_profile.capabilities[{index}]"
+        )
+        unknown_sources = sorted(set(capability["source_ids"]) - source_ids)
+        if unknown_sources:
+            raise SourceValidationError(
+                f"{item_label}.source_ids reference unknown official source(s): {', '.join(unknown_sources)}"
+            )
+        if capability["first_used_in"] not in lab_ids:
+            raise SourceValidationError(
+                f"{item_label}.first_used_in must resolve to a graded Lab id"
+            )
+        unknown_concepts = sorted(
+            set(capability["foundation_concept_ids"]) - foundation_concept_ids
+        )
+        if unknown_concepts:
+            raise SourceValidationError(
+                f"{item_label}.foundation_concept_ids reference unknown Lab 00 concept(s): {', '.join(unknown_concepts)}"
+            )
+        if capability["decision"] == "foundation":
+            cited_sources = {
+                source_id
+                for concept_id in capability["foundation_concept_ids"]
+                for source_id in foundation_concept_sources[concept_id]
+            }
+            if not cited_sources.intersection(capability["source_ids"]):
+                raise SourceValidationError(
+                    f"capability {capability['id']} foundation_concept_ids must cite at least one capability source_ids value"
+                )
+
+
+def _validate_study_minutes(
+    payload: Any, *, label: str, foundation: bool
+) -> None:
+    minutes = _mapping(payload, label=label)
+    tier = minutes.get("tier")
+    if foundation:
+        _require_exact_fields(
+            minutes, {"tier", "min", "max", "reason"}, label=label
+        )
+        if (
+            tier != "foundation"
+            or type(minutes.get("min")) is not int
+            or type(minutes.get("max")) is not int
+            or minutes["min"] != 45
+            or minutes["max"] != 60
+        ):
+            raise SourceValidationError(
+                f"{label} must be foundation tier with the exact 45-60 minute range"
+            )
+        _text(minutes, "reason", label=label)
+        return
+    if tier == "standard":
+        _require_exact_fields(minutes, {"tier", "min", "max"}, label=label)
+        if (
+            type(minutes.get("min")) is not int
+            or type(minutes.get("max")) is not int
+            or minutes["min"] != 30
+            or minutes["max"] != 45
+        ):
+            raise SourceValidationError(
+                f"{label} standard tier must use the exact 30-45 minute range"
+            )
+        return
+    if tier == "extended":
+        _require_exact_fields(
+            minutes, {"tier", "min", "max", "reason"}, label=label
+        )
+        if (
+            type(minutes.get("min")) is not int
+            or type(minutes.get("max")) is not int
+            or minutes["min"] != 45
+            or minutes["max"] != 60
+        ):
+            raise SourceValidationError(
+                f"{label} extended tier must use the exact 45-60 minute range"
+            )
+        _text(minutes, "reason", label=label)
+        return
+    raise SourceValidationError(f"{label}.tier must be standard or extended")
 
 
 def _validate_source_tree(root: Path) -> None:
@@ -496,11 +722,170 @@ def _validate_mappings(
     return concepts, outcomes
 
 
+def _validate_operational_contract(
+    concept: dict[str, Any], *, label: str
+) -> None:
+    contract_label = f"{label}.operational_contract"
+    contract = _mapping(concept.get("operational_contract"), label=contract_label)
+    _require_exact_fields(
+        contract, OPERATIONAL_CONTRACT_FIELDS, label=contract_label
+    )
+    if contract.get("kind") not in {
+        "api",
+        "mechanism",
+        "formula",
+        "lifecycle",
+        "data-model",
+    }:
+        raise SourceValidationError(
+            f"{contract_label}.kind must be api, mechanism, formula, lifecycle, or data-model"
+        )
+    for key in ("forms", "effects"):
+        _strings(contract.get(key), label=f"{contract_label}.{key}")
+
+    inputs = _list(contract.get("inputs"), label=f"{contract_label}.inputs")
+    if not inputs:
+        raise SourceValidationError(f"{contract_label}.inputs must not be empty")
+    for index, raw in enumerate(inputs):
+        item_label = f"{contract_label}.inputs[{index}]"
+        item = _mapping(raw, label=item_label)
+        _require_exact_fields(item, OPERATIONAL_INPUT_FIELDS, label=item_label)
+        for key in ("name", "meaning", "form", "example"):
+            _text(item, key, label=item_label)
+        _strings(item.get("constraints"), label=f"{item_label}.constraints")
+
+    outputs = _list(contract.get("outputs"), label=f"{contract_label}.outputs")
+    if not outputs:
+        raise SourceValidationError(f"{contract_label}.outputs must not be empty")
+    for index, raw in enumerate(outputs):
+        item_label = f"{contract_label}.outputs[{index}]"
+        item = _mapping(raw, label=item_label)
+        _require_exact_fields(item, OPERATIONAL_OUTPUT_FIELDS, label=item_label)
+        for key in ("name", "meaning", "form", "example"):
+            _text(item, key, label=item_label)
+
+    failures = _list(
+        contract.get("failure_modes"), label=f"{contract_label}.failure_modes"
+    )
+    if not failures:
+        raise SourceValidationError(
+            f"{contract_label}.failure_modes must not be empty"
+        )
+    for index, raw in enumerate(failures):
+        item_label = f"{contract_label}.failure_modes[{index}]"
+        item = _mapping(raw, label=item_label)
+        _require_exact_fields(item, OPERATIONAL_FAILURE_FIELDS, label=item_label)
+        for key in ("condition", "observable", "recovery"):
+            _text(item, key, label=item_label)
+
+
+def _validate_trace(
+    example: dict[str, Any], *, label: str, concept_ids: set[str]
+) -> None:
+    trace_label = f"{label}.trace"
+    trace = _list(example.get("trace"), label=trace_label)
+    if len(trace) < 2:
+        raise SourceValidationError(f"{trace_label} must contain at least two steps")
+    example_concepts = set(example["concept_ids"])
+    step_ids: set[str] = set()
+    for index, raw in enumerate(trace):
+        step_label = f"{trace_label}[{index}]"
+        step = _mapping(raw, label=step_label)
+        _require_exact_fields(step, TRACE_STEP_FIELDS, label=step_label)
+        step_id = _stable_id(step, label=step_label)
+        if step_id in step_ids:
+            raise SourceValidationError(
+                f"{trace_label} has duplicate step id: {step_id}"
+            )
+        step_ids.add(step_id)
+        mapped = set(
+            _strings(step.get("concept_ids"), label=f"{step_label}.concept_ids")
+        )
+        if not mapped <= concept_ids or not mapped <= example_concepts:
+            raise SourceValidationError(
+                f"{trace_label} concept_ids must belong to the lesson and be a subset of the runnable example concept_ids"
+            )
+        for key in ("input_state", "operation", "output_state", "explanation"):
+            _text(step, key, label=step_label)
+
+
+def _validate_assessed_coverage(
+    lesson: dict[str, Any],
+    *,
+    label: str,
+    concept_ids: set[str],
+    outcome_ids: set[str],
+    quiz: tuple[dict[str, Any], ...],
+    questions: tuple[CodingQuestion, ...] | None,
+) -> None:
+    examples = lesson["examples"]
+    runnable_trace_concepts = {
+        concept_id
+        for example in examples
+        if example["kind"] == "runnable"
+        for step in example["trace"]
+        for concept_id in step["concept_ids"]
+    }
+    quiz_concepts = {
+        concept_id for item in quiz for concept_id in item["concept_ids"]
+    }
+    diagnostic_concepts = {
+        concept_id
+        for example in examples
+        if example["kind"] == "diagnostic"
+        for concept_id in example["concept_ids"]
+    } | {
+        concept_id
+        for item in quiz
+        if item["kind"] == "diagnostic"
+        for concept_id in item["concept_ids"]
+    }
+    surfaces = [
+        ("runnable trace", runnable_trace_concepts),
+        ("quiz", quiz_concepts),
+    ]
+    if questions is not None:
+        coding_concepts = {
+            concept_id for question in questions for concept_id in question.concept_ids
+        }
+        surfaces.append(("coding question", coding_concepts))
+    surfaces.append(("diagnostic", diagnostic_concepts))
+    for concept_id in sorted(concept_ids):
+        for surface, covered in surfaces:
+            if concept_id not in covered:
+                raise SourceValidationError(
+                    f"{label} concept {concept_id} is missing {surface} coverage"
+                )
+
+    example_outcomes = {
+        outcome_id for example in examples for outcome_id in example["outcome_ids"]
+    }
+    assessment_outcomes = {
+        outcome_id for item in quiz for outcome_id in item["outcome_ids"]
+    }
+    if questions is not None:
+        assessment_outcomes.update(
+            outcome_id
+            for question in questions
+            for outcome_id in question.outcome_ids
+        )
+    for outcome_id in sorted(outcome_ids):
+        if outcome_id not in example_outcomes:
+            raise SourceValidationError(
+                f"{label} outcome {outcome_id} is missing example coverage"
+            )
+        if outcome_id not in assessment_outcomes:
+            raise SourceValidationError(
+                f"{label} outcome {outcome_id} is missing quiz or coding question coverage"
+            )
+
+
 def _load_lesson(
     path: Path,
     *,
     label: str,
     source_ids: set[str],
+    assessed: bool = False,
 ) -> tuple[dict[str, Any], set[str], set[str]]:
     lesson = _read_json(path, label=label)
     prerequisites = _list(
@@ -569,6 +954,8 @@ def _load_lesson(
                 raise SourceValidationError(
                     f"{claim_label}.status must be documented or implementation"
                 )
+        if assessed:
+            _validate_operational_contract(concept, label=item_label)
 
     examples = _list(lesson.get("examples"), label=f"{label}.examples")
     if len(examples) < 2:
@@ -599,6 +986,8 @@ def _load_lesson(
             outcome_ids=outcome_ids,
         )
         if kind == "runnable":
+            if assessed:
+                _validate_trace(example, label=item_label, concept_ids=concept_ids)
             if "code" in example:
                 raise SourceValidationError(
                     f"{item_label}.code must live in its declared example file"
@@ -1057,6 +1446,14 @@ def load_course_source(source_root: Path | str) -> CourseSource:
     title = _text(course, "title", label="course")
     description = _text(course, "description", label="course")
     audience = _validate_audience(course)
+    assessed_profile = (
+        _mapping(
+            audience.get("prerequisite_profile"),
+            label="course.audience.prerequisite_profile",
+        )
+        if audience["level"] == "assessed"
+        else None
+    )
     size = _text(course, "size", label="course")
     if size not in LAB_BOUNDS:
         raise SourceValidationError("course.size must be small, medium, or large")
@@ -1141,6 +1538,12 @@ def load_course_source(source_root: Path | str) -> CourseSource:
     )
     if foundation_id != "lab00":
         raise SourceValidationError("foundation id must be lab00")
+    if assessed_profile is not None:
+        _validate_study_minutes(
+            foundations.get("study_minutes"),
+            label="foundation.study_minutes",
+            foundation=True,
+        )
     foundation_lesson_path = root / _relative(
         _text(foundations, "lesson", label="foundations"),
         label="foundation lesson",
@@ -1155,7 +1558,14 @@ def load_course_source(source_root: Path | str) -> CourseSource:
         foundation_lesson_path,
         label="foundation lesson",
         source_ids=source_ids,
+        assessed=assessed_profile is not None,
     )
+    foundation_concept_sources = {
+        str(concept["id"]): {
+            str(claim["source_id"]) for claim in concept["source_claims"]
+        }
+        for concept in foundation_lesson_outline["concepts"]
+    }
     foundation_lesson = _render_lesson(
         _text(foundations, "title", label="foundations"),
         foundation_lesson_outline,
@@ -1173,6 +1583,15 @@ def load_course_source(source_root: Path | str) -> CourseSource:
         concept_ids=foundation_concepts,
         outcome_ids=foundation_outcomes,
     )
+    if assessed_profile is not None:
+        _validate_assessed_coverage(
+            foundation_lesson_outline,
+            label="lab00",
+            concept_ids=foundation_concepts,
+            outcome_ids=foundation_outcomes,
+            quiz=foundation_quiz,
+            questions=None,
+        )
 
     order = [str(item) for item in _list(course.get("lab_order"), label="lab_order")]
     if not order or len(order) != len(set(order)):
@@ -1211,6 +1630,12 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             raise SourceValidationError(
                 f"{lab_id} must depend on {previous}, not {depends_on}"
             )
+        if assessed_profile is not None:
+            _validate_study_minutes(
+                payload.get("study_minutes"),
+                label=f"{lab_id}.study_minutes",
+                foundation=False,
+            )
         declared_sources = tuple(
             str(item)
             for item in _list(payload.get("sources"), label=f"{lab_id}.sources")
@@ -1233,6 +1658,7 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             lesson_path,
             label=f"{lab_id} lesson",
             source_ids=source_ids,
+            assessed=assessed_profile is not None,
         )
         lesson = _render_lesson(
             _lab_lesson_title(
@@ -1307,6 +1733,15 @@ def load_course_source(source_root: Path | str) -> CourseSource:
                 raise SourceValidationError(f"duplicate quiz id: {quiz_id}")
             quiz_ids.add(quiz_id)
         quiz_positions.extend(positions)
+        if assessed_profile is not None:
+            _validate_assessed_coverage(
+                lesson_outline,
+                label=lab_id,
+                concept_ids=concept_ids,
+                outcome_ids=outcome_ids,
+                quiz=quiz,
+                questions=questions,
+            )
 
         questions_by_id = {question.question_id: question for question in questions}
         cycle = _mapping(payload.get("module_cycle"), label=f"{lab_id}.module_cycle")
@@ -1530,6 +1965,15 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             )
         )
         previous = lab_id
+
+    if assessed_profile is not None:
+        _validate_assessed_profile_references(
+            assessed_profile,
+            source_ids=source_ids,
+            lab_ids={lab.lab_id for lab in labs},
+            foundation_concept_ids=foundation_concepts,
+            foundation_concept_sources=foundation_concept_sources,
+        )
 
     if quiz_positions:
         maximum_choices = max(choice_count for _, choice_count in quiz_positions)
@@ -1908,21 +2352,28 @@ def _authoring_spec(course: CourseSource) -> dict[str, Any]:
             "quiz": [copy.deepcopy(question) for question in lab.quiz],
             "module_cycle": copy.deepcopy(lab.raw["module_cycle"]),
         }
+        if "study_minutes" in lab.raw:
+            payload["study_minutes"] = copy.deepcopy(lab.raw["study_minutes"])
         if "official_bridge" in lab.raw:
             payload["official_bridge"] = copy.deepcopy(lab.raw["official_bridge"])
         labs.append(payload)
 
+    foundation_payload = {
+        "id": str(course.foundation["id"]),
+        "title": str(course.foundation["title"]),
+        "lesson": copy.deepcopy(course.foundation_lesson_outline),
+        "quiz": [copy.deepcopy(question) for question in course.foundation_quiz],
+    }
+    if "study_minutes" in course.foundation:
+        foundation_payload["study_minutes"] = copy.deepcopy(
+            course.foundation["study_minutes"]
+        )
     return {
         "schema_version": 2,
         "course": course_payload,
         "target": copy.deepcopy(course.target),
         "research": copy.deepcopy(course.research),
-        "foundation": {
-            "id": str(course.foundation["id"]),
-            "title": str(course.foundation["title"]),
-            "lesson": copy.deepcopy(course.foundation_lesson_outline),
-            "quiz": [copy.deepcopy(question) for question in course.foundation_quiz],
-        },
+        "foundation": foundation_payload,
         "labs": labs,
     }
 

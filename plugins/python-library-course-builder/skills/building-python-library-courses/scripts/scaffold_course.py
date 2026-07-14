@@ -255,6 +255,10 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
         },
         "research": spec["research"],
     }
+    if "study_minutes" in foundation:
+        course_payload["foundations"]["study_minutes"] = copy.deepcopy(
+            foundation["study_minutes"]
+        )
     json_write(source / "course.json", course_payload)
     json_write(
         source / "sources.json",
@@ -331,6 +335,8 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
                 },
             },
         }
+        if "study_minutes" in lab:
+            lab_payload["study_minutes"] = copy.deepcopy(lab["study_minutes"])
         if "official_bridge" in lab:
             lab_payload["official_bridge"] = copy.deepcopy(lab["official_bridge"])
         json_write(lab_root / "lab.json", lab_payload)
