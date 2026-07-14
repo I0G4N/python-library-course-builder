@@ -243,7 +243,9 @@ def _question(
         "example": {
             "input": f"{symbol}()",
             "output": str(number),
-            "explanation": "The function returns the Lab value.",
+            "explanation": (
+                f"调用 {symbol}() 会返回 {number}，作为 {lab_id} JSON 转换边界的可观察结果。"
+            ),
         },
         "public_test": _test(path, symbol, number),
         "hidden_test": _test(path, symbol, number, hidden=True),

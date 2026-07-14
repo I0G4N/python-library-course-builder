@@ -381,7 +381,7 @@ def test_learner_manifest_question_allowlist_drops_private_raw_fields(
     assert learner_question["example"] == {
         "input": "answer_1()",
         "output": "1",
-        "explanation": "The function returns the Lab value.",
+        "explanation": "调用 answer_1() 会返回 1，作为 lab01 JSON 转换边界的可观察结果。",
     }
     assert set(learner_question) == {
         "id",

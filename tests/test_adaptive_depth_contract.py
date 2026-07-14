@@ -508,6 +508,7 @@ def test_forward_fixture_uses_chinese_json_prose_and_a_concrete_main_trace() -> 
         "value = 1 + 1",
         "plain Python values",
         "The returned scalar.",
+        "The function returns the Lab value.",
     ):
         assert generic_english not in representative
 
