@@ -22,6 +22,10 @@ Each generated course contains:
 
 The route alternates between a small teaching-equivalent of a mechanism and a graded bridge to the target library's official API. Later Labs use the official API for capabilities already learned, so the course becomes one integrated project rather than a set of isolated exercises.
 
+Before route design, the Skill turns concrete evidence of what the learner can already do into a behavior-based readiness profile. Lab 00 adapts to the prerequisite gaps that block the selected route, keeping already-mastered foundations out of the way and separating general Python knowledge from target-library knowledge.
+
+Each chapter turns its learning goals into operational contracts for inputs, outputs, state changes, errors, and recovery. Concrete execution traces follow real values through the target mechanism before the learner has to implement it. Lessons keep task-linked practice beside the concept it checks, and every graded task points back to the chapter knowledge and capstone behavior it exercises.
+
 ## prerequisites
 
 - Codex with plugin and Skill support.

@@ -1170,14 +1170,14 @@ def run_forward_verification(root: Path) -> None:
     paths = _plugin_paths(root)
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
-    from tests.course_v2_fixture import make_spec
+    from tests.course_v2_fixture import make_assessed_spec
 
     with tempfile.TemporaryDirectory(prefix="course-builder-forward-") as raw:
         temporary = Path(raw)
         spec_path = temporary / "course.json"
         project_path = temporary / "generated-course"
         spec_path.write_text(
-            json.dumps(make_spec(), ensure_ascii=False, indent=2) + "\n",
+            json.dumps(make_assessed_spec(), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         plan = forward_verification_plan(

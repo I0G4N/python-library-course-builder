@@ -684,6 +684,27 @@ def test_forward_plan_runs_scaffold_setup_and_full_verifier(tmp_path: Path) -> N
     ]
 
 
+def test_forward_verification_writes_the_assessed_course_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.course_v2_fixture import make_assessed_spec
+
+    validator = load_validator()
+    captured: dict[str, object] = {}
+
+    def capture_plan(**kwargs: object) -> tuple[()]:
+        spec_path = kwargs["spec_path"]
+        assert isinstance(spec_path, Path)
+        captured["spec"] = json.loads(spec_path.read_text(encoding="utf-8"))
+        return ()
+
+    monkeypatch.setattr(validator, "forward_verification_plan", capture_plan)
+
+    validator.run_forward_verification(ROOT)
+
+    assert captured["spec"] == make_assessed_spec()
+
+
 def test_forward_environment_is_a_closed_secret_free_allowlist(tmp_path: Path) -> None:
     validator = load_validator()
     inherited = {

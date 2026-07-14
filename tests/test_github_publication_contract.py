@@ -293,6 +293,36 @@ def test_readme_publishes_badge_official_docs_boundaries_and_first_use_loop() ->
     )
 
 
+def test_readme_publishes_the_adaptive_depth_learning_contract() -> None:
+    readme = _text(ROOT / "README.md").casefold()
+
+    for promise in (
+        "behavior-based readiness profile",
+        "lab 00 adapts to the prerequisite gaps",
+        "operational contracts",
+        "concrete execution traces",
+        "task-linked practice",
+    ):
+        assert promise in readme
+
+
+def test_changelog_records_assessed_flow_and_detailed_learner_projections() -> None:
+    release = _text(ROOT / "CHANGELOG.md").split(
+        "## [0.1.0] - 2026-07-14", 1
+    )[1].casefold()
+
+    for promise in (
+        "assessed prerequisite flow",
+        "behavior evidence",
+        "adaptive lab 00",
+        "detailed learner projections",
+        "operational contracts",
+        "concrete execution traces",
+        "task-linked practice",
+    ):
+        assert promise in release
+
+
 def test_raw_template_readme_describes_generated_sources_without_a_broken_link() -> None:
     readme = _text(TEMPLATE_README)
     assert "[platform/course/source/sources.json]" not in readme
