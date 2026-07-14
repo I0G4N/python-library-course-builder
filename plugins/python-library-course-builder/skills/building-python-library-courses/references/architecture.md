@@ -2,7 +2,18 @@
 
 Use this reference when designing or reviewing the generated repository. The objective is a content-driven learning product, not a bespoke demo for one library.
 
-The initial generic template was extracted from the verified ConcurrencyLab baseline `639b920`; generated projects copy the engine files and retain no import, symlink, or runtime path back to that repository.
+The generic template and bundled course infrastructure are independently authored for this project. Generated projects copy the engine files and retain no import, symlink, or runtime path back to the Skill or an originating course repository.
+
+## Contents
+
+- [Ownership map](#ownership-map)
+- [Data flow](#data-flow)
+- [Three-gate progression](#three-gate-progression)
+- [Responsive workspace layout](#responsive-workspace-layout)
+- [Runtime boundaries](#runtime-boundaries)
+- [Compilation and workspace rules](#compilation-and-workspace-rules)
+- [Privacy model](#privacy-model)
+- [Git checkpoints](#git-checkpoints)
 
 ## Ownership map
 

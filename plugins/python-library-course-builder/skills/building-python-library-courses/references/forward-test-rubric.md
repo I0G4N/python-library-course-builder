@@ -2,6 +2,16 @@
 
 Forward tests establish that the Skill transfers to a new target and does not merely replay the course it was extracted from.
 
+## Contents
+
+- [Test isolation](#test-isolation)
+- [Required small-target transfer test](#required-small-target-transfer-test)
+- [Required large-target gate test](#required-large-target-gate-test)
+- [Fail-closed negative tests](#fail-closed-negative-tests)
+- [Generated-project acceptance matrix](#generated-project-acceptance-matrix)
+- [Repository quality](#repository-quality)
+- [RED/GREEN comparison report](#redgreen-comparison-report)
+
 ## Test isolation
 
 Use a fresh agent or context with only the user-style request, the Skill, a target name, and an empty destination. Do not provide an existing course specification, reference implementation, expected Lab titles, or prior verification report. Record the exact prompt, target version, output path, commands, exit codes, and failures.
@@ -58,7 +68,7 @@ Run every check from fresh output.
 - no generated file is a symlink;
 - `labs/` is learner-facing and `platform/` owns engine/private code;
 - no unresolved token, generator absolute path, or foreign branding remains;
-- scans reject `ConcurrencyLab`, `ThreadEval`, fixed `lab12`, and fixed score denominators in a non-concurrency course.
+- scans reject legacy target-specific course branding, fixed `lab12`, and fixed score denominators in a course with a different subject or size.
 - every lesson defines purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source-backed claims for every concept;
 - every lesson has at least two examples: a CPU/offline runnable example with exact command/output and a diagnostic wrong -> symptom -> cause -> fix example;
 - every runnable command is exactly `python {path}` for its declared lesson-relative file;

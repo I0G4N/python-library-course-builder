@@ -34,7 +34,7 @@ test("the Web shell is runtime-driven and keeps the Python editor", async () => 
   assert.match(app, /\/api\/course/);
   assert.match(app, /\/api\/content/);
   assert.match(app, /PythonCode/);
-  assert.doesNotMatch(app, /lab12|ThreadEval|ConcurrencyLab/);
+  assert.doesNotMatch(app, /lab12|ThreadEval|Concurrency(?:Lab)/);
 });
 
 test(

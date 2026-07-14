@@ -1,0 +1,20 @@
+{
+  "name": "python-library-course-builder",
+  "interface": {
+    "displayName": "Python Library Course Builder"
+  },
+  "plugins": [
+    {
+      "name": "python-library-course-builder",
+      "source": {
+        "source": "local",
+        "path": "./plugins/python-library-course-builder"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

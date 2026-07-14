@@ -2,6 +2,17 @@
 
 Apply this rubric before scaffolding and again when reviewing the generated course. A course is not strong merely because its reference tests pass.
 
+## Contents
+
+- [Evidence and versioning](#1-evidence-and-versioning)
+- [Route coherence](#2-route-coherence)
+- [Lesson quality](#3-lesson-quality)
+- [Exercise design](#4-exercise-design)
+- [Test and grading quality](#5-test-and-grading-quality)
+- [Learning interfaces](#6-learning-interfaces)
+- [Handoff and maintainability](#7-handoff-and-maintainability)
+- [Review decision](#review-decision)
+
 ## 1. Evidence and versioning
 
 - The target version is explicit and compatible with the generated environment.

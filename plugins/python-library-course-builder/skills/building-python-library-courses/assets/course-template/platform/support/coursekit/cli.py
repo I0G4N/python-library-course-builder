@@ -1,4 +1,4 @@
-"""CS61A-style knowledge gates and CS336-style pytest grading."""
+"""Shared knowledge gates and pytest grading for generated courses."""
 
 from __future__ import annotations
 

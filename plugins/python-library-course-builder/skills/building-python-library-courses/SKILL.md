@@ -9,6 +9,20 @@ Turn one Python target into a standalone, source-backed learning repository. The
 
 In the commands below, set `SKILL_DIR` to the absolute directory that contains this `SKILL.md`.
 
+## prerequisites
+
+- Codex with Skill support for invoking this workflow.
+- Python 3.13 for every bundled inspection, validation, scaffolding, and verification command.
+- `uv` for reproducible, isolated Python execution.
+- Node.js 22.13 or newer with npm for the generated Web workspace and its contract tests.
+- Git for generated-project checkpoints and release verification.
+
+The supported local environments are macOS, Linux, and WSL2; native Windows is not a verified path. No GPU, API key, cloud account, paid service, or external database is required for mandatory course generation and grading.
+
+Every generated project is an **authoring repository** containing both learner and teacher projections. Hidden tests are not secret when that complete repository is distributed: they are withheld from the normal learner workspace to prevent accidental hints, not protected from a user who can inspect the filesystem. Use a learner-only export or private teacher repository when actual secrecy is required.
+
+Run only trusted local code. The generated Runner and pytest isolation reduce ordinary grading side effects, but they are not an operating-system sandbox for hostile submissions.
+
 ## Non-negotiable outcome
 
 Generate one repository that contains:

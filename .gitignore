@@ -1,0 +1,28 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+
+# Node and Web builds
+node_modules/
+.next/
+dist/
+build/
+coverage/
+
+# Local planning and agent scratch
+.planning/
+.superpowers/
+
+# Local verification artifacts
+*.log
+*.tmp
+course-verification.json

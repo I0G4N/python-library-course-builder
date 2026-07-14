@@ -1,0 +1,33 @@
+{
+  "name": "python-library-course-builder",
+  "version": "0.1.0",
+  "description": "Build source-backed, hands-on learning repositories for Python libraries.",
+  "author": {
+    "name": "I0G4N",
+    "url": "https://github.com/I0G4N"
+  },
+  "homepage": "https://github.com/I0G4N/python-library-course-builder#readme",
+  "repository": "https://github.com/I0G4N/python-library-course-builder",
+  "license": "Apache-2.0",
+  "keywords": [
+    "python",
+    "learning",
+    "course",
+    "labs",
+    "pytest",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Python Library Course Builder",
+    "shortDescription": "Build hands-on Python library courses.",
+    "longDescription": "Turn a Python library into a cumulative beginner course with lessons, coding labs, CLI and Web grading.",
+    "developerName": "I0G4N",
+    "category": "Productivity",
+    "capabilities": [],
+    "websiteURL": "https://github.com/I0G4N/python-library-course-builder",
+    "defaultPrompt": [
+      "Use $building-python-library-courses to build a hands-on Python library course."
+    ]
+  }
+}

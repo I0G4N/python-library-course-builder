@@ -4,6 +4,17 @@ Use one UTF-8 JSON specification to describe the evidence, teaching route, struc
 
 Run the inspector, validator, scaffolder, and verifier through the uv-managed Python 3.13 commands in `SKILL.md`. Schema v2 accepts a course requirement that includes Python 3.13 and excludes Python 3.14. Do not weaken that gate to accommodate the host interpreter.
 
+## Contents
+
+- [Top-level shape](#top-level-shape)
+- [Stable identity and evidence](#stable-identity-and-evidence)
+- [Structured lesson](#structured-lesson)
+- [Knowledge checks](#knowledge-checks)
+- [The mechanism and official bridge cycle](#the-mechanism-and-official-bridge-cycle)
+- [Coding interfaces](#coding-interfaces)
+- [Split canonical source and compilation](#split-canonical-source-and-compilation)
+- [Adaptive size](#adaptive-size)
+
 ## Top-level shape
 
 The exact field validation lives in `scripts/validate_course.py`. This abbreviated example shows ownership and nesting; authored strings and code must be complete.

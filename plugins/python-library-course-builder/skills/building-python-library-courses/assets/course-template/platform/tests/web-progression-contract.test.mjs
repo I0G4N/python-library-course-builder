@@ -194,6 +194,6 @@ test("Web progression stays generic across generated course sizes and subjects",
   ]);
   const source = `${app}\n${knowledge}`;
 
-  assert.doesNotMatch(source, /lab00|lab12|ThreadEval|ConcurrencyLab/);
+  assert.doesNotMatch(source, /lab00|lab12|ThreadEval|Concurrency(?:Lab)/);
   assert.doesNotMatch(source, /labs\.length\s*[!=<>]=?\s*\d+/);
 });

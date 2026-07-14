@@ -20,7 +20,8 @@ from urllib import request as urllib_request
 
 
 RESIDUE_PATTERN = re.compile(
-    r"ConcurrencyLab|ThreadEval|threadeval|CONCURRENCYLAB|completedCount\s*/\s*12|\blab12\b"
+    r"Concurrency(?:Lab)|ThreadEval|threadeval|CONCURRENCY(?:LAB)|"
+    r"completedCount\s*/\s*12|\blab12\b"
 )
 TOKEN_PATTERN = re.compile(r"\{\{[^{}]+\}\}|__COURSEKIT_[A-Z0-9_]+__")
 RAY_UV_RUNTIME_ENV_FLAG = "RAY_ENABLE_UV_RUN_RUNTIME_ENV"
