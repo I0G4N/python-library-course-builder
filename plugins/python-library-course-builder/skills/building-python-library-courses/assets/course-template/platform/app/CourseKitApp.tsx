@@ -9,7 +9,12 @@ import {
   type CSSProperties,
 } from "react";
 
-import { CourseLesson, type CourseContentItem } from "./CourseLesson";
+import {
+  CourseLesson,
+  type CourseContentItem,
+  type PracticeLink,
+  type StudyMinutes,
+} from "./CourseLesson";
 import {
   KnowledgeCheck,
   type KnowledgeProgress,
@@ -69,6 +74,7 @@ type CourseLab = {
   description?: string;
   concepts?: string[];
   questions?: CourseQuestion[];
+  study_minutes?: StudyMinutes;
 };
 
 type CourseManifest = {
@@ -78,6 +84,10 @@ type CourseManifest = {
   project?: string;
   total_points?: number;
   capstone?: string | { title?: string; description?: string };
+  readiness?: {
+    assumed: string[];
+    foundation: string[];
+  };
   labs: CourseLab[];
 };
 
@@ -111,6 +121,10 @@ type FoundationKnowledgePayload = KnowledgeProgress & {
 
 type ConnectionState = "loading" | "online" | "error";
 type RunMode = "public" | "submit";
+
+function studyTimeLabel(study: StudyMinutes): string {
+  return `${study.min}–${study.max} 分钟`;
+}
 
 function detailFromPayload(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
@@ -256,6 +270,32 @@ export function CourseKitApp() {
         : !currentKnowledgeComplete
           ? "请先完成当前 Lab 的知识检查，之后才能编辑和运行代码。"
           : null;
+  const handlePractice = useCallback((link: PracticeLink) => {
+    if (!selectedLab) return;
+    let targetId = `knowledge-check-${selectedLab.id}`;
+    if (link.kind === "coding-question") {
+      operationLifecycleRef.current.changeSelection();
+      setSelectedQuestionId(link.item_id);
+      setFileLoadFailed(false);
+      setFileLoading(codingReady);
+      if (codingReady) {
+        setFileLoadRetryVersion((value) => value + 1);
+      }
+      setResult(null);
+      setRunning(null);
+      setNotice(
+        codingReady
+          ? "正在载入所选练习…"
+          : "完成本章知识检查后即可进入这道编码练习。",
+      );
+      targetId = codingReady ? "work-column" : targetId;
+    }
+    window.requestAnimationFrame(() => {
+      const target = document.getElementById(targetId);
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [codingReady, selectedLab]);
   const dirty = source !== loadedSource;
   const earned = courseState.score ?? result?.score;
   const total = courseState.total_points ?? manifest?.total_points;
@@ -676,6 +716,8 @@ export function CourseKitApp() {
     );
   }
 
+  const readiness = manifest.readiness;
+
   return (
     <main
       className={`course-shell${layoutPreferences.sidebarCollapsed ? " sidebar-collapsed" : ""}`}
@@ -708,6 +750,16 @@ export function CourseKitApp() {
             </span>
           </button>
         </header>
+
+        {readiness ? (
+          <section className="readiness-summary" aria-labelledby="readiness-title">
+            <h2 id="readiness-title">学习准备</h2>
+            <h3>课程直接使用</h3>
+            <ul>{readiness.assumed.map((title, index) => <li key={`assumed-${index}-${title}`}>{title}</li>)}</ul>
+            <h3>Lab 00 会先讲</h3>
+            <ul>{readiness.foundation.map((title, index) => <li key={`foundation-${index}-${title}`}>{title}</li>)}</ul>
+          </section>
+        ) : null}
 
         <nav className="lab-nav" aria-label="课程章节">
           {labs.map((lab, index) => {
@@ -750,6 +802,9 @@ export function CourseKitApp() {
                 <span>
                   <strong>{lab.title}</strong>
                   <small>{isUnlocked ? lab.id : `${lab.id} · 未解锁`}</small>
+                  {lab.study_minutes ? (
+                    <small>{studyTimeLabel(lab.study_minutes)}</small>
+                  ) : null}
                 </span>
               </button>
             );
@@ -795,6 +850,12 @@ export function CourseKitApp() {
           <p className="course-summary">
             {selectedLab?.description ?? manifest.description ?? manifest.project ?? capstoneSummary(manifest.capstone)}
           </p>
+          {selectedLab?.study_minutes ? (
+            <p className="selected-study-time">
+              <strong>预计学习时间：{studyTimeLabel(selectedLab.study_minutes)}</strong>
+              {selectedLab.study_minutes.reason ? ` · ${selectedLab.study_minutes.reason}` : null}
+            </p>
+          ) : null}
         </header>
 
         <div
@@ -813,18 +874,24 @@ export function CourseKitApp() {
             </div>
             <div className="panel-scroll lesson-scroll">
               {lesson ? (
-                <CourseLesson content={lesson} />
+                <CourseLesson content={lesson} onPractice={handlePractice} />
               ) : (
                 <p className="empty-copy">这个 Lab 暂时没有可用讲义。</p>
               )}
               {selectedLab ? (
-                <KnowledgeCheck
-                  key={selectedLab.id}
-                  labId={selectedLab.id}
-                  refreshVersion={knowledgeRefreshVersion}
-                  onProgressChange={recordKnowledgeProgress}
-                  onStateChange={acceptCourseState}
-                />
+                <div
+                  id={`knowledge-check-${selectedLab.id}`}
+                  className="knowledge-check-target"
+                  tabIndex={-1}
+                >
+                  <KnowledgeCheck
+                    key={selectedLab.id}
+                    labId={selectedLab.id}
+                    refreshVersion={knowledgeRefreshVersion}
+                    onProgressChange={recordKnowledgeProgress}
+                    onStateChange={acceptCourseState}
+                  />
+                </div>
               ) : null}
             </div>
           </section>
@@ -843,6 +910,7 @@ export function CourseKitApp() {
               <section
                 className="work-column"
                 id="work-column"
+                tabIndex={-1}
                 aria-label="编码与测试"
               >
             <div className="panel code-panel">

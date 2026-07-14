@@ -1033,7 +1033,7 @@ def _markdown_list(title: str, values: Iterable[str]) -> list[str]:
     return [f"#### {title}", "", *(f"- {value}" for value in values), ""]
 
 
-def _render_lesson(
+def _render_legacy_lesson(
     title: str,
     lesson: dict[str, Any],
     *,
@@ -1180,6 +1180,316 @@ def _render_lesson(
         ]
     )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _derive_practice_links(
+    lesson: dict[str, Any],
+    activities: Iterable[dict[str, Any] | CodingQuestion],
+    *,
+    kind: str,
+) -> list[dict[str, str]]:
+    """Project the first authored activity for each concept without a reverse map."""
+
+    normalized: list[dict[str, Any]] = []
+    for activity in activities:
+        normalized.append(
+            activity.raw if isinstance(activity, CodingQuestion) else activity
+        )
+    title_key = "prompt" if kind == "knowledge-check" else "title"
+    links: list[dict[str, str]] = []
+    for concept in lesson["concepts"]:
+        concept_id = str(concept["id"])
+        activity = next(
+            (
+                item
+                for item in normalized
+                if concept_id in [str(value) for value in item.get("concept_ids", [])]
+            ),
+            None,
+        )
+        if activity is None:
+            continue
+        links.append(
+            {
+                "concept_id": concept_id,
+                "kind": kind,
+                "item_id": str(activity["id"]),
+                "title": str(activity[title_key]),
+            }
+        )
+    return links
+
+
+def _render_assessed_lesson(
+    title: str,
+    lesson: dict[str, Any],
+    *,
+    sources: dict[str, SourceReference],
+    study_minutes: dict[str, Any],
+    practice_links: Iterable[dict[str, str]],
+) -> str:
+    """Render the assessed learner path before optional implementation detail."""
+
+    contract_kind_labels = {
+        "api": "API 调用",
+        "data-model": "数据模型",
+        "mechanism": "运行机制",
+        "formula": "计算关系",
+        "lifecycle": "生命周期",
+    }
+    claim_status_labels = {
+        "documented": "公开契约",
+        "implementation": "实现细节",
+    }
+    study = f"{study_minutes['min']}–{study_minutes['max']} 分钟"
+    lines = [f"# {title}", "", f"**预计学习时间：** {study}", ""]
+    reason = study_minutes.get("reason")
+    if reason:
+        lines.extend([f"**为什么需要这些时间：** {reason}", ""])
+
+    lines.extend(["## 先修知识", ""])
+    for item in lesson["prerequisites"]:
+        lines.extend(
+            [
+                f"### {item['title']}",
+                "",
+                f"**为什么重要：** {item['why']}",
+                "",
+                f"**复习提示：** {item['refresh']}",
+                "",
+            ]
+        )
+    problem = lesson["problem"]
+    lines.extend(
+        [
+            "## 问题",
+            "",
+            f"**项目背景：** {problem['context']}",
+            "",
+            f"**看似直接的做法：** {problem['naive_approach']}",
+            "",
+            f"**它会怎样失败：** {problem['failure']}",
+            "",
+            "## 学习目标",
+            "",
+            *(f"- {item['text']}" for item in lesson["outcomes"]),
+            "",
+            "## 核心概念",
+            "",
+        ]
+    )
+
+    for concept in lesson["concepts"]:
+        contract = concept["operational_contract"]
+        lines.extend(
+            [
+                f"### {concept['name']}",
+                "",
+                f"**定义：** {concept['definition']}",
+                "",
+                f"**用途：** {concept['purpose']}",
+                "",
+                "#### 先这样理解",
+                "",
+                str(concept["mental_model"]),
+                "",
+                "#### 输入和输出是什么",
+                "",
+                f"**理解角度：** {contract_kind_labels[str(contract['kind'])]}",
+                "",
+                "**可用形式：**",
+                "",
+                *(f"- `{form}`" for form in contract["forms"]),
+                "",
+                "**输入：**",
+                "",
+            ]
+        )
+        for item in contract["inputs"]:
+            lines.extend(
+                [
+                    f"- **{item['name']}**：{item['meaning']}",
+                    f"  - 形式：`{item['form']}`",
+                    f"  - 具体例子：`{item['example']}`",
+                    "  - 约束：" + "；".join(str(value) for value in item["constraints"]),
+                ]
+            )
+        lines.extend(["", "**输出：**", ""])
+        for item in contract["outputs"]:
+            lines.extend(
+                [
+                    f"- **{item['name']}**：{item['meaning']}",
+                    f"  - 形式：`{item['form']}`",
+                    f"  - 具体例子：`{item['example']}`",
+                ]
+            )
+        lines.extend(["", "**可观察影响：**", ""])
+        lines.extend(f"- {value}" for value in contract["effects"])
+        lines.extend(["", "**失败时会发生什么：**", ""])
+        for failure in contract["failure_modes"]:
+            lines.extend(
+                [
+                    f"- 条件：{failure['condition']}",
+                    f"  - 可观察结果：{failure['observable']}",
+                    f"  - 恢复方式：{failure['recovery']}",
+                ]
+            )
+        lines.append("")
+
+    runnable_examples = [
+        example for example in lesson["examples"] if example["kind"] == "runnable"
+    ]
+    lines.extend(["## 可运行示例", ""])
+    for example in runnable_examples:
+        lines.extend(
+            [
+                f"### {example['title']}",
+                "",
+                str(example["explanation"]),
+                "",
+                "```python",
+                str(example["code"]).rstrip("\n"),
+                "```",
+                "",
+                "#### 拿一个具体输入走一遍",
+                "",
+            ]
+        )
+        for index, step in enumerate(example["trace"], 1):
+            lines.extend(
+                [
+                    f"{index}. **输入状态：** {step['input_state']}",
+                    f"   - **执行动作：** {step['operation']}",
+                    f"   - **输出状态：** {step['output_state']}",
+                    f"   - **为什么：** {step['explanation']}",
+                ]
+            )
+        lines.append("")
+
+    links = list(practice_links)
+    lines.extend(["## 接下来练什么", ""])
+    for link in links:
+        if link["kind"] == "coding-question":
+            lines.append(
+                f"- **{link['title']}**：`uv run course test {link['item_id']}`"
+            )
+        else:
+            lines.append(f"- **{link['title']}**：进入本章知识检查。")
+    lines.append("")
+
+    bridge = lesson["capstone_bridge"]
+    lines.extend(
+        [
+            "## 结课项目衔接",
+            "",
+            f"**输入：** {bridge['input']}",
+            "",
+            f"**输出：** {bridge['output']}",
+            "",
+            f"**增量：** {bridge['increment']}",
+            "",
+            f"**下一步：** {bridge['next']}",
+            "",
+            "## 总结",
+            "",
+            *(f"- {item}" for item in lesson["summary"]),
+            "",
+            "<details>",
+            "<summary>运行细节</summary>",
+            "",
+        ]
+    )
+    for concept in lesson["concepts"]:
+        lines.extend([f"### {concept['name']} 如何运行", ""])
+        lines.extend(
+            f"{index}. {step}" for index, step in enumerate(concept["mechanism"], 1)
+        )
+        lines.append("")
+    for example in runnable_examples:
+        lines.extend(
+            [
+                f"**运行命令：** `{example['command']}`",
+                "",
+                "**预期输出：**",
+                "",
+                "```text",
+                str(example["expected_output"]).rstrip("\n"),
+                "```",
+                "",
+            ]
+        )
+    for example in lesson["examples"]:
+        if example["kind"] != "diagnostic":
+            continue
+        lines.extend(
+            [
+                f"### {example['title']}",
+                "",
+                "```python",
+                str(example["wrong_code"]).rstrip("\n"),
+                "```",
+                "",
+                f"**现象：** {example['symptom']}",
+                "",
+                f"**原因：** {example['cause']}",
+                "",
+                "```python",
+                str(example["fix_code"]).rstrip("\n"),
+                "```",
+                "",
+                str(example["explanation"]),
+                "",
+            ]
+        )
+    lines.extend(["</details>", "", "<details>", "<summary>需要保持的条件</summary>", ""])
+    for concept in lesson["concepts"]:
+        lines.extend([f"### {concept['name']}", "", "**必须保持：**", ""])
+        lines.extend(f"- {value}" for value in concept["invariants"])
+        lines.extend(["", "**适用边界：**", ""])
+        lines.extend(f"- {value}" for value in concept["boundaries"])
+        lines.extend(["", "**容易踩坑：**", ""])
+        lines.extend(f"- {value}" for value in concept["pitfalls"])
+        lines.append("")
+    lines.extend(["</details>", "", "<details>", "<summary>依据与延伸</summary>", ""])
+    for concept in lesson["concepts"]:
+        lines.extend([f"### {concept['name']}", "", "**设计考虑：**", ""])
+        lines.extend(f"- {value}" for value in concept["design_reasons"])
+        lines.extend(["", "**收益：**", ""])
+        lines.extend(f"- {value}" for value in concept["benefits"])
+        lines.extend(["", "**取舍：**", ""])
+        lines.extend(f"- {value}" for value in concept["tradeoffs"])
+        lines.extend(["", "**官方依据：**", ""])
+        for claim in concept["source_claims"]:
+            source = sources[str(claim["source_id"])]
+            lines.append(
+                f"- [{source.title}]({source.url})"
+                f"（{claim_status_labels[str(claim['status'])]}）：{claim['claim']}"
+            )
+        lines.append("")
+    lines.extend(["</details>", ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_lesson(
+    title: str,
+    lesson: dict[str, Any],
+    *,
+    sources: dict[str, SourceReference],
+    assessed: bool = False,
+    study_minutes: dict[str, Any] | None = None,
+    practice_links: Iterable[dict[str, str]] = (),
+) -> str:
+    if not assessed:
+        return _render_legacy_lesson(title, lesson, sources=sources)
+    if study_minutes is None:
+        raise SourceValidationError("assessed lesson needs study_minutes")
+    return _render_assessed_lesson(
+        title,
+        lesson,
+        sources=sources,
+        study_minutes=study_minutes,
+        practice_links=practice_links,
+    )
 
 
 def _lab_lesson_title(lab_id: str, title: str) -> str:
@@ -1566,11 +1876,6 @@ def load_course_source(source_root: Path | str) -> CourseSource:
         }
         for concept in foundation_lesson_outline["concepts"]
     }
-    foundation_lesson = _render_lesson(
-        _text(foundations, "title", label="foundations"),
-        foundation_lesson_outline,
-        sources=source_map,
-    )
     foundation_quiz_path = root / _relative(
         _text(foundations, "quiz", label="foundations"), label="foundation quiz"
     )
@@ -1592,6 +1897,19 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             quiz=foundation_quiz,
             questions=None,
         )
+    foundation_practice_links = _derive_practice_links(
+        foundation_lesson_outline,
+        foundation_quiz,
+        kind="knowledge-check",
+    )
+    foundation_lesson = _render_lesson(
+        _text(foundations, "title", label="foundations"),
+        foundation_lesson_outline,
+        sources=source_map,
+        assessed=assessed_profile is not None,
+        study_minutes=foundations.get("study_minutes"),
+        practice_links=foundation_practice_links,
+    )
 
     order = [str(item) for item in _list(course.get("lab_order"), label="lab_order")]
     if not order or len(order) != len(set(order)):
@@ -1660,14 +1978,6 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             source_ids=source_ids,
             assessed=assessed_profile is not None,
         )
-        lesson = _render_lesson(
-            _lab_lesson_title(
-                lab_id, _text(payload, "title", label=lab_id)
-            ),
-            lesson_outline,
-            sources=source_map,
-        )
-
         declared_files: dict[str, tuple[ast.Module, ast.Module]] = {}
         declared_file_order: list[str] = []
         for file_index, raw_file in enumerate(
@@ -1742,6 +2052,19 @@ def load_course_source(source_root: Path | str) -> CourseSource:
                 quiz=quiz,
                 questions=questions,
             )
+        practice_links = _derive_practice_links(
+            lesson_outline,
+            questions,
+            kind="coding-question",
+        )
+        lesson = _render_lesson(
+            _lab_lesson_title(lab_id, _text(payload, "title", label=lab_id)),
+            lesson_outline,
+            sources=source_map,
+            assessed=assessed_profile is not None,
+            study_minutes=payload.get("study_minutes"),
+            practice_links=practice_links,
+        )
 
         questions_by_id = {question.question_id: question for question in questions}
         cycle = _mapping(payload.get("module_cycle"), label=f"{lab_id}.module_cycle")
@@ -2117,6 +2440,8 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
                 "questions": questions,
             }
         )
+        if "study_minutes" in lab.raw:
+            rendered_lab["study_minutes"] = copy.deepcopy(lab.raw["study_minutes"])
         if learner and isinstance(rendered_lab.get("tests"), dict):
             public = list(
                 dict.fromkeys(
@@ -2157,6 +2482,21 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
             "labs": labs,
         }
     )
+    profile = course.audience.get("prerequisite_profile")
+    if course.audience.get("level") == "assessed" and isinstance(profile, dict):
+        capabilities = profile.get("capabilities", [])
+        base["readiness"] = {
+            "assumed": [
+                str(item["title"])
+                for item in capabilities
+                if isinstance(item, dict) and item.get("decision") == "assume"
+            ],
+            "foundation": [
+                str(item["title"])
+                for item in capabilities
+                if isinstance(item, dict) and item.get("decision") == "foundation"
+            ],
+        }
     if "python" not in base:
         base["python_requires"] = course.python_requires
     if "capstone" not in base:
@@ -2172,6 +2512,10 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
             "readme": f"{course.foundation['id']}/README.md",
         }
     )
+    if "study_minutes" in course.foundation:
+        foundation["study_minutes"] = copy.deepcopy(
+            course.foundation["study_minutes"]
+        )
     if "examples" not in foundation:
         foundation["examples"] = [
             f"{course.foundation['id']}/{example['path']}"
@@ -2235,35 +2579,57 @@ def _content(course: CourseSource) -> dict[str, Any]:
         source = sources[source_id]
         return {"id": source.source_id, "title": source.title, "url": source.url}
 
+    foundation: dict[str, Any] = {
+        "id": course.foundations["id"],
+        "title": course.foundations["title"],
+        "lesson": course.foundation_lesson,
+        "lesson_outline": copy.deepcopy(course.foundation_lesson_outline),
+        "sources": [
+            source_payload(source_id)
+            for source_id in dict.fromkeys(
+                str(claim["source_id"])
+                for concept in course.foundation_lesson_outline["concepts"]
+                for claim in concept["source_claims"]
+            )
+        ],
+    }
+    if "study_minutes" in course.foundation:
+        foundation["study_minutes"] = copy.deepcopy(course.foundation["study_minutes"])
+    foundation_links = _derive_practice_links(
+        course.foundation_lesson_outline,
+        course.foundation_quiz,
+        kind="knowledge-check",
+    )
+    if foundation_links:
+        foundation["practice_links"] = foundation_links
+
+    labs: list[dict[str, Any]] = []
+    for lab in course.labs:
+        payload: dict[str, Any] = {
+            "id": lab.lab_id,
+            "title": lab.title,
+            "lesson": lab.lesson,
+            "lesson_outline": copy.deepcopy(lab.lesson_outline),
+            "sources": [source_payload(source_id) for source_id in lab.source_ids],
+            "concepts": list(lab.concepts),
+            "capstone_increment": lab.capstone_increment,
+        }
+        if "study_minutes" in lab.raw:
+            payload["study_minutes"] = copy.deepcopy(lab.raw["study_minutes"])
+        links = _derive_practice_links(
+            lab.lesson_outline,
+            lab.questions,
+            kind="coding-question",
+        )
+        if links:
+            payload["practice_links"] = links
+        labs.append(payload)
+
     return {
         "schema_version": 2,
         "course_id": course.course_id,
-        "foundations": {
-            "id": course.foundations["id"],
-            "title": course.foundations["title"],
-            "lesson": course.foundation_lesson,
-            "lesson_outline": copy.deepcopy(course.foundation_lesson_outline),
-            "sources": [
-                source_payload(source_id)
-                for source_id in dict.fromkeys(
-                    str(claim["source_id"])
-                    for concept in course.foundation_lesson_outline["concepts"]
-                    for claim in concept["source_claims"]
-                )
-            ],
-        },
-        "labs": [
-            {
-                "id": lab.lab_id,
-                "title": lab.title,
-                "lesson": lab.lesson,
-                "lesson_outline": copy.deepcopy(lab.lesson_outline),
-                "sources": [source_payload(source_id) for source_id in lab.source_ids],
-                "concepts": list(lab.concepts),
-                "capstone_increment": lab.capstone_increment,
-            }
-            for lab in course.labs
-        ],
+        "foundations": foundation,
+        "labs": labs,
     }
 
 

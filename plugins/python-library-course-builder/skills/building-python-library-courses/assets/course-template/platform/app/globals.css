@@ -152,6 +152,31 @@ summary:focus-visible,
   -webkit-line-clamp: 2;
 }
 
+.readiness-summary {
+  margin: 0 0.55rem;
+  padding: 0.55rem 0.62rem;
+  overflow-y: auto;
+  border: 1px solid #d3e2dc;
+  border-radius: 0.5rem;
+  background: #f6faf8;
+  font-size: 0.67rem;
+}
+
+.readiness-summary h2,
+.readiness-summary h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.72rem;
+}
+
+.readiness-summary h3:not(:first-child) {
+  margin-top: 0.45rem;
+}
+
+.readiness-summary ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+
 .lab-nav {
   display: flex;
   min-height: 0;
@@ -1028,6 +1053,91 @@ summary:focus-visible,
   gap: 0.55rem;
 }
 
+.study-time {
+  display: grid;
+  gap: 0.18rem;
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.65rem;
+  border-left: 3px solid #6db399;
+  background: #eff7f3;
+}
+
+.selected-study-time {
+  margin: 0.25rem 0 0;
+  color: var(--accent-deep);
+  font-size: 0.7rem;
+}
+
+.operational-contract {
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--soft-line);
+}
+
+.operational-contract code {
+  display: inline-block;
+  margin: 0.1rem 0.25rem 0.1rem 0;
+}
+
+.operational-contract dl,
+.lesson-trace dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 0.55rem;
+}
+
+.operational-contract dt,
+.lesson-trace dt {
+  font-weight: 700;
+}
+
+.operational-contract dd,
+.lesson-trace dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.practice-action {
+  display: grid;
+  gap: 0.12rem;
+  width: 100%;
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #9fc8b8;
+  border-radius: 0.45rem;
+  background: #eaf5f0;
+  color: var(--accent-deep);
+  text-align: left;
+  cursor: pointer;
+}
+
+.practice-action:hover,
+.practice-action:focus-visible {
+  border-color: var(--accent);
+  background: #dff0e8;
+}
+
+.practice-action span {
+  font-size: 0.64rem;
+}
+
+.lesson-trace {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #d3e2dc;
+  border-radius: 0.45rem;
+  background: #f6faf8;
+}
+
+.lesson-trace ol {
+  padding-left: 1.2rem;
+}
+
+.knowledge-check-target:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .lesson-prerequisites article,
 .lesson-concept-overview,
 .lesson-tradeoff-grid section,
@@ -1205,15 +1315,20 @@ summary:focus-visible,
 }
 
 .source-list {
-  display: grid;
-  gap: 0.28rem;
   margin-top: 1.1rem;
-  padding-top: 0.8rem;
   border-top: 1px solid var(--soft-line);
 }
 
-.source-list h3 {
-  margin-top: 0;
+.source-list > summary {
+  padding: 0.7rem 0;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.source-list > div {
+  display: grid;
+  gap: 0.28rem;
+  padding-bottom: 0.6rem;
 }
 
 .boot-screen {
@@ -1302,6 +1417,7 @@ summary:focus-visible,
   }
 
   .sidebar-collapsed .brand-copy,
+  .sidebar-collapsed .readiness-summary,
   .sidebar-collapsed .lab-link > span:last-child,
   .sidebar-collapsed .sidebar-footer {
     display: none;

@@ -124,12 +124,45 @@ def render_course_route(spec: dict[str, Any]) -> str:
             "\r\n", "\n"
         ).replace("\r", "\n").replace("\n", "<br>")
 
-    rows = [("lab00", str(spec["foundation"]["title"]))]
-    rows.extend((str(lab["id"]), str(lab["title"])) for lab in spec["labs"])
+    assessed = spec["course"]["audience"].get("level") == "assessed"
+    units = [spec["foundation"], *spec["labs"]]
+    rows = [(str(unit["id"]), str(unit["title"])) for unit in units]
+    if assessed:
+        lines = ["| 顺序 | 本章主题 | 预计用时 |", "| --- | --- | --- |"]
+        for unit, (lab_id, title) in zip(units, rows, strict=True):
+            study = unit["study_minutes"]
+            time = table_cell(f"{study['min']}–{study['max']} 分钟")
+            if study.get("reason"):
+                time += f"<br>{table_cell(study['reason'])}"
+            lines.append(
+                f"| `{table_cell(lab_id)}` | {table_cell(title)} | {time} |"
+            )
+        return "\n".join(lines)
     lines = ["| 顺序 | 本章主题 |", "| --- | --- |"]
     lines.extend(
         f"| `{table_cell(lab_id)}` | {table_cell(title)} |" for lab_id, title in rows
     )
+    return "\n".join(lines)
+
+
+def render_learning_preparation(spec: dict[str, Any]) -> str:
+    audience = spec["course"]["audience"]
+    if audience.get("level") != "assessed":
+        return (
+            "课程路线只假设学员掌握 Python 基础。每个计分 Lab 预计用时 30-45 分钟，"
+            "并从先修知识、具体问题、可追踪目标和完整可运行示例开始。更深入的机制、"
+            "设计权衡和错误代码诊断放在可展开区域中，避免干扰首次阅读。"
+        )
+
+    capabilities = audience["prerequisite_profile"]["capabilities"]
+    assumed = [item["title"] for item in capabilities if item["decision"] == "assume"]
+    foundation = [
+        item["title"] for item in capabilities if item["decision"] == "foundation"
+    ]
+    lines = ["## 学习准备", "", "课程会直接使用这些能力：", ""]
+    lines.extend(f"- {title}" for title in assumed)
+    lines.extend(["", "Lab 00 会先带你补齐：", ""])
+    lines.extend(f"- {title}" for title in foundation)
     return "\n".join(lines)
 
 
@@ -146,6 +179,7 @@ def replace_template_tokens(root: Path, spec: dict[str, Any]) -> None:
         "__COURSEKIT_CAPSTONE__": course["capstone"],
         "__COURSEKIT_FIRST_QUESTION__": spec["labs"][0]["questions"][0]["id"],
         "__COURSEKIT_ROUTE__": render_course_route(spec),
+        "__COURSEKIT_PREPARATION__": render_learning_preparation(spec),
     }
     for path in sorted(root.rglob("*")):
         if not path.is_file() or path.suffix not in TEXT_SUFFIXES:
