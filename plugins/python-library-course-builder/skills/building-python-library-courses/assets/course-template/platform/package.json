@@ -1,0 +1,53 @@
+{
+  "name": "coursekit-learning-platform",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "course:compile": "UV_CACHE_DIR=.uv-cache uv run python -m coursekit.cli compile course/source course",
+    "course:check": "UV_CACHE_DIR=.uv-cache uv run python -m coursekit.cli check course/source course",
+    "dev": "vinext dev",
+    "learn": "node scripts/learn.mjs",
+    "setup": "npm ci --ignore-scripts --no-audit --no-fund && uv sync --cache-dir .uv-cache --locked",
+    "build": "vinext build",
+    "test": "npm run course:check && npm run build && node --test tests/*.test.mjs",
+    "test:runner": "UV_CACHE_DIR=.uv-cache uv run pytest runner/tests -q",
+    "test:reference": "COURSEKIT_INTERNAL_RUN=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 UV_CACHE_DIR=.uv-cache PYTHONPATH=course/reference:course/starter uv run pytest -q course/starter course/tests/hidden",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .venv --ignore-pattern .uv-cache"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/commands": "6.10.4",
+    "@codemirror/lang-python": "6.2.1",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/search": "6.7.1",
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.43.6",
+    "@lezer/highlight": "1.2.3",
+    "drizzle-orm": "0.45.2",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "drizzle-kit": "0.31.10",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "react-server-dom-webpack": "19.2.6",
+    "tailwindcss": "4.2.1",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.0.13",
+    "wrangler": "4.92.0"
+  },
+  "type": "module"
+}

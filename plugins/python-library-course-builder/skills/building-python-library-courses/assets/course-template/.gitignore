@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+.uv-cache/
+.next/
+dist/
+node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.tsbuildinfo
+.pytest_cache/
+platform/.coursekit-artifacts.json
+labs/.coursekit/

@@ -1,0 +1,2113 @@
+from __future__ import annotations
+
+import ast
+from collections import Counter
+import copy
+import os
+import re
+import shutil
+import tempfile
+from pathlib import Path
+from typing import Any, Iterable
+from urllib.parse import urlparse
+
+from .io import json_bytes, read_json, safe_relative_path, unresolved_tokens
+from .models import (
+    CodingQuestion,
+    CompileReport,
+    CourseSource,
+    LabSource,
+    SourceReference,
+)
+
+
+class CourseKitError(RuntimeError):
+    """Base error for deterministic course compilation."""
+
+
+class SourceValidationError(CourseKitError):
+    """The canonical course source is incomplete or internally inconsistent."""
+
+
+class DriftError(CourseKitError):
+    """Compiled artifacts differ from the canonical source."""
+
+    def __init__(self, paths: Iterable[Path]) -> None:
+        self.paths = tuple(paths)
+        rendered = ", ".join(path.as_posix() for path in self.paths)
+        super().__init__(f"compiled course drift: {rendered}")
+
+
+class TargetNotEmptyError(CourseKitError):
+    """Workspace initialization would overwrite an existing target."""
+
+
+ARTIFACT_INDEX = Path(".coursekit-artifacts.json")
+IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
+REQUIREMENT_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9._,-]+\])?"
+    r"(?:(?:===|~=|==|!=|<=|>=|<|>)[A-Za-z0-9][A-Za-z0-9.*+!_-]*"
+    r"(?:,(?:===|~=|==|!=|<=|>=|<|>)[A-Za-z0-9][A-Za-z0-9.*+!_-]*)*)$"
+)
+DIRECT_REQUIREMENT_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9._,-]+\])? @ (?:https|git\+https)://\S+$"
+)
+PYTHON_CLAUSE_PATTERN = re.compile(
+    r"^(~=|==|!=|<=|>=|<|>)(\d+)(?:\.(\d+))?(?:\.(\d+|\*))?$"
+)
+LAB_BOUNDS = {
+    "small": (3, 5),
+    "medium": (6, 8),
+    "large": (6, 10),
+}
+QUESTION_KINDS = {"official_bridge", "reimplementation", "integration"}
+QUESTION_EXAMPLE_FIELDS = ("input", "output", "explanation")
+PUBLIC_QUESTION_FIELDS = (
+    "id",
+    "kind",
+    "title",
+    "file",
+    "symbol",
+    "points",
+    "timeout_seconds",
+    "prompt",
+    "concept_ids",
+    "outcome_ids",
+    "example",
+)
+SOURCE_QUESTION_FIELDS = frozenset((*PUBLIC_QUESTION_FIELDS, "tests"))
+QUIZ_KINDS = {"execution_trace", "diagnostic"}
+CONCEPT_LIST_FIELDS = {
+    "mechanism",
+    "design_reasons",
+    "benefits",
+    "tradeoffs",
+    "invariants",
+    "boundaries",
+    "pitfalls",
+}
+
+
+def _mapping(payload: Any, *, label: str) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise SourceValidationError(f"{label} must be a JSON object")
+    return payload
+
+
+def _list(payload: Any, *, label: str) -> list[Any]:
+    if not isinstance(payload, list):
+        raise SourceValidationError(f"{label} must be a JSON array")
+    return payload
+
+
+def _text(payload: dict[str, Any], key: str, *, label: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise SourceValidationError(f"{label}.{key} must be a non-empty string")
+    return value
+
+
+def _requirement(value: str) -> bool:
+    return bool(
+        REQUIREMENT_PATTERN.fullmatch(value)
+        or DIRECT_REQUIREMENT_PATTERN.fullmatch(value)
+    )
+
+
+def _python_version_matches(specifier: str, version: tuple[int, int, int]) -> bool:
+    clauses = [clause.strip() for clause in specifier.split(",") if clause.strip()]
+    if not clauses:
+        return False
+    for clause in clauses:
+        match = PYTHON_CLAUSE_PATTERN.fullmatch(clause)
+        if match is None:
+            raise SourceValidationError(
+                "course.python_requires must use simple PEP 440 comparison clauses"
+            )
+        operator, major, minor, patch = match.groups()
+        components = [int(major)]
+        if minor is not None:
+            components.append(int(minor))
+        if patch not in {None, "*"}:
+            components.append(int(patch))
+        expected = tuple((*components, *(0 for _ in range(3 - len(components)))))
+        if operator == "==" and patch == "*":
+            matched = version[:2] == expected[:2]
+        elif operator == "==":
+            matched = version == expected
+        elif operator == "!=":
+            matched = version != expected
+        elif operator == ">=":
+            matched = version >= expected
+        elif operator == "<=":
+            matched = version <= expected
+        elif operator == ">":
+            matched = version > expected
+        elif operator == "<":
+            matched = version < expected
+        else:
+            upper = (
+                (expected[0], expected[1] + 1, 0)
+                if len(components) >= 3
+                else (expected[0] + 1, 0, 0)
+            )
+            matched = expected <= version < upper
+        if not matched:
+            return False
+    return True
+
+
+def _python_requires(payload: dict[str, Any]) -> str:
+    value = _text(payload, "python_requires", label="course")
+    clauses = {clause.strip().replace(" ", "") for clause in value.split(",")}
+    bounded = bool(
+        clauses.intersection({"<3.14", "<3.14.0", "==3.13.*", "~=3.13.0"})
+    )
+    if (
+        not _python_version_matches(value, (3, 13, 0))
+        or not bounded
+        or any(
+            _python_version_matches(value, version)
+            for version in ((3, 14, 0), (3, 14, 1), (3, 15, 0))
+        )
+    ):
+        raise SourceValidationError(
+            "course.python_requires must include Python 3.13 and exclude Python 3.14 for this template"
+        )
+    return value
+
+
+def _read_json(path: Path, *, label: str) -> dict[str, Any]:
+    try:
+        return _mapping(read_json(path), label=label)
+    except FileNotFoundError as error:
+        raise SourceValidationError(f"missing {label}: {path}") from error
+    except ValueError as error:
+        raise SourceValidationError(str(error)) from error
+
+
+def _read_text(path: Path, *, label: str) -> str:
+    try:
+        text = path.read_text()
+    except FileNotFoundError as error:
+        raise SourceValidationError(f"missing {label}: {path}") from error
+    tokens = unresolved_tokens(text)
+    if tokens:
+        raise SourceValidationError(
+            f"unresolved template token(s) in {path}: {', '.join(tokens)}"
+        )
+    return text
+
+
+def _relative(value: str, *, label: str) -> Path:
+    try:
+        return Path(*safe_relative_path(value, label=label).parts)
+    except ValueError as error:
+        raise SourceValidationError(str(error)) from error
+
+
+def _identifier(value: str, *, label: str) -> str:
+    if not IDENTIFIER_PATTERN.fullmatch(value):
+        raise SourceValidationError(
+            f"{label} must use lowercase letters, digits, hyphens, or underscores: {value!r}"
+        )
+    return value
+
+
+def _stable_id(payload: dict[str, Any], *, label: str) -> str:
+    value = _text(payload, "id", label=label)
+    if not IDENTIFIER_PATTERN.fullmatch(value.replace(".", "-")):
+        raise SourceValidationError(f"{label}.id must be a stable lowercase id")
+    return value
+
+
+def _strings(payload: Any, *, label: str, minimum: int = 1) -> tuple[str, ...]:
+    values = _list(payload, label=label)
+    if len(values) < minimum or not all(
+        isinstance(value, str) and value.strip() for value in values
+    ):
+        raise SourceValidationError(
+            f"{label} must contain at least {minimum} non-empty string(s)"
+        )
+    return tuple(values)
+
+
+def _parse_python(code: str, *, label: str) -> ast.Module:
+    try:
+        return ast.parse(code, filename=label)
+    except SyntaxError as error:
+        raise SourceValidationError(f"{label} is not valid Python: {error}") from error
+
+
+def _imports(module: ast.Module) -> set[str]:
+    result: set[str] = set()
+    importlib_names = {"importlib"}
+    import_module_callables: set[str] = set()
+    builtin_import_callables = {"__import__"}
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                result.add(alias.name)
+                if alias.name == "importlib":
+                    importlib_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                raise SourceValidationError(
+                    "coding source uses a relative ImportFrom"
+                )
+            if not node.module:
+                continue
+            result.add(node.module)
+            for alias in node.names:
+                if alias.name != "*":
+                    result.add(f"{node.module}.{alias.name}")
+                local_name = alias.asname or alias.name
+                if node.module == "importlib" and alias.name == "import_module":
+                    import_module_callables.add(local_name)
+                if node.module == "builtins" and alias.name == "__import__":
+                    builtin_import_callables.add(local_name)
+    for node in ast.walk(module):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        first = node.args[0]
+        if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+            continue
+        function = node.func
+        if (
+            isinstance(function, ast.Attribute)
+            and function.attr == "import_module"
+            and isinstance(function.value, ast.Name)
+            and function.value.id in importlib_names
+        ) or (
+            isinstance(function, ast.Name)
+            and function.id in import_module_callables | builtin_import_callables
+        ):
+            result.add(first.value)
+    return result
+
+
+def _imports_root(imports: set[str], root: str) -> bool:
+    return any(name == root or name.startswith(f"{root}.") for name in imports)
+
+
+def _module_name(path: str) -> str:
+    value = Path(path)
+    parts = value.parts[:-1] if value.name == "__init__.py" else (*value.parts[:-1], value.stem)
+    return ".".join(parts)
+
+
+def _declared_helper(
+    imported: str,
+    declared_modules: dict[str, tuple[ast.Module, ast.Module]],
+) -> str | None:
+    candidates = [
+        name
+        for name in declared_modules
+        if imported == name or imported.startswith(f"{name}.")
+    ]
+    return max(candidates, key=len) if candidates else None
+
+
+def _validate_reimplementation_closure(
+    *,
+    learner_file: str,
+    lab_id: str,
+    declared_files: dict[str, tuple[ast.Module, ast.Module]],
+    forbidden_imports: tuple[str, ...],
+    prior_course_roots: tuple[str, ...],
+    label: str,
+) -> None:
+    declared_modules = {
+        _module_name(path): modules for path, modules in declared_files.items()
+    }
+    entry = _module_name(learner_file)
+    for projection in (0, 1):
+        pending = [entry]
+        visited: set[str] = set()
+        while pending:
+            module_name = pending.pop()
+            if module_name in visited:
+                continue
+            visited.add(module_name)
+            imports = _imports(declared_modules[module_name][projection])
+            if any(
+                _imports_root(imports, root)
+                for root in (*forbidden_imports, *prior_course_roots)
+            ):
+                raise SourceValidationError(
+                    f"{label}.learner_file closure contains a forbidden import"
+                )
+            for imported in imports:
+                if not _imports_root({imported}, lab_id):
+                    continue
+                helper = _declared_helper(imported, declared_modules)
+                if helper is None:
+                    if imported == lab_id:
+                        continue
+                    raise SourceValidationError(
+                        f"{label}.learner_file imports an undeclared local helper: {imported}"
+                    )
+                pending.append(helper)
+
+
+def _validate_audience(payload: dict[str, Any]) -> dict[str, Any]:
+    audience = _mapping(payload.get("audience"), label="course.audience")
+    if _text(audience, "level", label="course.audience") != "basic-python":
+        raise SourceValidationError("course.audience.level must be basic-python")
+    _strings(audience.get("assumes"), label="course.audience.assumes")
+    _strings(
+        audience.get("does_not_assume"),
+        label="course.audience.does_not_assume",
+    )
+    duration = _mapping(
+        audience.get("lab_minutes"), label="course.audience.lab_minutes"
+    )
+    if duration.get("min") != 30 or duration.get("max") != 45:
+        raise SourceValidationError(
+            "course.audience.lab_minutes must declare the 30-45 minute range"
+        )
+    return copy.deepcopy(audience)
+
+
+def _validate_source_tree(root: Path) -> None:
+    if not root.is_dir():
+        raise SourceValidationError(f"course source directory is missing: {root}")
+    if root.is_symlink():
+        raise SourceValidationError(f"course source root cannot be a symlink: {root}")
+    if (root / "authoring-spec.json").exists():
+        raise SourceValidationError(
+            "course/source/authoring-spec.json is not canonical in schema v2"
+        )
+    legacy_lessons = [
+        path for path in root.rglob("lesson.md") if path.is_file() or path.is_symlink()
+    ]
+    if legacy_lessons:
+        raise SourceValidationError(
+            f"schema v2 lessons must use lesson.json, not {legacy_lessons[0]}"
+        )
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise SourceValidationError(f"course source cannot contain symlink: {path}")
+        if path.is_file():
+            try:
+                tokens = unresolved_tokens(path.read_text())
+            except UnicodeDecodeError:
+                continue
+            if tokens:
+                raise SourceValidationError(
+                    f"unresolved template token(s) in {path}: {', '.join(tokens)}"
+                )
+
+
+def _validate_output_root(output: Path) -> None:
+    if output.is_symlink():
+        raise SourceValidationError(f"output root cannot be a symlink: {output}")
+    if output.exists() and not output.is_dir():
+        raise SourceValidationError(f"output root must be a directory: {output}")
+
+
+def _validate_output_paths(output: Path, artifacts: Iterable[Path]) -> None:
+    for artifact in artifacts:
+        current = output
+        for part in artifact.parts:
+            current = current / part
+            if current.is_symlink():
+                raise SourceValidationError(
+                    f"output artifact path cannot contain symlink: {current}"
+                )
+            if current.exists() and current != output / artifact and not current.is_dir():
+                raise SourceValidationError(
+                    f"output artifact parent must be a directory: {current}"
+                )
+
+
+def _validate_mappings(
+    payload: dict[str, Any],
+    *,
+    label: str,
+    concept_ids: set[str],
+    outcome_ids: set[str],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    concepts = _strings(payload.get("concept_ids"), label=f"{label}.concept_ids")
+    outcomes = _strings(payload.get("outcome_ids"), label=f"{label}.outcome_ids")
+    if not set(concepts) <= concept_ids:
+        raise SourceValidationError(f"{label}.concept_ids reference unknown concepts")
+    if not set(outcomes) <= outcome_ids:
+        raise SourceValidationError(f"{label}.outcome_ids reference unknown outcomes")
+    return concepts, outcomes
+
+
+def _load_lesson(
+    path: Path,
+    *,
+    label: str,
+    source_ids: set[str],
+) -> tuple[dict[str, Any], set[str], set[str]]:
+    lesson = _read_json(path, label=label)
+    prerequisites = _list(
+        lesson.get("prerequisites"), label=f"{label}.prerequisites"
+    )
+    if not prerequisites:
+        raise SourceValidationError(f"{label}.prerequisites must not be empty")
+    prerequisite_ids: set[str] = set()
+    for index, raw in enumerate(prerequisites):
+        item_label = f"{label}.prerequisites[{index}]"
+        item = _mapping(raw, label=item_label)
+        item_id = _stable_id(item, label=item_label)
+        if item_id in prerequisite_ids:
+            raise SourceValidationError(f"duplicate prerequisite id: {item_id}")
+        prerequisite_ids.add(item_id)
+        for key in ("title", "why", "refresh"):
+            _text(item, key, label=item_label)
+
+    problem = _mapping(lesson.get("problem"), label=f"{label}.problem")
+    for key in ("context", "naive_approach", "failure"):
+        _text(problem, key, label=f"{label}.problem")
+
+    outcomes = _list(lesson.get("outcomes"), label=f"{label}.outcomes")
+    if not outcomes:
+        raise SourceValidationError(f"{label}.outcomes must not be empty")
+    outcome_ids: set[str] = set()
+    for index, raw in enumerate(outcomes):
+        item_label = f"{label}.outcomes[{index}]"
+        item = _mapping(raw, label=item_label)
+        outcome_id = _stable_id(item, label=item_label)
+        if outcome_id in outcome_ids:
+            raise SourceValidationError(f"duplicate outcome id: {outcome_id}")
+        outcome_ids.add(outcome_id)
+        _text(item, "text", label=item_label)
+
+    concepts = _list(lesson.get("concepts"), label=f"{label}.concepts")
+    if not concepts:
+        raise SourceValidationError(f"{label}.concepts must not be empty")
+    concept_ids: set[str] = set()
+    for index, raw in enumerate(concepts):
+        item_label = f"{label}.concepts[{index}]"
+        concept = _mapping(raw, label=item_label)
+        concept_id = _stable_id(concept, label=item_label)
+        if concept_id in concept_ids:
+            raise SourceValidationError(f"duplicate concept id: {concept_id}")
+        concept_ids.add(concept_id)
+        for key in ("name", "definition", "purpose", "mental_model"):
+            _text(concept, key, label=item_label)
+        for key in sorted(CONCEPT_LIST_FIELDS):
+            _strings(concept.get(key), label=f"{item_label}.{key}")
+        claims = _list(
+            concept.get("source_claims"), label=f"{item_label}.source_claims"
+        )
+        if not claims:
+            raise SourceValidationError(f"{item_label}.source_claims must not be empty")
+        for claim_index, raw_claim in enumerate(claims):
+            claim_label = f"{item_label}.source_claims[{claim_index}]"
+            claim = _mapping(raw_claim, label=claim_label)
+            source_id = _text(claim, "source_id", label=claim_label)
+            if source_id not in source_ids:
+                raise SourceValidationError(
+                    f"{claim_label} references unknown source {source_id}"
+                )
+            _text(claim, "claim", label=claim_label)
+            if claim.get("status") not in {"documented", "implementation"}:
+                raise SourceValidationError(
+                    f"{claim_label}.status must be documented or implementation"
+                )
+
+    examples = _list(lesson.get("examples"), label=f"{label}.examples")
+    if len(examples) < 2:
+        raise SourceValidationError(f"{label}.examples needs at least two examples")
+    hydrated = copy.deepcopy(lesson)
+    hydrated_examples = hydrated["examples"]
+    kinds: set[str] = set()
+    example_ids: set[str] = set()
+    example_paths: set[str] = set()
+    for index, raw in enumerate(examples):
+        item_label = f"{label}.examples[{index}]"
+        example = _mapping(raw, label=item_label)
+        hydrated_example = _mapping(hydrated_examples[index], label=item_label)
+        example_id = _stable_id(example, label=item_label)
+        if example_id in example_ids:
+            raise SourceValidationError(f"duplicate lesson example id: {example_id}")
+        example_ids.add(example_id)
+        _text(example, "title", label=item_label)
+        kind = _text(example, "kind", label=item_label)
+        if kind not in {"runnable", "diagnostic"}:
+            raise SourceValidationError(f"{item_label}.kind must be runnable or diagnostic")
+        kinds.add(kind)
+        _text(example, "explanation", label=item_label)
+        _validate_mappings(
+            example,
+            label=item_label,
+            concept_ids=concept_ids,
+            outcome_ids=outcome_ids,
+        )
+        if kind == "runnable":
+            if "code" in example:
+                raise SourceValidationError(
+                    f"{item_label}.code must live in its declared example file"
+                )
+            relative = _relative(
+                _text(example, "path", label=item_label),
+                label=f"{item_label}.path",
+            )
+            if relative.suffix != ".py" or relative.as_posix() in example_paths:
+                raise SourceValidationError(
+                    f"{item_label}.path must be a unique Python path"
+                )
+            example_paths.add(relative.as_posix())
+            code = _read_text(path.parent / relative, label=f"{item_label} code")
+            _parse_python(code, label=f"{item_label}.code")
+            hydrated_example["code"] = code
+            command = _text(example, "command", label=item_label)
+            expected_command = f"python {relative.as_posix()}"
+            if command != expected_command:
+                raise SourceValidationError(
+                    f"{item_label}.command must be exactly {expected_command!r}"
+                )
+            _text(example, "expected_output", label=item_label)
+        else:
+            for key in ("wrong_code", "symptom", "cause", "fix_code"):
+                _text(example, key, label=item_label)
+            _parse_python(str(example["wrong_code"]), label=f"{item_label}.wrong_code")
+            _parse_python(str(example["fix_code"]), label=f"{item_label}.fix_code")
+    for required in ("runnable", "diagnostic"):
+        if required not in kinds:
+            raise SourceValidationError(f"{label}.examples needs a {required} example")
+
+    bridge = _mapping(
+        lesson.get("capstone_bridge"), label=f"{label}.capstone_bridge"
+    )
+    for key in ("input", "output", "increment", "next"):
+        _text(bridge, key, label=f"{label}.capstone_bridge")
+    _strings(lesson.get("summary"), label=f"{label}.summary")
+    return hydrated, concept_ids, outcome_ids
+
+
+def _markdown_list(title: str, values: Iterable[str]) -> list[str]:
+    return [f"#### {title}", "", *(f"- {value}" for value in values), ""]
+
+
+def _render_lesson(
+    title: str,
+    lesson: dict[str, Any],
+    *,
+    sources: dict[str, SourceReference],
+) -> str:
+    """Render every structured field as deterministic, portable Markdown."""
+
+    lines = [f"# {title}", "", "## Prerequisites", ""]
+    for item in lesson["prerequisites"]:
+        lines.extend(
+            [
+                f"### {item['title']}",
+                "",
+                f"**Why it matters:** {item['why']}",
+                "",
+                f"**Refresh:** {item['refresh']}",
+                "",
+            ]
+        )
+    problem = lesson["problem"]
+    lines.extend(
+        [
+            "## Problem",
+            "",
+            f"**Context:** {problem['context']}",
+            "",
+            f"**Naive approach:** {problem['naive_approach']}",
+            "",
+            f"**Failure:** {problem['failure']}",
+            "",
+            "## Outcomes",
+            "",
+            *(f"- {item['text']} (`{item['id']}`)" for item in lesson["outcomes"]),
+            "",
+            "## Concepts",
+            "",
+        ]
+    )
+    for concept in lesson["concepts"]:
+        lines.extend(
+            [
+                f"### {concept['name']}",
+                "",
+                f"**Definition:** {concept['definition']}",
+                "",
+                f"**Purpose:** {concept['purpose']}",
+                "",
+                "#### Mechanism",
+                "",
+                *(f"{index}. {step}" for index, step in enumerate(concept["mechanism"], 1)),
+                "",
+                f"**Mental model:** {concept['mental_model']}",
+                "",
+            ]
+        )
+        for heading, key in (
+            ("Design reasons", "design_reasons"),
+            ("Benefits", "benefits"),
+            ("Tradeoffs", "tradeoffs"),
+            ("Invariants", "invariants"),
+            ("Boundaries", "boundaries"),
+            ("Pitfalls", "pitfalls"),
+        ):
+            lines.extend(_markdown_list(heading, concept[key]))
+        lines.extend(["#### Official source claims", ""])
+        for claim in concept["source_claims"]:
+            source = sources[claim["source_id"]]
+            lines.append(
+                f"- [{source.title}]({source.url}) ({claim['status']}): {claim['claim']}"
+            )
+        lines.append("")
+
+    lines.extend(["## Examples", ""])
+    for example in lesson["examples"]:
+        lines.extend([f"### {example['title']}", ""])
+        if example["kind"] == "runnable":
+            lines.extend(
+                [
+                    "```python",
+                    str(example["code"]).rstrip("\n"),
+                    "```",
+                    "",
+                    f"**Run:** `{example['command']}`",
+                    "",
+                    "**Expected output:**",
+                    "",
+                    "```text",
+                    str(example["expected_output"]).rstrip("\n"),
+                    "```",
+                    "",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "**Wrong code:**",
+                    "",
+                    "```python",
+                    str(example["wrong_code"]).rstrip("\n"),
+                    "```",
+                    "",
+                    f"**Symptom:** {example['symptom']}",
+                    "",
+                    f"**Cause:** {example['cause']}",
+                    "",
+                    "**Fix:**",
+                    "",
+                    "```python",
+                    str(example["fix_code"]).rstrip("\n"),
+                    "```",
+                    "",
+                ]
+            )
+        lines.extend(
+            [
+                str(example["explanation"]),
+                "",
+                "**Concepts:** " + ", ".join(f"`{value}`" for value in example["concept_ids"]),
+                "",
+                "**Outcomes:** " + ", ".join(f"`{value}`" for value in example["outcome_ids"]),
+                "",
+            ]
+        )
+
+    bridge = lesson["capstone_bridge"]
+    lines.extend(
+        [
+            "## Capstone bridge",
+            "",
+            f"**Input:** {bridge['input']}",
+            "",
+            f"**Output:** {bridge['output']}",
+            "",
+            f"**Increment:** {bridge['increment']}",
+            "",
+            f"**Next:** {bridge['next']}",
+            "",
+            "## Summary",
+            "",
+            *(f"- {item}" for item in lesson["summary"]),
+            "",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _lab_lesson_title(lab_id: str, title: str) -> str:
+    """Give compiled Lab Markdown a stable, zero-padded heading."""
+
+    canonical = f"Lab {lab_id.removeprefix('lab')}"
+    if title.casefold() == canonical.casefold():
+        return canonical
+    return f"{canonical}: {title}"
+
+
+def _validate_quiz(
+    items: Any,
+    *,
+    label: str,
+    concept_ids: set[str],
+    outcome_ids: set[str],
+) -> tuple[tuple[dict[str, Any], ...], tuple[tuple[int, int], ...]]:
+    questions = _list(items, label=label)
+    if not questions:
+        raise SourceValidationError(f"{label} must contain at least one question")
+    seen: set[str] = set()
+    kinds: set[str] = set()
+    validated: list[dict[str, Any]] = []
+    positions: list[tuple[int, int]] = []
+    for index, raw in enumerate(questions):
+        item_label = f"{label}[{index}]"
+        question = _mapping(raw, label=item_label)
+        question_id = _stable_id(question, label=item_label)
+        if question_id in seen:
+            raise SourceValidationError(f"duplicate quiz id: {question_id}")
+        seen.add(question_id)
+        kind = _text(question, "kind", label=item_label)
+        if kind not in QUIZ_KINDS:
+            raise SourceValidationError(
+                f"{item_label}.kind must be execution_trace or diagnostic"
+            )
+        kinds.add(kind)
+        _text(question, "prompt", label=item_label)
+        choices = _list(question.get("choices"), label=f"{item_label}.choices")
+        if not 3 <= len(choices) <= 4:
+            raise SourceValidationError(f"{item_label}.choices must contain 3-4 choices")
+        choice_ids: list[str] = []
+        for choice_index, raw_choice in enumerate(choices):
+            choice_label = f"{item_label}.choices[{choice_index}]"
+            choice = _mapping(raw_choice, label=choice_label)
+            choice_id = _stable_id(choice, label=choice_label)
+            if choice_id in choice_ids:
+                raise SourceValidationError(f"duplicate choice id: {choice_id}")
+            choice_ids.append(choice_id)
+            _text(choice, "text", label=choice_label)
+            _text(choice, "feedback", label=choice_label)
+        answer_id = _text(question, "answer_id", label=item_label)
+        if answer_id not in choice_ids:
+            raise SourceValidationError(f"{item_label}.answer_id must reference a choice")
+        positions.append((choice_ids.index(answer_id), len(choice_ids)))
+        _text(question, "explanation", label=question_id)
+        _validate_mappings(
+            question,
+            label=item_label,
+            concept_ids=concept_ids,
+            outcome_ids=outcome_ids,
+        )
+        validated.append(question)
+    missing = QUIZ_KINDS - kinds
+    if missing:
+        raise SourceValidationError(
+            f"{label} must include execution_trace and diagnostic questions"
+        )
+    return tuple(validated), tuple(positions)
+
+
+def _selector_file(selector: str, *, hidden: bool) -> Path:
+    raw_path = selector.split("::", 1)[0]
+    relative = _relative(raw_path, label="test selector")
+    if hidden:
+        prefix = Path("tests/hidden")
+        try:
+            return relative.relative_to(prefix)
+        except ValueError as error:
+            raise SourceValidationError(
+                f"hidden test selector must start with tests/hidden/: {selector}"
+            ) from error
+    return relative
+
+
+def _selector_node(selector: str) -> str:
+    _raw_path, separator, node = selector.partition("::")
+    if not separator or not node or "::" in node:
+        raise SourceValidationError(
+            f"test selector must include exactly one node: {selector}"
+        )
+    if not node.startswith("test_"):
+        raise SourceValidationError(f"test selector node must start with test_: {selector}")
+    return node
+
+
+def _public_selector_file(selector: str, *, lab_id: str) -> Path:
+    relative = _selector_file(selector, hidden=False)
+    try:
+        return relative.relative_to(Path(lab_id) / "tests")
+    except ValueError as error:
+        raise SourceValidationError(
+            f"public test selector must start with {lab_id}/tests/: {selector}"
+        ) from error
+
+
+def _declares_symbol(path: Path, symbol: str) -> bool:
+    try:
+        module = ast.parse(path.read_text(), filename=str(path))
+    except (FileNotFoundError, SyntaxError) as error:
+        raise SourceValidationError(f"cannot inspect Python file {path}: {error}") from error
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and node.name == symbol
+        for node in module.body
+    )
+
+
+def _validate_test_selector(path: Path, selector: str) -> None:
+    node_name = _selector_node(selector)
+    module = _parse_python(
+        _read_text(path, label=f"{selector} source"),
+        label=f"{selector} source",
+    )
+    if not any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == node_name
+        for node in module.body
+    ):
+        raise SourceValidationError(
+            f"{selector} source does not declare {node_name}"
+        )
+
+
+def _validate_question(
+    raw: Any,
+    *,
+    label: str,
+    lab_root: Path,
+    concept_ids: set[str],
+    outcome_ids: set[str],
+) -> CodingQuestion:
+    payload = _mapping(raw, label=label)
+    unknown_fields = sorted(set(payload) - SOURCE_QUESTION_FIELDS)
+    if unknown_fields:
+        raise SourceValidationError(
+            f"{label} has unknown field(s): {', '.join(unknown_fields)}"
+        )
+    question_id = _stable_id(payload, label=label)
+    lab_id = lab_root.name
+    if not question_id.startswith(f"{lab_id}.q"):
+        raise SourceValidationError(
+            f"{label}.id must use the {lab_id}.q prefix"
+        )
+    _text(payload, "title", label=question_id)
+    _text(payload, "prompt", label=question_id)
+    kind = _text(payload, "kind", label=question_id)
+    if kind not in QUESTION_KINDS:
+        raise SourceValidationError(
+            f"{question_id}.kind must be official_bridge, reimplementation, or integration"
+        )
+    mapped_concepts, mapped_outcomes = _validate_mappings(
+        payload,
+        label=question_id,
+        concept_ids=concept_ids,
+        outcome_ids=outcome_ids,
+    )
+    file_value = _text(payload, "file", label=question_id)
+    file_path = _relative(file_value, label=f"{question_id} file")
+    if not file_path.parts or file_path.parts[0] != lab_id:
+        raise SourceValidationError(
+            f"{question_id} file must stay under {lab_id}/: {file_value}"
+        )
+    symbol = _text(payload, "symbol", label=question_id)
+    points = payload.get("points")
+    if not isinstance(points, int) or isinstance(points, bool) or points <= 0:
+        raise SourceValidationError(f"{question_id} points must be a positive integer")
+    timeout_seconds = payload.get("timeout_seconds", 30)
+    if (
+        not isinstance(timeout_seconds, int)
+        or isinstance(timeout_seconds, bool)
+        or not 1 <= timeout_seconds <= 90
+    ):
+        raise SourceValidationError(
+            f"{question_id} timeout_seconds must be an integer from 1 to 90"
+        )
+    tests = _mapping(payload.get("tests"), label=f"{question_id}.tests")
+    public = tuple(
+        str(item)
+        for item in _list(tests.get("public"), label=f"{question_id}.tests.public")
+    )
+    hidden = tuple(
+        str(item)
+        for item in _list(tests.get("hidden"), label=f"{question_id}.tests.hidden")
+    )
+    if not public or not hidden:
+        raise SourceValidationError(f"{question_id} needs public and hidden tests")
+    if len(public) != 1 or len(hidden) != 1:
+        raise SourceValidationError(
+            f"{question_id} needs exactly one public and hidden test"
+        )
+    example = _mapping(payload.get("example"), label=f"{question_id}.example")
+    unknown_example_fields = sorted(set(example) - set(QUESTION_EXAMPLE_FIELDS))
+    if unknown_example_fields:
+        raise SourceValidationError(
+            f"{question_id}.example has unknown field(s): {', '.join(unknown_example_fields)}"
+        )
+    for key in QUESTION_EXAMPLE_FIELDS:
+        _text(example, key, label=f"{question_id}.example")
+
+    starter = lab_root / "starter" / file_path
+    reference = lab_root / "reference" / file_path
+    for implementation, implementation_kind in (
+        (starter, "starter"),
+        (reference, "reference"),
+    ):
+        if not implementation.is_file():
+            raise SourceValidationError(
+                f"missing {implementation_kind} file for {question_id}: {implementation}"
+            )
+        if not _declares_symbol(implementation, symbol):
+            raise SourceValidationError(
+                f"{implementation_kind} file {implementation} does not declare symbol {symbol}"
+            )
+    for selector in public:
+        path = lab_root / "tests/public" / _public_selector_file(
+            selector, lab_id=lab_id
+        )
+        if not path.is_file():
+            raise SourceValidationError(f"missing public test for {question_id}: {path}")
+        _validate_test_selector(path, selector)
+    for selector in hidden:
+        path = lab_root / "tests/hidden" / _selector_file(selector, hidden=True)
+        if not path.is_file():
+            raise SourceValidationError(f"missing hidden test for {question_id}: {path}")
+        _validate_test_selector(path, selector)
+
+    normalized = copy.deepcopy(payload)
+    normalized["timeout_seconds"] = timeout_seconds
+    return CodingQuestion(
+        question_id=question_id,
+        kind=kind,
+        file=file_value,
+        symbol=symbol,
+        concept_ids=mapped_concepts,
+        outcome_ids=mapped_outcomes,
+        points=points,
+        timeout_seconds=timeout_seconds,
+        public_tests=public,
+        hidden_tests=hidden,
+        raw=normalized,
+    )
+
+
+def load_course_source(source_root: Path | str) -> CourseSource:
+    unresolved_root = Path(source_root).absolute()
+    _validate_source_tree(unresolved_root)
+    root = unresolved_root.resolve()
+    course = _read_json(root / "course.json", label="course.json")
+    if course.get("schema_version") != 2:
+        raise SourceValidationError("course.json schema_version must be 2")
+    course_id = _text(course, "id", label="course")
+    title = _text(course, "title", label="course")
+    description = _text(course, "description", label="course")
+    audience = _validate_audience(course)
+    size = _text(course, "size", label="course")
+    if size not in LAB_BOUNDS:
+        raise SourceValidationError("course.size must be small, medium, or large")
+    raw_dependencies = _list(course.get("dependencies", []), label="course.dependencies")
+    if not all(
+        isinstance(value, str) and value.strip() and _requirement(value)
+        for value in raw_dependencies
+    ):
+        raise SourceValidationError(
+            "course.dependencies must contain pinned or bounded PEP 508 requirement strings"
+        )
+    dependencies = tuple(str(value) for value in raw_dependencies)
+    curriculum_id = _text(course, "curriculum_id", label="course")
+    expected_curriculum_id = f"{course_id}-v2"
+    if curriculum_id != expected_curriculum_id:
+        raise SourceValidationError(
+            f"course.curriculum_id must be {expected_curriculum_id}"
+        )
+
+    source_payload = _read_json(root / "sources.json", label="sources.json")
+    target = copy.deepcopy(
+        _mapping(source_payload.get("target"), label="sources.json.target")
+    )
+    for key in ("name", "kind", "version", "breadth"):
+        _text(target, key, label="target")
+    if target["kind"] not in {"stdlib", "pypi", "framework", "repository"}:
+        raise SourceValidationError(
+            "target.kind must be stdlib, pypi, framework, or repository"
+        )
+    if target["kind"] != "stdlib" and not dependencies:
+        raise SourceValidationError(
+            "third-party targets require pinned course.dependencies"
+        )
+    if target["breadth"] not in {"focused", "broad"}:
+        raise SourceValidationError("target.breadth must be focused or broad")
+    track = target.get("track")
+    if target["breadth"] == "broad" and (
+        not isinstance(track, str) or not track.strip()
+    ):
+        raise SourceValidationError("a broad target requires a non-empty target.track")
+    if target["breadth"] == "broad" and size != "large":
+        raise SourceValidationError("a broad target requires course.size large")
+    import_roots = _strings(
+        target.get("import_roots"), label="sources.json.target.import_roots"
+    )
+    if any("." in value or not value.replace("_", "a").isidentifier() for value in import_roots):
+        raise SourceValidationError("target.import_roots must be top-level Python imports")
+    sources: list[SourceReference] = []
+    source_ids: set[str] = set()
+    raw_sources = _list(source_payload.get("sources"), label="sources.json.sources")
+    if not raw_sources:
+        raise SourceValidationError("target official sources must not be empty")
+    if target.get("official_sources") != raw_sources:
+        raise SourceValidationError(
+            "sources.json target.official_sources must match sources.json.sources"
+        )
+    for index, raw in enumerate(raw_sources):
+        payload = _mapping(raw, label=f"sources[{index}]")
+        source_id = _text(payload, "id", label=f"sources[{index}]")
+        if source_id in source_ids:
+            raise SourceValidationError(f"duplicate source id: {source_id}")
+        source_ids.add(source_id)
+        url = _text(payload, "url", label=source_id)
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise SourceValidationError(f"source URL must be an HTTPS URL: {url}")
+        sources.append(
+            SourceReference(source_id, _text(payload, "title", label=source_id), url)
+        )
+    source_map = {source.source_id: source for source in sources}
+
+    research = copy.deepcopy(
+        _mapping(course.get("research"), label="course.research")
+    )
+    if research.get("status") != "complete":
+        raise SourceValidationError("research.status must be complete")
+    _text(research, "version_basis", label="research")
+    _strings(research.get("notes"), label="research.notes")
+
+    foundations = _mapping(course.get("foundations"), label="course.foundations")
+    foundation_id = _identifier(
+        _text(foundations, "id", label="foundations"), label="foundations.id"
+    )
+    if foundation_id != "lab00":
+        raise SourceValidationError("foundation id must be lab00")
+    foundation_lesson_path = root / _relative(
+        _text(foundations, "lesson", label="foundations"),
+        label="foundation lesson",
+    )
+    if foundation_lesson_path.name != "lesson.json":
+        raise SourceValidationError("foundation lesson must be lesson.json")
+    (
+        foundation_lesson_outline,
+        foundation_concepts,
+        foundation_outcomes,
+    ) = _load_lesson(
+        foundation_lesson_path,
+        label="foundation lesson",
+        source_ids=source_ids,
+    )
+    foundation_lesson = _render_lesson(
+        _text(foundations, "title", label="foundations"),
+        foundation_lesson_outline,
+        sources=source_map,
+    )
+    foundation_quiz_path = root / _relative(
+        _text(foundations, "quiz", label="foundations"), label="foundation quiz"
+    )
+    foundation_quiz_payload = _read_json(
+        foundation_quiz_path, label="foundation quiz"
+    )
+    foundation_quiz, foundation_positions = _validate_quiz(
+        foundation_quiz_payload.get("questions"),
+        label="foundation quiz",
+        concept_ids=foundation_concepts,
+        outcome_ids=foundation_outcomes,
+    )
+
+    order = [str(item) for item in _list(course.get("lab_order"), label="lab_order")]
+    if not order or len(order) != len(set(order)):
+        raise SourceValidationError("lab_order must contain unique Lab ids")
+    if foundation_id in order:
+        raise SourceValidationError(
+            f"duplicate foundation and Lab id: {foundation_id}"
+        )
+    lower, upper = LAB_BOUNDS[size]
+    if not lower <= len(order) <= upper:
+        raise SourceValidationError(
+            f"a {size} course must contain {lower}-{upper} graded labs"
+        )
+    labs: list[LabSource] = []
+    question_ids: set[str] = set()
+    quiz_ids = {str(question["id"]) for question in foundation_quiz}
+    quiz_positions = list(foundation_positions)
+    prior_mini_modules: list[str] = []
+    prior_course_roots: list[str] = []
+    previous_target_symbols: tuple[str, ...] | None = None
+    previous = foundation_id
+    for offset, lab_id in enumerate(order, start=1):
+        _identifier(lab_id, label="lab id")
+        expected_id = f"lab{offset:02d}"
+        if lab_id != expected_id:
+            raise SourceValidationError(f"labs must be ordered linearly as {expected_id}")
+        lab_root = root / "labs" / _relative(lab_id, label="lab id")
+        payload = _read_json(lab_root / "lab.json", label=f"{lab_id}/lab.json")
+        declared_id = _text(payload, "id", label=f"{lab_id}/lab.json")
+        if declared_id != lab_id:
+            raise SourceValidationError(
+                f"lab_order id {lab_id} does not match declared id {declared_id}"
+            )
+        depends_on = _text(payload, "depends_on", label=lab_id)
+        if depends_on != previous:
+            raise SourceValidationError(
+                f"{lab_id} must depend on {previous}, not {depends_on}"
+            )
+        declared_sources = tuple(
+            str(item)
+            for item in _list(payload.get("sources"), label=f"{lab_id}.sources")
+        )
+        if not declared_sources:
+            raise SourceValidationError(
+                f"{lab_id}.sources must reference official sources"
+            )
+        unknown_sources = sorted(set(declared_sources) - source_ids)
+        if unknown_sources:
+            raise SourceValidationError(
+                f"{lab_id} references unknown source(s): {', '.join(unknown_sources)}"
+            )
+        lesson_path = lab_root / _relative(
+            _text(payload, "lesson", label=lab_id), label=f"{lab_id} lesson"
+        )
+        if lesson_path.name != "lesson.json":
+            raise SourceValidationError(f"{lab_id} lesson must be lesson.json")
+        lesson_outline, concept_ids, outcome_ids = _load_lesson(
+            lesson_path,
+            label=f"{lab_id} lesson",
+            source_ids=source_ids,
+        )
+        lesson = _render_lesson(
+            _lab_lesson_title(
+                lab_id, _text(payload, "title", label=lab_id)
+            ),
+            lesson_outline,
+            sources=source_map,
+        )
+
+        declared_files: dict[str, tuple[ast.Module, ast.Module]] = {}
+        declared_file_order: list[str] = []
+        for file_index, raw_file in enumerate(
+            _list(payload.get("files"), label=f"{lab_id}.files")
+        ):
+            file_label = f"{lab_id}.files[{file_index}]"
+            file_payload = _mapping(raw_file, label=file_label)
+            file_value = _text(file_payload, "path", label=file_label)
+            file_path = _relative(file_value, label=f"{file_label}.path")
+            if not file_path.parts or file_path.parts[0] != lab_id or file_path.suffix != ".py":
+                raise SourceValidationError(
+                    f"{file_label}.path must be a Python file under {lab_id}/"
+                )
+            if file_value in declared_files:
+                raise SourceValidationError(f"duplicate Lab file: {file_value}")
+            starter_code = _read_text(
+                lab_root / "starter" / file_path, label=f"{file_label} starter"
+            )
+            reference_code = _read_text(
+                lab_root / "reference" / file_path, label=f"{file_label} reference"
+            )
+            declared_files[file_value] = (
+                _parse_python(starter_code, label=f"{file_label}.starter"),
+                _parse_python(reference_code, label=f"{file_label}.reference"),
+            )
+            declared_file_order.append(file_value)
+        if not declared_files:
+            raise SourceValidationError(f"{lab_id}.files must not be empty")
+
+        questions = tuple(
+            _validate_question(
+                raw,
+                label=f"{lab_id}.questions[{index}]",
+                lab_root=lab_root,
+                concept_ids=concept_ids,
+                outcome_ids=outcome_ids,
+            )
+            for index, raw in enumerate(
+                _list(payload.get("questions"), label=f"{lab_id}.questions")
+            )
+        )
+        if not 1 <= len(questions) <= 3:
+            raise SourceValidationError(f"{lab_id} must declare 1-3 coding questions")
+        for question in questions:
+            if question.file not in declared_files:
+                raise SourceValidationError(
+                    f"{question.question_id}.file is not declared in {lab_id}.files"
+                )
+            if question.question_id in question_ids:
+                raise SourceValidationError(
+                    f"duplicate coding question id: {question.question_id}"
+                )
+            question_ids.add(question.question_id)
+        quiz, positions = _validate_quiz(
+            payload.get("quiz"),
+            label=f"{lab_id}.quiz",
+            concept_ids=concept_ids,
+            outcome_ids=outcome_ids,
+        )
+        for question in quiz:
+            quiz_id = str(question["id"])
+            if quiz_id in quiz_ids:
+                raise SourceValidationError(f"duplicate quiz id: {quiz_id}")
+            quiz_ids.add(quiz_id)
+        quiz_positions.extend(positions)
+
+        questions_by_id = {question.question_id: question for question in questions}
+        cycle = _mapping(payload.get("module_cycle"), label=f"{lab_id}.module_cycle")
+        reimplementation = _mapping(
+            cycle.get("reimplementation"),
+            label=f"{lab_id}.module_cycle.reimplementation",
+        )
+        reimplementation_label = f"{lab_id}.module_cycle.reimplementation"
+        module_id = _text(reimplementation, "module_id", label=reimplementation_label)
+        if not IDENTIFIER_PATTERN.fullmatch(module_id.replace(".", "-")):
+            raise SourceValidationError(f"{reimplementation_label}.module_id is invalid")
+        _text(reimplementation, "title", label=reimplementation_label)
+        target_symbols = _strings(
+            reimplementation.get("target_symbols"),
+            label=f"{reimplementation_label}.target_symbols",
+        )
+        _strings(
+            reimplementation.get("lower_level_dependencies"),
+            label=f"{reimplementation_label}.lower_level_dependencies",
+        )
+        learner_file = _text(
+            reimplementation, "learner_file", label=reimplementation_label
+        )
+        if learner_file not in declared_files:
+            raise SourceValidationError(
+                f"{reimplementation_label}.learner_file must be a declared Lab file"
+            )
+        reimplementation_questions = _strings(
+            reimplementation.get("question_ids"),
+            label=f"{reimplementation_label}.question_ids",
+        )
+        declared_reimplementation_ids = {
+            question.question_id
+            for question in questions
+            if question.kind == "reimplementation"
+        }
+        if set(reimplementation_questions) != declared_reimplementation_ids:
+            raise SourceValidationError(
+                f"{reimplementation_label}.question_ids must list every current reimplementation question"
+            )
+        if any(
+            questions_by_id[question_id].file != learner_file
+            for question_id in reimplementation_questions
+        ):
+            raise SourceValidationError(
+                f"{reimplementation_label} requires every reimplementation question.file to equal learner_file"
+            )
+        forbidden_imports = _strings(
+            reimplementation.get("forbidden_imports"),
+            label=f"{reimplementation_label}.forbidden_imports",
+        )
+        if not set(import_roots) <= set(forbidden_imports):
+            raise SourceValidationError(
+                f"{reimplementation_label}.forbidden_imports must include target.import_roots"
+            )
+        _validate_reimplementation_closure(
+            learner_file=learner_file,
+            lab_id=lab_id,
+            declared_files=declared_files,
+            forbidden_imports=forbidden_imports,
+            prior_course_roots=tuple(prior_course_roots),
+            label=reimplementation_label,
+        )
+        for file_value, modules in declared_files.items():
+            for module in modules:
+                imported = _imports(module)
+                if any(
+                    _imports_root(imported, prior_module)
+                    for prior_module in (*prior_mini_modules, *prior_course_roots)
+                ):
+                    raise SourceValidationError(
+                        f"{file_value} imports a prior mini implementation or another prior Lab helper"
+                    )
+        for question in questions:
+            for selector, hidden in (
+                (question.public_tests[0], False),
+                (question.hidden_tests[0], True),
+            ):
+                if hidden:
+                    relative = _selector_file(selector, hidden=True)
+                    test_path = lab_root / "tests/hidden" / relative
+                else:
+                    relative = _public_selector_file(selector, lab_id=lab_id)
+                    test_path = lab_root / "tests/public" / relative
+                imported = _imports(
+                    _parse_python(
+                        _read_text(test_path, label=f"{selector} source"),
+                        label=f"{selector} source",
+                    )
+                )
+                if any(
+                    _imports_root(imported, prior_module)
+                    for prior_module in (*prior_mini_modules, *prior_course_roots)
+                ):
+                    raise SourceValidationError(
+                        f"{selector} imports a prior mini implementation or another prior Lab helper"
+                    )
+
+        if offset == 1:
+            if payload.get("official_bridge") is not None:
+                raise SourceValidationError("lab01 must not declare official_bridge")
+        else:
+            bridge = _mapping(
+                payload.get("official_bridge"), label=f"{lab_id}.official_bridge"
+            )
+            bridge_label = f"{lab_id}.official_bridge"
+            if _text(bridge, "from_lab", label=bridge_label) != previous:
+                raise SourceValidationError(
+                    f"{bridge_label}.from_lab must be the immediately previous Lab"
+                )
+            mini_module = _text(bridge, "mini_module", label=bridge_label)
+            if not prior_mini_modules or mini_module != prior_mini_modules[-1]:
+                raise SourceValidationError(
+                    f"{bridge_label}.mini_module must name the previous teaching module"
+                )
+            official_symbols = _strings(
+                bridge.get("official_symbols"),
+                label=f"{bridge_label}.official_symbols",
+            )
+            if previous_target_symbols is None or set(official_symbols) != set(
+                previous_target_symbols
+            ):
+                raise SourceValidationError(
+                    f"previous reimplementation target_symbols must equal {bridge_label}.official_symbols"
+                )
+            required_imports = _strings(
+                bridge.get("required_imports"),
+                label=f"{bridge_label}.required_imports",
+            )
+            if not set(required_imports) <= set(import_roots):
+                raise SourceValidationError(
+                    f"{bridge_label}.required_imports must reference target.import_roots"
+                )
+            bridge_question_id = _text(bridge, "question_id", label=bridge_label)
+            if (
+                not questions
+                or questions[0].question_id != bridge_question_id
+                or questions[0].kind != "official_bridge"
+            ):
+                raise SourceValidationError(
+                    f"{lab_id} first coding question must be the official_bridge"
+                )
+            bridge_question = questions_by_id.get(bridge_question_id)
+            if bridge_question is None:
+                raise SourceValidationError(
+                    f"{bridge_label}.question_id must reference a coding question"
+                )
+            for module in declared_files[bridge_question.file]:
+                imported = _imports(module)
+                missing_imports = [
+                    root_name
+                    for root_name in required_imports
+                    if not _imports_root(imported, root_name)
+                ]
+                if missing_imports:
+                    raise SourceValidationError(
+                        f"{bridge_label} question file is missing required import(s): {', '.join(missing_imports)}"
+                    )
+            observables = _list(
+                bridge.get("observables"), label=f"{bridge_label}.observables"
+            )
+            observable_ids: set[str] = set()
+            for observable_index, raw_observable in enumerate(observables):
+                observable_label = f"{bridge_label}.observables[{observable_index}]"
+                observable = _mapping(raw_observable, label=observable_label)
+                observable_id = _stable_id(observable, label=observable_label)
+                if observable_id in observable_ids:
+                    raise SourceValidationError(
+                        f"duplicate official bridge observable: {observable_id}"
+                    )
+                observable_ids.add(observable_id)
+                _text(observable, "description", label=observable_label)
+            if not observable_ids:
+                raise SourceValidationError(f"{bridge_label}.observables must not be empty")
+            covered: set[str] = set()
+            cases = _list(
+                bridge.get("comparison_cases"),
+                label=f"{bridge_label}.comparison_cases",
+            )
+            for case_index, raw_case in enumerate(cases):
+                case_label = f"{bridge_label}.comparison_cases[{case_index}]"
+                case = _mapping(raw_case, label=case_label)
+                _text(case, "input", label=case_label)
+                if "expected" not in case:
+                    raise SourceValidationError(
+                        f"{case_label}.expected must declare the comparison result"
+                    )
+                mapped = _strings(
+                    case.get("observable_ids"), label=f"{case_label}.observable_ids"
+                )
+                if not set(mapped) <= observable_ids:
+                    raise SourceValidationError(
+                        f"{case_label}.observable_ids reference unknown observable"
+                    )
+                covered.update(mapped)
+            if covered != observable_ids:
+                raise SourceValidationError(
+                    f"{bridge_label}.comparison_cases must cover every observable"
+                )
+
+        mini_path = _relative(learner_file, label=f"{reimplementation_label}.learner_file")
+        prior_mini_modules.append(".".join((*mini_path.parts[:-1], mini_path.stem)))
+        prior_course_roots.append(lab_id)
+        previous_target_symbols = target_symbols
+        concepts = tuple(str(item["name"]) for item in lesson_outline["concepts"])
+        capstone_increment = str(lesson_outline["capstone_bridge"]["increment"])
+        labs.append(
+            LabSource(
+                lab_id=lab_id,
+                title=_text(payload, "title", label=lab_id),
+                depends_on=depends_on,
+                source_ids=declared_sources,
+                concepts=concepts,
+                capstone_increment=capstone_increment,
+                questions=questions,
+                quiz=quiz,
+                root=lab_root,
+                lesson=lesson,
+                lesson_outline=lesson_outline,
+                raw=copy.deepcopy(payload),
+            )
+        )
+        previous = lab_id
+
+    if quiz_positions:
+        maximum_choices = max(choice_count for _, choice_count in quiz_positions)
+        observed_positions = {position for position, _ in quiz_positions}
+        if observed_positions != set(range(maximum_choices)):
+            raise SourceValidationError("quiz answer positions must use every position")
+        counts = Counter(position for position, _ in quiz_positions)
+        if max(counts.values()) / len(quiz_positions) > 0.40:
+            raise SourceValidationError(
+                "no quiz answer position may exceed 40% of the course"
+            )
+
+    compatible = tuple(
+        str(item)
+        for item in _list(
+            course.get("compatible_curriculum_ids", []),
+            label="compatible_curriculum_ids",
+        )
+    )
+    if any(value.endswith("-v1") for value in compatible):
+        raise SourceValidationError("schema v2 cannot declare a v1 compatible curriculum")
+    extensions = tuple(
+        _mapping(item, label="extension")
+        for item in _list(course.get("extensions", []), label="extensions")
+    )
+    return CourseSource(
+        schema_version=2,
+        course_id=course_id,
+        title=title,
+        description=description,
+        audience=audience,
+        curriculum_id=curriculum_id,
+        compatible_curriculum_ids=compatible,
+        language=_text(course, "language", label="course"),
+        python_requires=_python_requires(course),
+        size=size,
+        dependencies=dependencies,
+        capstone=_text(course, "capstone", label="course"),
+        extensions=extensions,
+        foundation_lesson=foundation_lesson,
+        foundation_lesson_outline=foundation_lesson_outline,
+        foundation_quiz=foundation_quiz,
+        sources=tuple(sources),
+        target=target,
+        research=research,
+        labs=tuple(labs),
+        root=root,
+        course=copy.deepcopy(course),
+        foundation=copy.deepcopy(foundations),
+    )
+
+
+def _question_source_policy(
+    lab: LabSource,
+    question: CodingQuestion,
+    *,
+    prior_mini_modules: tuple[str, ...],
+    prior_course_roots: tuple[str, ...],
+) -> dict[str, Any]:
+    cycle = _mapping(lab.raw.get("module_cycle"), label=f"{lab.lab_id}.module_cycle")
+    reimplementation = _mapping(
+        cycle.get("reimplementation"),
+        label=f"{lab.lab_id}.module_cycle.reimplementation",
+    )
+    forbidden_imports: tuple[str, ...] = ()
+    if question.kind == "reimplementation":
+        forbidden_imports = _strings(
+            reimplementation.get("forbidden_imports"),
+            label=f"{lab.lab_id}.module_cycle.reimplementation.forbidden_imports",
+        )
+    required_imports: tuple[str, ...] = ()
+    bridge = lab.raw.get("official_bridge")
+    if isinstance(bridge, dict) and bridge.get("question_id") == question.question_id:
+        required_imports = _strings(
+            bridge.get("required_imports"),
+            label=f"{lab.lab_id}.official_bridge.required_imports",
+        )
+    return {
+        "local_root": lab.lab_id,
+        "required_imports": list(required_imports),
+        "forbidden_imports": list(forbidden_imports),
+        "prior_mini_modules": list(prior_mini_modules),
+        "forbidden_course_roots": list(prior_course_roots),
+    }
+
+
+def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
+    labs: list[dict[str, Any]] = []
+    prior_mini_modules: list[str] = []
+    prior_course_roots: list[str] = []
+    for lab in course.labs:
+        questions = []
+        for question in lab.questions:
+            tests: dict[str, Any] = {
+                "sample": list(question.public_tests),
+                "public": list(question.public_tests),
+            }
+            if not learner:
+                tests["hidden"] = list(question.hidden_tests)
+                tests["submit"] = list(
+                    dict.fromkeys(question.public_tests + question.hidden_tests)
+                )
+            else:
+                tests["submit"] = list(question.public_tests)
+            rendered_question = {
+                key: copy.deepcopy(question.raw[key])
+                for key in PUBLIC_QUESTION_FIELDS
+                if key in question.raw
+            }
+            rendered_question["example"] = {
+                key: copy.deepcopy(question.raw["example"][key])
+                for key in QUESTION_EXAMPLE_FIELDS
+            }
+            rendered_question.update(
+                {
+                    "id": question.question_id,
+                    "file": question.file,
+                    "symbol": question.symbol,
+                    "points": question.points,
+                    "timeout_seconds": question.timeout_seconds,
+                    "tests": tests,
+                    "source_policy": _question_source_policy(
+                        lab,
+                        question,
+                        prior_mini_modules=tuple(prior_mini_modules),
+                        prior_course_roots=tuple(prior_course_roots),
+                    ),
+                }
+            )
+            questions.append(rendered_question)
+
+        rendered_lab = copy.deepcopy(lab.raw.get("manifest", {}))
+        rendered_lab.update(
+            {
+                "id": lab.lab_id,
+                "title": lab.title,
+                "directory": lab.lab_id,
+                "readme": f"{lab.lab_id}/README.md",
+                "depends_on": lab.depends_on,
+                "concepts": list(lab.concepts),
+                "questions": questions,
+            }
+        )
+        if learner and isinstance(rendered_lab.get("tests"), dict):
+            public = list(
+                dict.fromkeys(
+                    rendered_lab["tests"].get("public")
+                    or rendered_lab["tests"].get("sample")
+                    or []
+                )
+            )
+            rendered_lab["tests"] = {
+                "public": public,
+                "sample": public,
+                "submit": public,
+            }
+        labs.append(rendered_lab)
+        reimplementation = lab.raw["module_cycle"]["reimplementation"]
+        mini_path = Path(str(reimplementation["learner_file"]))
+        prior_mini_modules.append(
+            ".".join((*mini_path.parts[:-1], mini_path.stem))
+        )
+        prior_course_roots.append(lab.lab_id)
+
+    base = copy.deepcopy(course.course.get("manifest", {}))
+    # Curriculum schema is compiler-owned; canonical metadata cannot downgrade it.
+    base["schema_version"] = 2
+    base.setdefault("layout_version", 3)
+    base.update(
+        {
+            "engine_version": 1,
+            "course_id": course.course_id,
+            "title": course.title,
+            "curriculum_id": course.curriculum_id,
+            "compatible_curriculum_ids": list(course.compatible_curriculum_ids),
+            "language": course.language,
+            "audience": copy.deepcopy(course.audience),
+            "content": "content.json" if not learner else "_course/content.json",
+            "extensions": list(course.extensions),
+            "total_points": course.total_points,
+            "labs": labs,
+        }
+    )
+    if "python" not in base:
+        base["python_requires"] = course.python_requires
+    if "capstone" not in base:
+        base["capstone"] = course.capstone
+
+    foundation = copy.deepcopy(course.foundation.get("manifest", {}))
+    foundation.update(
+        {
+            "id": course.foundation["id"],
+            "title": course.foundation["title"],
+            "graded": False,
+            "directory": course.foundation["id"],
+            "readme": f"{course.foundation['id']}/README.md",
+        }
+    )
+    if "examples" not in foundation:
+        foundation["examples"] = [
+            f"{course.foundation['id']}/{example['path']}"
+            for example in course.foundation_lesson_outline["examples"]
+            if example["kind"] == "runnable"
+        ]
+    if "demos" in course.foundation:
+        foundation["demos"] = copy.deepcopy(course.foundation["demos"])
+    if learner and isinstance(foundation.get("tests"), dict):
+        public = list(
+            dict.fromkeys(
+                foundation["tests"].get("public")
+                or foundation["tests"].get("sample")
+                or []
+            )
+        )
+        foundation["tests"] = {
+            "public": public,
+            "sample": public,
+            "submit": public,
+        }
+    base["foundations"] = foundation
+    base["knowledge"] = "knowledge.json" if not learner else "_course/knowledge.json"
+
+    if learner:
+        base["starter_root"] = "."
+        base["source_root"] = "."
+        adapter = base.get("adapter")
+        if isinstance(adapter, str) and adapter.startswith("starter/"):
+            base["adapter"] = adapter.removeprefix("starter/")
+        base["student_workspace"] = True
+        base.pop("reference_root", None)
+        base.pop("reference_components", None)
+    return base
+
+
+def _knowledge(course: CourseSource) -> dict[str, Any]:
+    return {
+        "schema_version": 2,
+        "curriculum_id": course.curriculum_id,
+        "title": course.course.get(
+            "knowledge_title", f"{course.title} knowledge checks"
+        ),
+        "labs": {
+            course.foundation["id"]: {
+                "title": course.foundation["title"],
+                "questions": list(course.foundation_quiz),
+            },
+            **{
+                lab.lab_id: {"title": lab.title, "questions": list(lab.quiz)}
+                for lab in course.labs
+            },
+        },
+    }
+
+
+def _content(course: CourseSource) -> dict[str, Any]:
+    sources = {source.source_id: source for source in course.sources}
+
+    def source_payload(source_id: str) -> dict[str, str]:
+        source = sources[source_id]
+        return {"id": source.source_id, "title": source.title, "url": source.url}
+
+    return {
+        "schema_version": 2,
+        "course_id": course.course_id,
+        "foundations": {
+            "id": course.foundations["id"],
+            "title": course.foundations["title"],
+            "lesson": course.foundation_lesson,
+            "lesson_outline": copy.deepcopy(course.foundation_lesson_outline),
+            "sources": [
+                source_payload(source_id)
+                for source_id in dict.fromkeys(
+                    str(claim["source_id"])
+                    for concept in course.foundation_lesson_outline["concepts"]
+                    for claim in concept["source_claims"]
+                )
+            ],
+        },
+        "labs": [
+            {
+                "id": lab.lab_id,
+                "title": lab.title,
+                "lesson": lab.lesson,
+                "lesson_outline": copy.deepcopy(lab.lesson_outline),
+                "sources": [source_payload(source_id) for source_id in lab.source_ids],
+                "concepts": list(lab.concepts),
+                "capstone_increment": lab.capstone_increment,
+            }
+            for lab in course.labs
+        ],
+    }
+
+
+def _authoring_test(
+    lab: LabSource,
+    selector: str,
+    *,
+    hidden: bool,
+) -> dict[str, str]:
+    node = _selector_node(selector)
+    if hidden:
+        relative = _selector_file(selector, hidden=True)
+        source = lab.root / "tests/hidden" / relative
+    else:
+        relative = _public_selector_file(selector, lab_id=lab.lab_id)
+        source = lab.root / "tests/public" / relative
+    return {
+        "path": relative.as_posix(),
+        "selector": node,
+        "code": _read_text(source, label=f"{selector} source"),
+    }
+
+
+def _authoring_spec(course: CourseSource) -> dict[str, Any]:
+    """Reconstruct the normalized inline authoring contract from split source."""
+
+    course_payload = {
+        key: copy.deepcopy(course.course[key])
+        for key in (
+            "id",
+            "title",
+            "description",
+            "language",
+            "python_requires",
+            "size",
+            "dependencies",
+            "capstone",
+            "audience",
+        )
+    }
+    labs: list[dict[str, Any]] = []
+    for lab in course.labs:
+        files = []
+        for raw_file in _list(lab.raw.get("files"), label=f"{lab.lab_id}.files"):
+            file_payload = _mapping(raw_file, label=f"{lab.lab_id}.file")
+            file_value = _text(file_payload, "path", label=f"{lab.lab_id}.file")
+            relative = _relative(file_value, label=f"{lab.lab_id}.file.path")
+            files.append(
+                {
+                    "path": file_value,
+                    "starter": _read_text(
+                        lab.root / "starter" / relative,
+                        label=f"{file_value} starter",
+                    ),
+                    "reference": _read_text(
+                        lab.root / "reference" / relative,
+                        label=f"{file_value} reference",
+                    ),
+                }
+            )
+
+        questions = []
+        for question in lab.questions:
+            if len(question.public_tests) != 1 or len(question.hidden_tests) != 1:
+                raise SourceValidationError(
+                    f"{question.question_id} needs exactly one public and hidden test for authoring parity"
+                )
+            payload = copy.deepcopy(question.raw)
+            payload.pop("tests", None)
+            payload["public_test"] = _authoring_test(
+                lab, question.public_tests[0], hidden=False
+            )
+            payload["hidden_test"] = _authoring_test(
+                lab, question.hidden_tests[0], hidden=True
+            )
+            questions.append(payload)
+
+        payload: dict[str, Any] = {
+            "id": lab.lab_id,
+            "title": lab.title,
+            "depends_on": lab.depends_on,
+            "lesson": copy.deepcopy(lab.lesson_outline),
+            "sources": list(lab.source_ids),
+            "files": files,
+            "questions": questions,
+            "quiz": [copy.deepcopy(question) for question in lab.quiz],
+            "module_cycle": copy.deepcopy(lab.raw["module_cycle"]),
+        }
+        if "official_bridge" in lab.raw:
+            payload["official_bridge"] = copy.deepcopy(lab.raw["official_bridge"])
+        labs.append(payload)
+
+    return {
+        "schema_version": 2,
+        "course": course_payload,
+        "target": copy.deepcopy(course.target),
+        "research": copy.deepcopy(course.research),
+        "foundation": {
+            "id": str(course.foundation["id"]),
+            "title": str(course.foundation["title"]),
+            "lesson": copy.deepcopy(course.foundation_lesson_outline),
+            "quiz": [copy.deepcopy(question) for question in course.foundation_quiz],
+        },
+        "labs": labs,
+    }
+
+
+def _copy_tree_contents(source: Path, target: Path) -> None:
+    if not source.is_dir():
+        raise SourceValidationError(f"missing source directory: {source}")
+    for path in sorted(source.rglob("*")):
+        if path.is_dir():
+            continue
+        relative = path.relative_to(source)
+        destination = target / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            if destination.is_file() and destination.read_bytes() == path.read_bytes():
+                continue
+            raise SourceValidationError(
+                f"compiled artifact collision at {destination.relative_to(target)}"
+            )
+        shutil.copy2(path, destination)
+
+
+def _copy_lesson_examples(
+    source_root: Path,
+    lesson: dict[str, Any],
+    target_root: Path,
+) -> None:
+    for example in lesson["examples"]:
+        if example["kind"] != "runnable":
+            continue
+        relative = _relative(str(example["path"]), label="lesson example")
+        source = source_root / relative
+        destination = target_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists() and destination.read_bytes() != source.read_bytes():
+            raise SourceValidationError(
+                f"compiled artifact collision at lesson example {destination}"
+            )
+        shutil.copy2(source, destination)
+
+
+def _build_tree(course: CourseSource, root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "manifest.json").write_bytes(json_bytes(_manifest(course)))
+    (root / "knowledge.json").write_bytes(json_bytes(_knowledge(course)))
+    (root / "content.json").write_bytes(json_bytes(_content(course)))
+    (root / "authoring-spec.json").write_bytes(json_bytes(_authoring_spec(course)))
+
+    foundation_id = str(course.foundations["id"])
+    foundation = root / "starter" / foundation_id
+    foundation.mkdir(parents=True)
+    (foundation / "README.md").write_text(course.foundation_lesson)
+    _copy_lesson_examples(
+        course.root / "foundations",
+        course.foundation_lesson_outline,
+        foundation,
+    )
+
+    for lab in course.labs:
+        _copy_tree_contents(lab.root / "starter", root / "starter")
+        _copy_tree_contents(lab.root / "reference", root / "reference")
+        _copy_tree_contents(
+            lab.root / "tests/public", root / "starter" / lab.lab_id / "tests"
+        )
+        _copy_tree_contents(lab.root / "tests/hidden", root / "tests/hidden")
+        readme = root / "starter" / lab.lab_id / "README.md"
+        readme.parent.mkdir(parents=True, exist_ok=True)
+        readme.write_text(lab.lesson)
+        _copy_lesson_examples(lab.root, lab.lesson_outline, root / "starter" / lab.lab_id)
+
+    (root / "starter/manifest.json").write_bytes(
+        json_bytes(_manifest(course, learner=True))
+    )
+    course_data = root / "starter/_course"
+    course_data.mkdir(parents=True, exist_ok=True)
+    (course_data / "knowledge.json").write_bytes(json_bytes(_knowledge(course)))
+    (course_data / "content.json").write_bytes(json_bytes(_content(course)))
+
+    generated = sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and path.relative_to(root) != ARTIFACT_INDEX
+    )
+    generated.append(ARTIFACT_INDEX.as_posix())
+    (root / ARTIFACT_INDEX).write_bytes(
+        json_bytes({"schema_version": 1, "files": generated})
+    )
+
+
+def _generated_files(root: Path) -> set[Path]:
+    return {
+        path.relative_to(root)
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+def _previous_artifacts(output: Path) -> set[Path]:
+    index = output / ARTIFACT_INDEX
+    if not index.exists():
+        return set()
+    try:
+        payload = _mapping(read_json(index), label="artifact index")
+        if payload.get("schema_version") != 1:
+            raise SourceValidationError("artifact index schema_version must be 1")
+        return {
+            _relative(str(value), label="artifact index path")
+            for value in _list(payload.get("files"), label="artifact index files")
+        }
+    except (ValueError, FileNotFoundError) as error:
+        raise CourseKitError(f"invalid CourseKit artifact index: {index}: {error}") from error
+
+
+def _same_file(expected: Path, actual: Path) -> bool:
+    return actual.is_file() and expected.read_bytes() == actual.read_bytes()
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+
+
+def _apply_transaction(
+    *, expected: Path, output: Path, changed: tuple[Path, ...], backup: Path
+) -> None:
+    actions: list[tuple[Path, bool]] = []
+    try:
+        for artifact in changed:
+            source = expected / artifact
+            destination = output / artifact
+            saved = backup / artifact
+            had_destination = destination.exists() or destination.is_symlink()
+            if had_destination:
+                saved.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(destination, saved)
+            actions.append((artifact, had_destination))
+            if source.is_file():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(source, destination)
+    except BaseException:
+        for artifact, had_destination in reversed(actions):
+            destination = output / artifact
+            saved = backup / artifact
+            _remove_path(destination)
+            if had_destination and saved.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(saved, destination)
+        raise
+
+
+def compile_course(
+    source_root: Path | str,
+    output_root: Path | str,
+    *,
+    check: bool = False,
+) -> CompileReport:
+    course = load_course_source(source_root)
+    output = Path(output_root).absolute()
+    _validate_output_root(output)
+    if not check:
+        output.parent.mkdir(parents=True, exist_ok=True)
+    temporary_parent = output.parent if output.parent.is_dir() else None
+    with tempfile.TemporaryDirectory(
+        prefix=f".{output.name}-coursekit-", dir=temporary_parent
+    ) as temporary:
+        expected = Path(temporary) / "compiled"
+        _build_tree(course, expected)
+        desired = _generated_files(expected)
+        previous = _previous_artifacts(output)
+        stale = previous - desired
+        changed = tuple(
+            sorted(
+                stale
+                | {
+                    artifact
+                    for artifact in desired
+                    if not _same_file(expected / artifact, output / artifact)
+                },
+                key=lambda path: path.as_posix(),
+            )
+        )
+        _validate_output_paths(output, changed)
+        if check and changed:
+            raise DriftError(changed)
+        if check or not changed:
+            return CompileReport(output_root=output, written=())
+
+        output.mkdir(parents=True, exist_ok=True)
+        _apply_transaction(
+            expected=expected,
+            output=output,
+            changed=changed,
+            backup=Path(temporary) / "backup",
+        )
+        return CompileReport(output_root=output, written=changed)
+
+
+def initialize_workspace(
+    compiled_root: Path | str, target: Path | str
+) -> list[Path]:
+    compiled = Path(compiled_root).resolve()
+    destination = Path(target).absolute()
+    if destination.is_symlink() or (
+        destination.exists()
+        and (not destination.is_dir() or any(destination.iterdir()))
+    ):
+        raise TargetNotEmptyError(f"workspace target is not empty: {destination}")
+    starter = compiled / "starter"
+    if not starter.is_dir():
+        raise CourseKitError(f"compiled starter is missing: {starter}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    had_empty_destination = destination.exists()
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix=f".{destination.name}-workspace-", dir=destination.parent
+        ) as temporary:
+            transaction = Path(temporary)
+            staged = transaction / "workspace"
+            staged.mkdir()
+            _copy_tree_contents(starter, staged)
+            learner_manifest = staged / "manifest.json"
+            if not learner_manifest.is_file():
+                raise CourseKitError(
+                    f"compiled learner manifest is missing: {starter / 'manifest.json'}"
+                )
+            written = [
+                path.relative_to(staged)
+                for path in sorted(staged.rglob("*"))
+                if path.is_file()
+            ]
+            saved = transaction / "original-empty-target"
+            if had_empty_destination:
+                os.replace(destination, saved)
+            try:
+                os.replace(staged, destination)
+            except OSError:
+                if had_empty_destination and saved.exists() and not destination.exists():
+                    os.replace(saved, destination)
+                raise
+            return written
+    except CourseKitError:
+        raise
+    except OSError as error:
+        raise CourseKitError(
+            f"workspace initialization failed without changing the target: {error}"
+        ) from error

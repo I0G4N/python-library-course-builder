@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Library Course Builder"
+  short_description: "Build complete Python library learning projects"
+  default_prompt: "Use $building-python-library-courses to turn a Python library into a structured, testable learning project."

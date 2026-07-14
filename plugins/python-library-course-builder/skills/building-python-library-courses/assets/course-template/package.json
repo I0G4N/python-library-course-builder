@@ -1,0 +1,16 @@
+{
+  "name": "__COURSEKIT_SLUG__-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "setup": "npm --prefix platform run setup && uv sync --cache-dir ../platform/.uv-cache --directory labs --locked",
+    "learn": "npm --prefix platform run learn",
+    "build": "npm --prefix platform run build",
+    "test": "npm --prefix platform test && npm --prefix platform run test:runner",
+    "test:reference": "npm --prefix platform run test:reference",
+    "lint": "npm --prefix platform run lint"
+  }
+}

@@ -1,0 +1,1 @@
+"""CourseKit Skill contract tests."""
