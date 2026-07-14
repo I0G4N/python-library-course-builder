@@ -184,6 +184,171 @@ def test_scaffolded_readmes_use_simplified_chinese_for_fixed_guidance(
     assert "uv run course status" in labs_readme
 
 
+def test_scaffolded_lesson_documents_localize_only_compiler_owned_structure(
+    generated_course: Path,
+) -> None:
+    foundation_readme = (generated_course / "labs/lab00/README.md").read_text(
+        encoding="utf-8"
+    )
+    lab_readme = (generated_course / "labs/lab01/README.md").read_text(
+        encoding="utf-8"
+    )
+    content = json.loads(
+        (generated_course / "platform/course/content.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    compiled_foundation = content["foundations"]["lesson"]
+    compiled_lab = content["labs"][0]["lesson"]
+
+    assert content["schema_version"] == 2
+    assert foundation_readme == compiled_foundation
+    assert lab_readme == compiled_lab
+    documents = (
+        foundation_readme,
+        lab_readme,
+        compiled_foundation,
+        compiled_lab,
+    )
+    chinese_structure = (
+        "## 先修知识",
+        "**为什么重要：**",
+        "**复习提示：**",
+        "## 问题",
+        "**背景：**",
+        "**朴素方案：**",
+        "**失败表现：**",
+        "## 学习目标",
+        "## 核心概念",
+        "**定义：**",
+        "**用途：**",
+        "#### 机制",
+        "**心智模型：**",
+        "#### 设计理由",
+        "#### 收益",
+        "#### 权衡",
+        "#### 不变量",
+        "#### 边界",
+        "#### 常见陷阱",
+        "#### 官方来源声明",
+        "## 示例",
+        "**运行：**",
+        "**预期输出：**",
+        "**错误代码：**",
+        "**现象：**",
+        "**原因：**",
+        "**修复：**",
+        "**相关概念：**",
+        "**对应目标：**",
+        "## 结课项目衔接",
+        "**输入：**",
+        "**输出：**",
+        "**增量：**",
+        "**下一步：**",
+        "## 总结",
+    )
+    stale_english_structure = (
+        "## Prerequisites",
+        "**Why it matters:**",
+        "**Refresh:**",
+        "## Problem",
+        "**Context:**",
+        "**Naive approach:**",
+        "**Failure:**",
+        "## Outcomes",
+        "## Concepts",
+        "**Definition:**",
+        "**Purpose:**",
+        "#### Mechanism",
+        "**Mental model:**",
+        "#### Design reasons",
+        "#### Benefits",
+        "#### Tradeoffs",
+        "#### Invariants",
+        "#### Boundaries",
+        "#### Pitfalls",
+        "#### Official source claims",
+        "## Examples",
+        "**Run:**",
+        "**Expected output:**",
+        "**Wrong code:**",
+        "**Symptom:**",
+        "**Cause:**",
+        "**Fix:**",
+        "**Concepts:**",
+        "**Outcomes:**",
+        "## Capstone bridge",
+        "**Input:**",
+        "**Output:**",
+        "**Increment:**",
+        "**Next:**",
+        "## Summary",
+    )
+    for document in documents:
+        for label in chinese_structure:
+            assert label in document
+        for label in stale_english_structure:
+            assert label not in document
+
+    assert lab_readme.startswith("# Lab 01")
+    assert "`lab01.o-trace`" in lab_readme
+    assert "`python examples/01_happy_path.py`" in lab_readme
+    assert content["foundations"]["sources"] == [
+        {
+            "id": "python-docs",
+            "title": "Python JSON documentation",
+            "url": "https://docs.python.org/3.13/library/json.html",
+        }
+    ]
+
+
+def test_scaffolded_knowledge_title_is_simplified_chinese_in_every_projection(
+    generated_course: Path,
+) -> None:
+    source_course = json.loads(
+        (generated_course / "platform/course/source/course.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    authoring_knowledge = json.loads(
+        (generated_course / "platform/course/knowledge.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    learner_knowledge = json.loads(
+        (generated_course / "labs/_course/knowledge.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    expected = f"{source_course['title']} 知识检查"
+
+    assert source_course["schema_version"] == 2
+    assert source_course["knowledge_title"] == expected
+    for knowledge in (authoring_knowledge, learner_knowledge):
+        assert knowledge["schema_version"] == 2
+        assert set(knowledge) == {"schema_version", "curriculum_id", "title", "labs"}
+        assert knowledge["title"] == expected
+
+
+def test_scaffolded_manifest_localizes_owned_learner_labels(
+    generated_course: Path,
+) -> None:
+    manifest = json.loads(
+        (generated_course / "labs/manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert manifest["foundations"]["description"] == (
+        "心智模型、环境检查和官方来源导览。"
+    )
+    first_lab = manifest["labs"][0]
+    assert first_lab["git_checkpoint"]["title"] == "完成 lab01"
+    assert first_lab["git_checkpoint"]["commands"] == [
+        "git status --short -- lab01",
+        "git add -- lab01",
+        "git commit -m finish-lab01 -- lab01",
+    ]
+
+
 def test_cli_runs_only_canonical_public_test_in_disposable_workspace(
     generated_course: Path,
 ) -> None:

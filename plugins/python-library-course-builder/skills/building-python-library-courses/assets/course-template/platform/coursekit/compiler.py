@@ -652,34 +652,34 @@ def _render_lesson(
 ) -> str:
     """Render every structured field as deterministic, portable Markdown."""
 
-    lines = [f"# {title}", "", "## Prerequisites", ""]
+    lines = [f"# {title}", "", "## 先修知识", ""]
     for item in lesson["prerequisites"]:
         lines.extend(
             [
                 f"### {item['title']}",
                 "",
-                f"**Why it matters:** {item['why']}",
+                f"**为什么重要：** {item['why']}",
                 "",
-                f"**Refresh:** {item['refresh']}",
+                f"**复习提示：** {item['refresh']}",
                 "",
             ]
         )
     problem = lesson["problem"]
     lines.extend(
         [
-            "## Problem",
+            "## 问题",
             "",
-            f"**Context:** {problem['context']}",
+            f"**背景：** {problem['context']}",
             "",
-            f"**Naive approach:** {problem['naive_approach']}",
+            f"**朴素方案：** {problem['naive_approach']}",
             "",
-            f"**Failure:** {problem['failure']}",
+            f"**失败表现：** {problem['failure']}",
             "",
-            "## Outcomes",
+            "## 学习目标",
             "",
             *(f"- {item['text']} (`{item['id']}`)" for item in lesson["outcomes"]),
             "",
-            "## Concepts",
+            "## 核心概念",
             "",
         ]
     )
@@ -688,28 +688,28 @@ def _render_lesson(
             [
                 f"### {concept['name']}",
                 "",
-                f"**Definition:** {concept['definition']}",
+                f"**定义：** {concept['definition']}",
                 "",
-                f"**Purpose:** {concept['purpose']}",
+                f"**用途：** {concept['purpose']}",
                 "",
-                "#### Mechanism",
+                "#### 机制",
                 "",
                 *(f"{index}. {step}" for index, step in enumerate(concept["mechanism"], 1)),
                 "",
-                f"**Mental model:** {concept['mental_model']}",
+                f"**心智模型：** {concept['mental_model']}",
                 "",
             ]
         )
         for heading, key in (
-            ("Design reasons", "design_reasons"),
-            ("Benefits", "benefits"),
-            ("Tradeoffs", "tradeoffs"),
-            ("Invariants", "invariants"),
-            ("Boundaries", "boundaries"),
-            ("Pitfalls", "pitfalls"),
+            ("设计理由", "design_reasons"),
+            ("收益", "benefits"),
+            ("权衡", "tradeoffs"),
+            ("不变量", "invariants"),
+            ("边界", "boundaries"),
+            ("常见陷阱", "pitfalls"),
         ):
             lines.extend(_markdown_list(heading, concept[key]))
-        lines.extend(["#### Official source claims", ""])
+        lines.extend(["#### 官方来源声明", ""])
         for claim in concept["source_claims"]:
             source = sources[claim["source_id"]]
             lines.append(
@@ -717,7 +717,7 @@ def _render_lesson(
             )
         lines.append("")
 
-    lines.extend(["## Examples", ""])
+    lines.extend(["## 示例", ""])
     for example in lesson["examples"]:
         lines.extend([f"### {example['title']}", ""])
         if example["kind"] == "runnable":
@@ -727,9 +727,9 @@ def _render_lesson(
                     str(example["code"]).rstrip("\n"),
                     "```",
                     "",
-                    f"**Run:** `{example['command']}`",
+                    f"**运行：** `{example['command']}`",
                     "",
-                    "**Expected output:**",
+                    "**预期输出：**",
                     "",
                     "```text",
                     str(example["expected_output"]).rstrip("\n"),
@@ -740,17 +740,17 @@ def _render_lesson(
         else:
             lines.extend(
                 [
-                    "**Wrong code:**",
+                    "**错误代码：**",
                     "",
                     "```python",
                     str(example["wrong_code"]).rstrip("\n"),
                     "```",
                     "",
-                    f"**Symptom:** {example['symptom']}",
+                    f"**现象：** {example['symptom']}",
                     "",
-                    f"**Cause:** {example['cause']}",
+                    f"**原因：** {example['cause']}",
                     "",
-                    "**Fix:**",
+                    "**修复：**",
                     "",
                     "```python",
                     str(example["fix_code"]).rstrip("\n"),
@@ -762,9 +762,11 @@ def _render_lesson(
             [
                 str(example["explanation"]),
                 "",
-                "**Concepts:** " + ", ".join(f"`{value}`" for value in example["concept_ids"]),
+                "**相关概念：** "
+                + ", ".join(f"`{value}`" for value in example["concept_ids"]),
                 "",
-                "**Outcomes:** " + ", ".join(f"`{value}`" for value in example["outcome_ids"]),
+                "**对应目标：** "
+                + ", ".join(f"`{value}`" for value in example["outcome_ids"]),
                 "",
             ]
         )
@@ -772,17 +774,17 @@ def _render_lesson(
     bridge = lesson["capstone_bridge"]
     lines.extend(
         [
-            "## Capstone bridge",
+            "## 结课项目衔接",
             "",
-            f"**Input:** {bridge['input']}",
+            f"**输入：** {bridge['input']}",
             "",
-            f"**Output:** {bridge['output']}",
+            f"**输出：** {bridge['output']}",
             "",
-            f"**Increment:** {bridge['increment']}",
+            f"**增量：** {bridge['increment']}",
             "",
-            f"**Next:** {bridge['next']}",
+            f"**下一步：** {bridge['next']}",
             "",
-            "## Summary",
+            "## 总结",
             "",
             *(f"- {item}" for item in lesson["summary"]),
             "",
@@ -1767,7 +1769,7 @@ def _knowledge(course: CourseSource) -> dict[str, Any]:
         "schema_version": 2,
         "curriculum_id": course.curriculum_id,
         "title": course.course.get(
-            "knowledge_title", f"{course.title} knowledge checks"
+            "knowledge_title", f"{course.title} 知识检查"
         ),
         "labs": {
             course.foundation["id"]: {

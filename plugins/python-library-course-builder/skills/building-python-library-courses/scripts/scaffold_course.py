@@ -205,7 +205,7 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
         "capstone": course["capstone"],
         "lab_order": lab_order,
         "extensions": [],
-        "knowledge_title": f"{course['title']} knowledge checks",
+        "knowledge_title": f"{course['title']} 知识检查",
         "manifest": {
             "schema_version": 2,
             "layout_version": 3,
@@ -240,7 +240,7 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
                 "id": "lab00",
                 "order": 0,
                 "title": foundation["title"],
-                "description": "Mental model, environment check, and official-source orientation.",
+                "description": "心智模型、环境检查和官方来源导览。",
                 "graded": False,
                 "directory": "lab00",
                 "readme": "lab00/README.md",
@@ -316,7 +316,7 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
                     "min_commits": 1,
                 },
                 "git_checkpoint": {
-                    "title": f"Finish {lab_id}",
+                    "title": f"完成 {lab_id}",
                     "commands": [
                         f"git status --short -- {lab_id}",
                         f"git add -- {lab_id}",

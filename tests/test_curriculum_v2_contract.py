@@ -902,6 +902,22 @@ def test_foundation_structured_content_includes_resolved_source_links(
     ]
 
 
+def test_compiler_defaults_knowledge_title_to_simplified_chinese(
+    tmp_path: Path,
+) -> None:
+    source = _write_valid_split_source(tmp_path)
+    course_path = source / "course.json"
+    course_payload = json.loads(course_path.read_text(encoding="utf-8"))
+    course_payload.pop("knowledge_title")
+    course_path.write_text(json.dumps(course_payload) + "\n", encoding="utf-8")
+    output = tmp_path / "compiled"
+
+    compile_course(source, output)
+
+    knowledge = json.loads((output / "knowledge.json").read_text(encoding="utf-8"))
+    assert knowledge["title"] == f"{course_payload['title']} 知识检查"
+
+
 def test_scaffolder_rejects_snapshot_that_differs_from_validated_input() -> None:
     authored = make_v2_spec()
     authored["author_extension"] = {"preserve": True}
