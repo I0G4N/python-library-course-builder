@@ -53,6 +53,37 @@ test("core concept definitions stay visible before the closed deep dive", async 
   assert.match(lesson.slice(overview, deepDive), /concept\.purpose/);
 });
 
+test("plain contract and concrete trace precede the closed deep dive with learner labels", async () => {
+  const lesson = await readFile(lessonUrl, "utf8");
+
+  const deepDive = lesson.indexOf('<details className="lesson-deep-dive">');
+  assert.ok(deepDive >= 0, "the lesson must retain a native deep-dive disclosure");
+
+  const openCore = lesson.slice(0, deepDive);
+  for (const label of [
+    "先这样理解",
+    "输入和输出是什么",
+    "拿一个具体输入走一遍",
+  ]) {
+    const position = lesson.indexOf(label);
+    assert.ok(position >= 0, `missing learner-visible label: ${label}`);
+    assert.ok(position < deepDive, `${label} must appear before the closed disclosure`);
+  }
+
+  assert.match(openCore, /concept\.mental_model/);
+  assert.match(openCore, /concept\.operational_contract/);
+  assert.match(openCore, /operational_contract\.inputs/);
+  assert.match(openCore, /operational_contract\.outputs/);
+  assert.match(openCore, /example\.trace/);
+  assert.match(openCore, /step\.input_state/);
+  assert.match(openCore, /step\.operation/);
+  assert.match(openCore, /step\.output_state/);
+
+  assert.doesNotMatch(lesson, /心智模型：/);
+  assert.doesNotMatch(lesson, /机制：一步一步发生什么/);
+  assert.doesNotMatch(lesson, /始终成立的约束/);
+});
+
 test("structured foundation source payloads render as safe official links", async () => {
   const lesson = await readFile(lessonUrl, "utf8");
 

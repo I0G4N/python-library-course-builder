@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 
@@ -333,3 +334,162 @@ def make_spec(timeout_seconds: object = MISSING) -> dict[str, object]:
         },
         "labs": labs,
     }
+
+
+def _operational_contract(kind: str) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "forms": ["json.loads(text)", "json.dumps(value)"],
+        "inputs": [
+            {
+                "name": "value",
+                "meaning": "The JSON text or Python value crossing the API boundary.",
+                "form": "str | JSON-compatible Python value",
+                "example": '{"ready": true}',
+                "constraints": ["The value must satisfy the documented JSON mapping."],
+            }
+        ],
+        "outputs": [
+            {
+                "name": "result",
+                "meaning": "The converted Python value or JSON text.",
+                "form": "JSON-compatible Python value | str",
+                "example": '{"ready": true}',
+            }
+        ],
+        "effects": ["The operation does not mutate the caller-owned input."],
+        "failure_modes": [
+            {
+                "condition": "The input violates the selected JSON operation's contract.",
+                "observable": "The documented exception is raised at the API boundary.",
+                "recovery": "Correct or normalize the input before retrying.",
+            }
+        ],
+    }
+
+
+def make_assessed_spec() -> dict[str, object]:
+    """Return the complete assessed-mode contract fixture used by RED tests."""
+    spec = deepcopy(make_spec())
+    lab00_concept_id = "lab00.c-mechanism"
+    spec["course"]["audience"] = {  # type: ignore[index]
+        "level": "assessed",
+        "prerequisite_profile": {
+            "assessment": "learner-self-report",
+            "capabilities": [
+                {
+                    "id": "python-functions",
+                    "kind": "python",
+                    "subject": "functions",
+                    "title": "Define and call Python functions",
+                    "status": "known",
+                    "decision": "assume",
+                    "basis": "explicit-prerequisite",
+                    "source_ids": ["python-docs"],
+                    "first_used_in": "lab01",
+                    "foundation_concept_ids": [],
+                },
+                {
+                    "id": "json-data-model",
+                    "kind": "library",
+                    "subject": "json data model",
+                    "title": "Map JSON values to Python values",
+                    "status": "partial",
+                    "decision": "foundation",
+                    "basis": "selected-route-usage",
+                    "source_ids": ["python-docs"],
+                    "first_used_in": "lab01",
+                    "foundation_concept_ids": [lab00_concept_id],
+                },
+                {
+                    "id": "domain-boundary",
+                    "kind": "domain",
+                    "subject": "serialization boundary",
+                    "title": "Recognize a serialization boundary",
+                    "status": "missing",
+                    "decision": "foundation",
+                    "basis": "selected-route-usage",
+                    "source_ids": ["python-docs"],
+                    "first_used_in": "lab02",
+                    "foundation_concept_ids": [lab00_concept_id],
+                },
+                {
+                    "id": "json-errors",
+                    "kind": "library",
+                    "subject": "json failures",
+                    "title": "Diagnose malformed JSON input",
+                    "status": "unsure",
+                    "decision": "foundation",
+                    "basis": "explicit-prerequisite",
+                    "source_ids": ["python-docs"],
+                    "first_used_in": "lab03",
+                    "foundation_concept_ids": [lab00_concept_id],
+                },
+            ],
+        },
+    }
+
+    foundation = spec["foundation"]  # type: ignore[index]
+    foundation["study_minutes"] = {  # type: ignore[index]
+        "tier": "foundation",
+        "min": 45,
+        "max": 60,
+        "reason": "The self-assessment identified prerequisite gaps used by the route.",
+    }
+
+    operational_kinds = iter(
+        ("api", "mechanism", "formula", "lifecycle", "data-model", "api")
+    )
+    sections = [foundation, *spec["labs"]]  # type: ignore[index]
+    for section in sections:
+        lesson = section["lesson"]
+        concept_ids = [concept["id"] for concept in lesson["concepts"]]
+        for concept in lesson["concepts"]:
+            concept["operational_contract"] = _operational_contract(
+                next(operational_kinds)
+            )
+
+        runnable = next(
+            example for example in lesson["examples"] if example["kind"] == "runnable"
+        )
+        runnable["concept_ids"] = list(concept_ids)
+        runnable["trace"] = [
+            {
+                "id": f"{section['id']}.t-input",
+                "concept_ids": [concept_ids[0]],
+                "input_state": 'text = \'{"ready": true}\'',
+                "operation": "Pass the concrete input across the declared boundary.",
+                "output_state": "The operation owns one validated input value.",
+                "explanation": "This makes the input form and ownership visible.",
+            },
+            {
+                "id": f"{section['id']}.t-result",
+                "concept_ids": [concept_ids[-1]],
+                "input_state": "The validated input is ready for conversion.",
+                "operation": "Execute the selected JSON operation.",
+                "output_state": "result = {'ready': True}",
+                "explanation": "This makes the observable output state explicit.",
+            },
+        ]
+
+        diagnostic = next(
+            example
+            for example in lesson["examples"]
+            if example["kind"] == "diagnostic"
+        )
+        diagnostic["concept_ids"] = list(concept_ids)
+        for quiz in section["quiz"]:
+            quiz["concept_ids"] = list(concept_ids)
+
+    for index, lab in enumerate(spec["labs"]):  # type: ignore[index]
+        if index < 2:
+            lab["study_minutes"] = {"tier": "standard", "min": 30, "max": 45}
+        else:
+            lab["study_minutes"] = {
+                "tier": "extended",
+                "min": 45,
+                "max": 60,
+                "reason": "The final Lab combines conversion, diagnosis, and replacement.",
+            }
+
+    return spec
