@@ -31,13 +31,15 @@ Write learner-facing lessons, quiz prompts, feedback, generated documentation, a
 
 ### 1. Inspect locally, then research officially
 
+If the target is absent, ask for it and stop until known. Assess general Python readiness with short behavior/evidence questions rather than beginner/intermediate labels, and reuse evidence already supplied by the user instead of re-asking.
+
 Run the inspector before planning:
 
 ```bash
 uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/inspect_python_target.py" TARGET --output /tmp/course-research.json
 ```
 
-Treat the report as a local inventory, not as factual research. Verify every curriculum claim against primary official sources: use Python documentation and CPython source for standard-library modules; use official documentation, package metadata, release notes, and upstream source for third-party targets. Pin the taught version or range, record source URLs, and distinguish documented guarantees from implementation details. Stop and report an evidence gap when official sources are missing or contradictory.
+Treat the report as a local inventory, not as factual research. Research the target's public and product surface from primary official sources so Stage 2 can classify it: use Python documentation and CPython source for standard-library modules; use official documentation, package metadata, release notes, and upstream source for third-party targets. Pin the taught version or range, record source URLs, and distinguish documented guarantees from implementation details. Stop and report an evidence gap when official sources are missing or contradictory.
 
 ### 2. Apply the scope gate
 
@@ -51,7 +53,17 @@ Require one executable environment, one dependency chain, and one cumulative cap
 
 ### 3. Design one cumulative route
 
-Assume only basic Python. Start with ungraded foundations in Lab 00, budget 30-45 minutes for every graded Lab, and make each Lab add a usable increment to the same capstone.
+Read [teaching-depth-contract.md](references/teaching-depth-contract.md) before route or specification design. After scope is fixed (and, for a large target, after the user selects one track), complete this selected-route readiness sequence before authoring:
+
+1. Research the selected route from primary official sources as needed beyond the target-surface evidence from Stage 1.
+2. Build a learning-prerequisite DAG of learner capabilities, not package dependency metadata.
+3. Ask only about route-relevant Python, library, and domain capabilities not already evidenced.
+4. Summarize capability titles as **safe to assume**, **teach in Lab 00**, or **too large for this route**.
+5. If multiple prerequisite layers cannot fit a focused 45-60 minute Lab 00, stop before writing the schema or destination file and offer a prerequisite course or a narrower track. Never serialize a large-gap state as a completed target specification.
+
+Author new specifications with `course.audience.level: assessed`, a `learner-self-report` prerequisite profile, exact per-unit `study_minutes`, a concept `operational_contract`, a runnable `trace`, and complete concept/outcome activity mappings. Treat legacy `basic-python` as validator compatibility input, not the authoring default.
+
+Use Lab 00 only for evidenced foundations. Give each graded Lab one new knowledge mainline and one usable increment to the same capstone. Lab 02+ may also begin with the prior mechanism's graded official bridge; that bridge does not justify a second unrelated mainline. Apply the exact adaptive time tiers and positive chapter recipe from the teaching-depth contract.
 
 Enforce the teaching-equivalent -> official bridge cycle:
 
@@ -106,6 +118,7 @@ Copy the exact setup, launch, first-Lab, test, score, and shutdown commands from
 ## Load detailed references only when needed
 
 - Read [curriculum-contract.md](references/curriculum-contract.md) for the schema, sizing, lesson, question, source-policy, and mechanism-cycle contracts.
+- Read [teaching-depth-contract.md](references/teaching-depth-contract.md) before readiness, route, or lesson design for adaptive foundations, operational depth, concrete traces, activity alignment, and time tiers.
 - Read [authoring-rubric.md](references/authoring-rubric.md) for teaching depth, exercise quality, and grader quality.
 - Read [architecture.md](references/architecture.md) for generated-project ownership, runtime, security, progression, and UI contracts.
 - Read [forward-test-rubric.md](references/forward-test-rubric.md) for required generated-project checks and optional fresh-agent transfer evaluation.

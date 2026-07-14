@@ -5,6 +5,7 @@ This rubric separates the required generated-project acceptance matrix from opti
 ## Contents
 
 - [Optional fresh-agent transfer evaluation](#optional-fresh-agent-transfer-evaluation)
+- [Paired Skill-output evaluation](#paired-skill-output-evaluation)
 - [Optional small-target transfer test](#optional-small-target-transfer-test)
 - [Optional large-target gate test](#optional-large-target-gate-test)
 - [Required fail-closed negative tests](#required-fail-closed-negative-tests)
@@ -18,7 +19,40 @@ Use this advisory evaluation when measuring whether the Skill transfers to a new
 
 Always generate outside the source repository. The destination must not exist or must be empty. Afterward, inspect for symlinks and absolute references back to the Skill or originating project.
 
-The generated route must assume only basic Python, budget 30-45 minutes per graded Lab, and repeatedly enforce the teaching-equivalent -> official bridge cycle. A reviewer must be able to trace that no downstream source or capstone imports a prior mini implementation.
+The generated route must use a route-relevant prerequisite profile and gap decision, an evidence-based Lab 00, exact per-unit `study_minutes`, and the teaching-equivalent -> official bridge cycle. A reviewer must be able to trace that no downstream source or capstone imports a prior mini implementation.
+
+## Paired Skill-output evaluation
+
+This paired gate is **required for any change to readiness or teaching-depth Skill guidance**. Preserve one user-style prompt and target, score the **old output**, then give the same prompt and revised Skill to a fresh isolated agent that cannot see the old result, expected answer, or score. Save the exact prompt, Skill revision, output, source/version state, and scoring evidence for the **new output**. Fresh-agent transfer remains optional for ordinary course generation when the Skill guidance itself is unchanged.
+
+Score six dimensions from 0-2. Every score needs an **evidence citation** to a concrete output section, value flow, mapping, or source decision:
+
+1. **route-relevant readiness assessment and gap decision** — 0 absent; 1 useful prose but incomplete evidence/routing; 2 reuses evidence, asks only unresolved route capabilities, groups decisions, and stops a large gap before a spec.
+2. **evidence-based two-layer foundation plan** — 0 generic prerequisites; 1 some gaps addressed; 2 separates evidenced general-Python gaps from route-specific library/domain foundations and gives mapped, justified Lab 00 work.
+3. **precise operational contract** — 0 absent; 1 partially specifies behavior; 2 closes visible forms, constrained example inputs, example outputs, effects, and condition/observable/recovery failures around the tested convention.
+4. **complete concrete-value worked trace** — 0 absent/generic; 1 concrete but incomplete or unmapped; 2 carries one real value/state through at least two named transitions with relevant intermediate shape/type/state/ownership and matches tests.
+5. **concept-to-quiz/coding/capstone alignment** — 0 absent; 1 plausible narrative mapping; 2 gives inspectable concept/outcome mappings across the required activity surfaces and a real cumulative increment.
+6. **natural Simplified-Chinese explanation with source/version discipline** — 0 unusable or unsupported; 1 understandable with gaps; 2 defines terms at first use, alternates explanation with values, uses primary official evidence, and resolves or explicitly blocks version uncertainty.
+
+Pass only with **no zero**, at least **10/12**, and **exactly 2** on dimensions 3 and 4. If the new output misses any gate, strengthen the reusable Skill/reference wording and rerun with another fresh isolated agent; do not reinterpret the same evidence upward.
+
+Record the result with this template:
+
+```markdown
+| Dimension | Old | New | Old evidence citation | New evidence citation |
+|---|---:|---:|---|---|
+| Readiness and gap decision | /2 | /2 | | |
+| Two-layer foundation | /2 | /2 | | |
+| Operational contract | /2 | /2 | | |
+| Concrete worked trace | /2 | /2 | | |
+| Activity/capstone alignment | /2 | /2 | | |
+| Natural Chinese and sources | /2 | /2 | | |
+
+Old total: /12
+New total: /12
+Gate: PASS/FAIL
+Unresolved questions:
+```
 
 ## Optional small-target transfer test
 
@@ -62,6 +96,9 @@ Run every check from fresh output.
 ### Source and structure
 
 - canonical source validates and compiled artifacts have no drift;
+- new Skill-authored output uses an `assessed` prerequisite profile whose capability titles, evidence basis, source IDs, first graded use, and `assume`/`foundation` gap decision resolve; legacy `basic-python` remains compatibility input;
+- a completed specification contains no serialized large-gap state; a route needing multiple prerequisite layers stops before files are created;
+- Lab 00 and every graded Lab preserve exact per-unit `study_minutes` through split source, parity snapshot, `content.json`, teacher and learner manifest, README, and learner projections;
 - schema v2 split source contains structured `lesson.json` files, no editable source authoring snapshot, and emits a compiler-generated parity snapshot equal to the validated input;
 - Lab IDs are contiguous and the count matches the adaptive range;
 - all declared files, symbols, selectors, source IDs, and points resolve;
@@ -70,12 +107,14 @@ Run every check from fresh output.
 - no unresolved token, generator absolute path, or foreign branding remains;
 - scans reject legacy target-specific course branding, fixed `lab12`, and fixed score denominators in a course with a different subject or size.
 - every lesson defines purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source-backed claims for every concept;
+- every assessed concept has a closed operational contract; every runnable example has a complete concrete-value trace of at least two steps; concept/outcome activity coverage satisfies the assessed Lab 00 versus graded-Lab surfaces;
 - every lesson has at least two examples: a CPU/offline runnable example with exact command/output and a diagnostic wrong -> symptom -> cause -> fix example;
 - every runnable command is exactly `python {path}` for its declared lesson-relative file;
 - every quiz bank includes execution-trace and diagnostic questions, maps them to concepts/outcomes, gives feedback per stable choice ID, uses all answer positions, and keeps every position at or below 40%;
 - every Lab after Lab 01 starts with a graded official bridge for the previous mechanism in the immediately next Lab, covers every prior target responsibility, then handwrites its next teaching-equivalent;
 - AST/source-contract tests reject target imports in mini modules and any prior mini implementation import in downstream code or tests.
 - review rejects prerequisite leakage and proves each exact graded formula has a visible worked numeric derivation or execution trace;
+- `content.json` derives each concept's first practice link in authored concept/activity order, uses a knowledge check for Lab 00 and coding question for graded Labs, and adds no reverse `practice_links` to the authoring parity snapshot;
 - a capstone mutation probe replaces real payload transformations with stage-name-only callbacks, reorders identities, changes masks, and bypasses a selected config branch; each mutation must fail.
 
 ### TDD projections
@@ -105,7 +144,8 @@ Run every check from fresh output.
 
 - production Web build and TypeScript checks pass;
 - the rendered course uses manifest Lab titles/counts and compiled Markdown lessons;
-- structured `lesson_outline` renders beginner prerequisites/problem/outcomes/examples before accessible disclosures for principles, design choices, and diagnostics, while the full Markdown fallback remains usable;
+- structured `lesson_outline` renders the assessed **open core** with exact time/reason, `先这样理解`, `输入和输出是什么`, `拿一个具体输入走一遍`, concrete trace, and first practice link before accessible disclosures for principles, design choices, sources, and diagnostics; the full Markdown fallback remains usable;
+- manifest and README readiness projections group capability titles into assumed and foundation preparation without exposing internal IDs or enums; Web/Markdown use learner-safe labels rather than author terms;
 - Python lesson fences and the editor have syntax highlighting and monospace alignment;
 - Lab 00 has no code workspace, while each graded Lab hides the complete code/result area and makes no file request until foundation and current-Lab knowledge are complete;
 - the desktop shell exposes two keyboard-accessible separators, respects declared minimum widths, lets the sidebar collapse, supports pointer drag plus Arrow keys/Home/End, and restores validated per-course localStorage preferences;

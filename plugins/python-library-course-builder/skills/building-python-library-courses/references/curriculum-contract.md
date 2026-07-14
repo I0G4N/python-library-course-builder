@@ -8,6 +8,7 @@ Run the inspector, validator, scaffolder, and verifier through the uv-managed Py
 
 - [Top-level shape](#top-level-shape)
 - [Stable identity and evidence](#stable-identity-and-evidence)
+- [Assessed readiness and duration](#assessed-readiness-and-duration)
 - [Structured lesson](#structured-lesson)
 - [Knowledge checks](#knowledge-checks)
 - [The mechanism and official bridge cycle](#the-mechanism-and-official-bridge-cycle)
@@ -24,18 +25,44 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
   "schema_version": 2,
   "course": {
     "id": "pathlib-practice",
-    "title": "Practical pathlib",
-    "description": "Build a safe local file organizer incrementally.",
+    "title": "用 pathlib 构建本地文件整理器",
+    "description": "逐步构建一个可测试的本地文件整理器。",
     "language": "zh-CN",
     "python_requires": ">=3.13,<3.14",
     "size": "small",
     "dependencies": [],
-    "capstone": "A deterministic local file organizer",
+    "capstone": "一个确定、可测试的本地文件整理器",
     "audience": {
-      "level": "basic-python",
-      "assumes": ["variables", "functions", "classes", "imports"],
-      "does_not_assume": ["pathlib", "filesystem design"],
-      "lab_minutes": {"min": 30, "max": 45}
+      "level": "assessed",
+      "prerequisite_profile": {
+        "assessment": "learner-self-report",
+        "capabilities": [
+          {
+            "id": "python-functions",
+            "kind": "python",
+            "subject": "Python 函数",
+            "title": "定义并调用 Python 函数",
+            "status": "known",
+            "decision": "assume",
+            "basis": "explicit-prerequisite",
+            "source_ids": ["python-language"],
+            "first_used_in": "lab01",
+            "foundation_concept_ids": []
+          },
+          {
+            "id": "path-value-boundary",
+            "kind": "library",
+            "subject": "路径值与文件系统效果",
+            "title": "区分路径表示与文件系统操作",
+            "status": "partial",
+            "decision": "foundation",
+            "basis": "selected-route-usage",
+            "source_ids": ["python-pathlib"],
+            "first_used_in": "lab01",
+            "foundation_concept_ids": ["lab00.c-path-boundary"]
+          }
+        ]
+      }
     }
   },
   "target": {
@@ -46,6 +73,13 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
     "track": "core filesystem workflows",
     "import_roots": ["pathlib"],
     "official_sources": [
+      {
+        "id": "python-language",
+        "title": "Python 3.13 tutorial",
+        "url": "https://docs.python.org/3.13/tutorial/",
+        "kind": "documentation",
+        "version": "3.13"
+      },
       {
         "id": "python-pathlib",
         "title": "Python 3.13 pathlib documentation",
@@ -62,7 +96,13 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
   },
   "foundation": {
     "id": "lab00",
-    "title": "Lab 00: Python objects, paths, and the test loop",
+    "title": "Lab 00：路径值、文件系统效果与测试循环",
+    "study_minutes": {
+      "tier": "foundation",
+      "min": 45,
+      "max": 60,
+      "reason": "学习者证据显示需要先区分路径表示与文件系统效果。"
+    },
     "lesson": {"prerequisites": [], "problem": {}, "outcomes": [], "concepts": [], "examples": [], "capstone_bridge": {}, "summary": []},
     "quiz": []
   },
@@ -72,11 +112,36 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
 
 ## Stable identity and evidence
 
-Course, source, Lab, prerequisite, outcome, concept, example, quiz, choice, and coding-question IDs are stable. Lab IDs are contiguous `lab01` through `labNN`; `depends_on` forms one linear chain starting at `lab00`. The `course.audience` object is mandatory and records the basic-Python assumptions plus the 30-45 minute Lab budget.
+Course, source, Lab, prerequisite, outcome, concept, example, quiz, choice, and coding-question IDs are stable. Lab IDs are contiguous `lab01` through `labNN`; `depends_on` forms one linear chain starting at `lab00`.
 
 Every official source is a primary HTTPS source with a title and applicable version or revision. Concepts cite registry IDs through `source_claims`, never an unregistered free-form URL. Each claim is marked `documented` for a public contract or `implementation` for a version-pinned implementation observation. Do not turn an implementation detail into a promised API.
 
 `target.import_roots` lists the top-level Python packages whose use is controlled by the mechanism cycle. Third-party targets require pinned or bounded PEP 508 dependencies. Standard-library courses may leave dependencies empty.
+
+## Assessed readiness and duration
+
+New Skill-authored specifications use `course.audience.level: assessed`. In this mode, `course.audience` contains exactly `level` and `prerequisite_profile`; the profile contains exactly `assessment` and a nonempty `capabilities` array, with `assessment: learner-self-report`.
+
+Each capability contains exactly `"id"`, `"kind"`, `"subject"`, `"title"`, `"status"`, `"decision"`, `"basis"`, `"source_ids"`, `"first_used_in"`, and `"foundation_concept_ids"`:
+
+- `kind` is `python`, `library`, or `domain`;
+- `status` is `known`, `partial`, `missing`, or `unsure`;
+- `decision` is `assume` or `foundation`;
+- `basis` is `explicit-prerequisite` or `selected-route-usage`.
+
+Capability IDs are stable and unique; `subject` and `title` are nonempty; `source_ids` is nonempty and unique; and `foundation_concept_ids` contains unique stable IDs. A `known` capability uses `assume` and an empty `foundation_concept_ids`. Every other status uses `foundation` and at least one mapped Lab 00 concept. Source IDs resolve to the official-source registry, `first_used_in` resolves to a graded Lab, foundation concept IDs resolve inside Lab 00, and each mapped foundation capability shares at least one cited source with its teaching concept.
+
+A **large gap** is a pre-specification route decision, not a third capability decision. If the required capabilities need multiple prerequisite layers that cannot fit one focused Lab 00, stop **before** writing the target specification or destination and offer a prerequisite course or narrower route. A completed assessed specification therefore contains only `assume` and `foundation` decisions.
+
+Every assessed unit owns an exact `study_minutes` object:
+
+- Lab 00: `{"tier": "foundation", "min": 45, "max": 60, "reason": "..."}` — exact **45-60** minute range and a gap-specific reason;
+- ordinary graded Lab: `{"tier": "standard", "min": 30, "max": 45}` — exact **30-45** minute range and no reason field;
+- genuinely combined, derivation-heavy, or lifecycle-heavy Lab: `{"tier": "extended", "min": 45, "max": 60, "reason": "..."}` — exact **45-60** minute range and a specific reason.
+
+`min` and `max` are JSON integers, not booleans or numeric strings. `reason` is nonempty where required, and the closed shapes above allow no extra fields.
+
+Legacy `course.audience.level: basic-python` remains readable **compatibility** input with `assumes`, `does_not_assume`, and `lab_minutes: {"min": 30, "max": 45}`. It bypasses assessed-only profile, `study_minutes`, `operational_contract`, `trace`, and coverage requirements; it is not the new authoring default.
 
 ## Structured `lesson`
 
@@ -87,82 +152,148 @@ Lab 00 and every graded Lab use the same `lesson` object:
   "prerequisites": [
     {
       "id": "lab01.p-functions",
-      "title": "Functions and return values",
-      "why": "The exercise exposes behavior through one function boundary.",
-      "refresh": "A function receives owned inputs and returns an explicit result."
+      "title": "函数与返回值",
+      "why": "本练习通过一个函数边界暴露可观察行为。",
+      "refresh": "函数接收明确的输入，并返回一个明确的结果。"
     }
   ],
   "problem": {
-    "context": "The organizer needs to represent a root and child safely.",
-    "naive_approach": "Concatenate strings with a slash.",
-    "failure": "Separators, path kinds, and filesystem effects become conflated."
+    "context": "文件整理器需要安全地表示根目录和子文件。",
+    "naive_approach": "直接用斜杠拼接字符串。",
+    "failure": "分隔符、路径类型和文件系统效果混在了一起。"
   },
   "outcomes": [
-    {"id": "lab01.o-trace", "text": "Trace input, operation, and output ownership."},
-    {"id": "lab01.o-diagnose", "text": "Explain and repair one broken boundary."}
+    {"id": "lab01.o-trace", "text": "追踪输入、操作和输出的所有权。"},
+    {"id": "lab01.o-diagnose", "text": "解释并修复一个错误的路径边界。"}
   ],
   "concepts": [
     {
       "id": "lab01.c-path-model",
-      "name": "Lexical path composition",
-      "definition": "A path object describes a path without necessarily performing I/O.",
-      "purpose": "It separates representation from filesystem effects.",
-      "mechanism": ["Validate the pieces.", "Create a new value.", "Return it without touching disk."],
-      "mental_model": "Treat a path as a recipe, not an already-created file.",
-      "design_reasons": ["A value object makes effects explicit."],
-      "benefits": ["Composition is testable without creating files."],
-      "tradeoffs": ["A later explicit I/O step is still required."],
-      "invariants": ["Composition alone performs no filesystem write."],
-      "boundaries": ["Platform normalization may differ."],
-      "pitfalls": ["Do not infer existence from a composed path."],
+      "name": "词法路径组合",
+      "definition": "路径对象描述一个路径，但组合路径本身不执行文件系统 I/O。",
+      "purpose": "它把路径表示与文件系统效果分开。",
+      "mechanism": ["接收根路径和子名称。", "创建一个新的路径值。", "返回新值而不访问磁盘。"],
+      "mental_model": "先把路径看成一张地址配方，而不是已经创建的文件。",
+      "design_reasons": ["值对象让效果边界保持显式。"],
+      "benefits": ["无需创建文件就能测试组合行为。"],
+      "tradeoffs": ["真正读写文件时仍需要后续的显式 I/O。"],
+      "invariants": ["仅组合路径不会写入文件系统。"],
+      "boundaries": ["不同平台的路径规范化结果可能不同。"],
+      "pitfalls": ["不要从组合后的路径推断文件一定存在。"],
       "source_claims": [
-        {"source_id": "python-pathlib", "claim": "Path exposes lexical composition operations.", "status": "documented"}
-      ]
+        {"source_id": "python-pathlib", "claim": "Path 提供词法路径组合操作。", "status": "documented"}
+      ],
+      "operational_contract": {
+        "kind": "api",
+        "forms": ["PurePath(root) / child"],
+        "inputs": [
+          {
+            "name": "root_and_child",
+            "meaning": "要组合的根路径值与一个子名称。",
+            "form": "PurePath 与 str",
+            "example": "PurePath('root'), 'a.txt'",
+            "constraints": ["子名称必须是本路线允许的相对路径片段。"]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "destination",
+            "meaning": "组合后得到的新路径值。",
+            "form": "PurePath",
+            "example": "PurePath('root/a.txt')"
+          }
+        ],
+        "effects": ["返回新路径值，不创建文件，也不修改输入。"],
+        "failure_modes": [
+          {
+            "condition": "调用者把路径组合误当成文件创建。",
+            "observable": "磁盘上没有出现对应文件。",
+            "recovery": "在后续步骤显式调用文件系统写入 API。"
+          }
+        ]
+      }
     }
   ],
   "examples": [
     {
       "id": "lab01.e-run",
-      "title": "Compose one child",
+      "title": "组合一个子路径",
       "kind": "runnable",
       "path": "examples/01_compose.py",
       "code": "from pathlib import PurePath\nprint(PurePath('root') / 'a.txt')\n",
       "command": "python examples/01_compose.py",
       "expected_output": "root/a.txt",
-      "explanation": "This complete example is CPU/offline runnable.",
+      "explanation": "这个完整示例可以在 CPU/离线环境直接运行。",
       "concept_ids": ["lab01.c-path-model"],
-      "outcome_ids": ["lab01.o-trace"]
+      "outcome_ids": ["lab01.o-trace"],
+      "trace": [
+        {
+          "id": "lab01.t-root",
+          "concept_ids": ["lab01.c-path-model"],
+          "input_state": "root = PurePath('root')，child = 'a.txt'",
+          "operation": "读取两个调用输入，但不访问文件系统。",
+          "output_state": "root.parts == ('root',)，child 仍是 str。",
+          "explanation": "这一步确认输入形式和调用者仍拥有原值。"
+        },
+        {
+          "id": "lab01.t-compose",
+          "concept_ids": ["lab01.c-path-model"],
+          "input_state": "root = PurePath('root')，child = 'a.txt'",
+          "operation": "计算 root / child。",
+          "output_state": "destination = PurePath('root/a.txt')，磁盘未发生变化。",
+          "explanation": "组合产生一个新路径值；它没有创建文件。"
+        }
+      ]
     },
     {
       "id": "lab01.e-bug",
-      "title": "Separate representation from I/O",
+      "title": "把路径表示与 I/O 分开",
       "kind": "diagnostic",
       "wrong_code": "open('root/' + name, 'w')\n",
-      "symptom": "A supposedly pure helper creates a file.",
-      "cause": "Representation and effect share one hidden operation.",
+      "symptom": "一个本应只返回路径的辅助函数却创建了文件。",
+      "cause": "路径表示和文件系统效果被藏在同一个操作里。",
       "fix_code": "from pathlib import PurePath\ndef target(name):\n    return PurePath('root') / name\n",
-      "explanation": "The path follows wrong -> symptom -> cause -> fix.",
+      "explanation": "这个例子沿着 wrong -> symptom -> cause -> fix 解释效果边界。",
       "concept_ids": ["lab01.c-path-model"],
       "outcome_ids": ["lab01.o-diagnose"]
     }
   ],
   "capstone_bridge": {
-    "input": "A validated root and child name.",
-    "output": "A lexical destination path.",
-    "increment": "Add safe target representation to the organizer.",
-    "next": "Replace the hand-built representation boundary with the official Path API."
+    "input": "一个已验证的根路径和子名称。",
+    "output": "一个词法目标路径值。",
+    "increment": "为整理器加入安全的目标路径表示。",
+    "next": "下一课用官方 Path API 替换手写的表示边界。"
   },
-  "summary": ["Representation is distinct from effect.", "The next Lab grades the official bridge."]
+  "summary": ["路径表示不同于文件系统效果。", "下一课会考查官方 bridge。"]
 }
 ```
 
-Every lesson is written for a learner with basic Python only and supports 30-45 minutes of focused work. Each concept must define the term, explain its purpose and mechanism, give a mental model, justify the design, state benefits and tradeoffs, identify invariants and boundaries, call out pitfalls, and tie claims to evidence.
+Write each new lesson from the assessed readiness evidence and its unit-specific `study_minutes`, not from a universal beginner label or duration. Each concept still defines the term, purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source claims.
+
+In assessed mode every concept also has a closed `operational_contract` with exactly:
+
+- `kind`: `api`, `mechanism`, `formula`, `lifecycle`, or `data-model`;
+- nonempty `forms` and `effects` string arrays;
+- nonempty `inputs`, each with `name`, `meaning`, `form`, `example`, and nonempty `constraints`;
+- nonempty `outputs`, each with `name`, `meaning`, `form`, and `example`;
+- nonempty `failure_modes`, each with `condition`, `observable`, and `recovery`.
+
+Every assessed runnable example adds a `trace` of at least two steps. Each step has exactly a stable unique `id`, nonempty mapped `concept_ids`, `input_state`, `operation`, `output_state`, and `explanation`. Step concept IDs stay within both the lesson and the runnable example's concept mappings. Carry the same concrete value or state across the steps and match the convention graded by the tests.
 
 Every lesson has at least two examples. One is a complete runnable file with an exact command and expected output. One is a diagnostic with wrong code, visible symptom, root cause, and fixed code: wrong -> symptom -> cause -> fix. Accelerator-only surfaces use metadata, configuration, source traces, or preflight examples; mandatory examples and grading stay CPU/offline runnable.
 
 For a runnable example whose lesson-relative file is `{path}`, the command is exactly `python {path}`. Shell wrappers, `python -m`, chained commands, alternate interpreters, and extra flags are outside this deterministic example contract.
 
 The rule against prerequisite leakage is strict: a prerequisite may refresh only material actually introduced in an earlier Lab. New syntax, framework concepts, and mathematics belong in the current lesson's open definitions and runnable trace. Every exact formula graded by public or hidden tests needs a worked numeric derivation visible before the exercise.
+
+Assessed coverage is exact across authored surfaces:
+
+- every Lab 00 concept maps to a runnable trace, quiz, and diagnosis;
+- every graded-Lab concept maps to a runnable trace, quiz, coding question, and diagnosis;
+- diagnosis coverage may come from a diagnostic example or diagnostic quiz;
+- every outcome maps to an example and to an assessment: a quiz in Lab 00, or a quiz/coding question in a graded Lab.
+
+Examples, quiz items, and coding questions carry forward `concept_ids` and `outcome_ids`. Authors order those activities intentionally. The compiler derives each concept's first-practice link from that authored order; do not serialize reverse `practice_links` into the specification.
 
 The cumulative capstone must carry meaningful values through the promised route. A stage-name-only tuple, callback log, or fake plumbing trace is not integration. Capstone tests perturb identities, masks, values, configuration branches, and ordering so bypassing an earlier responsibility fails observably.
 

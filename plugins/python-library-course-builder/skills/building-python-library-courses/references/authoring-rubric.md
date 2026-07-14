@@ -26,10 +26,13 @@ Reject the route if a core learning outcome depends on unverifiable behavior.
 ## 2. Route coherence
 
 - Lab 00 gets a new learner from setup to one passing smoke command.
-- The declared audience is basic Python only, and every graded Lab fits a 30-45 minutes study block.
+- The `assessed` profile records **evidence-based readiness** rather than a beginner/intermediate label. Reuse user-supplied evidence and ask only about selected-route capabilities that remain unknown.
+- A **two-layer Lab 00** fills only evidenced **general-Python gaps**, then teaches the **route-specific library and domain foundations** needed before Lab 01. Treat unseen **new material** as teaching, not **review**.
+- Lab 00 uses 45-60 minutes with a gap-specific reason. An ordinary graded Lab uses 30-45 minutes. Only a genuinely combined, derivation-heavy, or lifecycle-heavy Lab uses 45-60 minutes with a specific reason.
 - Each graded Lab has only the prerequisites it needs and depends on the previous Lab.
 - Reject prerequisite leakage: do not label syntax, framework behavior, or mathematics as a refresh unless an earlier lesson actually taught it.
 - Concepts are introduced before use and revisited through composition rather than repeated prose.
+- Every graded Lab follows **one new knowledge mainline**. **Lab 02+** may also begin with the immediately prior mechanism's official bridge; that bridge does not justify a **second unrelated mainline**.
 - Lab N handwrites a teaching-equivalent from lower-level primitives; the immediately next Lab starts with a graded official bridge that compares declared observables through the pinned API.
 - The next bridge covers every declared target symbol and every responsibility graded by the previous reimplementation questions; bridge metadata, code, observables, and tests must agree.
 - No downstream learner/reference/test code or capstone imports a prior mini implementation; it calls the official API when it needs an earlier capability.
@@ -42,6 +45,8 @@ For a broad library, prefer one deep product track over a catalog of unrelated s
 
 ## 3. Lesson quality
 
+Use one visible sequence: concrete capstone problem -> plain-language understanding -> exact operational contract -> complete real-value execution trace -> boundary and error reasoning -> runnable and diagnostic examples -> knowledge check -> coding/capstone increment. Render the open core with the learner-safe labels `先这样理解`, `输入和输出是什么`, and `拿一个具体输入走一遍` before deeper implementation and source details.
+
 For every concept, check that the structured lesson answers:
 
 - What is the object or operation, in precise plain language?
@@ -52,7 +57,11 @@ For every concept, check that the structured lesson answers:
 - Which pitfalls are likely, and how does the learner move through wrong -> symptom -> cause -> fix?
 - Which primary source supports each public or implementation claim?
 
-Every chapter has at least two examples: a complete CPU/offline runnable program with command and expected output, and a diagnostic with wrong code, symptom, cause, and fixed code. The runnable program is executed against the untouched starter projection before coding unlock, so it cannot import or call an incomplete learner TODO; use self-contained code or only fully pre-scaffolded helpers. Examples must be minimal and aligned with the pinned version. Use Python syntax highlighting and a true monospace font in both lecture code blocks and the editor. Render beginner prerequisites, problem, outcomes, and runnable examples first; place deeper principles/design tradeoffs and diagnostics in accessible native disclosures. Keep a complete Markdown fallback. Keep prose readable at ordinary browser zoom; avoid oversized headings, crowded cards, and duplicate panels.
+The **operational contract** is closed around the tested behavior: kind; visible forms; inputs with meanings, forms, concrete examples, and constraints; outputs with examples; effects; and failure modes that connect condition -> observable -> recovery. Choose `api`, `mechanism`, `formula`, `lifecycle`, or `data-model` deliberately.
+
+The **complete real-value execution trace** carries the same value or state through at least two named transitions. It shows intermediate shape, type, state, or ownership where relevant and uses the exact convention graded by tests. Generic “execute one operation” prose is not a trace.
+
+Every chapter has at least two examples: a complete CPU/offline runnable program with command and expected output, and a diagnostic with wrong code, symptom, cause, and fixed code. The runnable program is executed against the untouched starter projection before coding unlock, so it cannot import or call an incomplete learner TODO; use self-contained code or only fully pre-scaffolded helpers. Examples must be minimal and aligned with the pinned version. Use Python syntax highlighting and a true monospace font in both lecture code blocks and the editor. Render readiness-matched prerequisites, problem, outcomes, and runnable examples first; place deeper principles/design tradeoffs and diagnostics in accessible native disclosures. Keep a complete Markdown fallback. Keep prose readable at ordinary browser zoom; avoid oversized headings, crowded cards, and duplicate panels.
 
 If an exercise grades an exact recurrence, estimator, loss, shape transformation, event-loop trace, or lifecycle, the open lesson includes a worked numeric derivation or complete worked execution trace before the TODO. The derivation names every symbol, shows intermediate values, and matches the tested convention rather than assuming domain background.
 
@@ -60,6 +69,8 @@ Every chapter has both an execution-trace and a diagnostic knowledge question. E
 
 ## 4. Exercise design
 
+- Every assessed concept reaches trace, quiz, and diagnosis; every graded-Lab concept also reaches coding. Every outcome reaches an example plus a quiz or coding assessment.
+- Authored examples, quizzes, and coding questions map forward to the concepts/outcomes they exercise. The compiler derives the concept-ordered **first practice link** from authored activity order; authors do not maintain reverse mappings.
 - Prompts specify observable behavior without revealing the implementation.
 - Function and class interfaces are small enough to complete in one study session.
 - Starter code has one intentional gap per declared interface and no accidental failure.
