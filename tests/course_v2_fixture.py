@@ -430,6 +430,16 @@ def make_assessed_spec() -> dict[str, object]:
     }
 
     foundation = spec["foundation"]  # type: ignore[index]
+    foundation_lesson = foundation["lesson"]  # type: ignore[index]
+    json_shape = deepcopy(foundation_lesson["concepts"][0])
+    json_shape.update(
+        {
+            "id": "lab00.c-json-shape",
+            "name": "JSON value shape",
+            "definition": "JSON values map to a closed set of Python value shapes.",
+        }
+    )
+    foundation_lesson["concepts"].append(json_shape)
     foundation["study_minutes"] = {  # type: ignore[index]
         "tier": "foundation",
         "min": 45,
@@ -438,7 +448,15 @@ def make_assessed_spec() -> dict[str, object]:
     }
 
     operational_kinds = iter(
-        ("api", "mechanism", "formula", "lifecycle", "data-model", "api")
+        (
+            "api",
+            "data-model",
+            "mechanism",
+            "formula",
+            "lifecycle",
+            "data-model",
+            "api",
+        )
     )
     sections = [foundation, *spec["labs"]]  # type: ignore[index]
     for section in sections:

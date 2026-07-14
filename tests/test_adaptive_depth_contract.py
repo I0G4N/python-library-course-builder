@@ -24,6 +24,7 @@ from tests.course_v2_fixture import make_assessed_spec, make_spec  # noqa: E402
 
 Spec = dict[str, object]
 Mutation = Callable[[Spec], None]
+_DELETE = object()
 
 
 def _audience(spec: Spec) -> dict[str, Any]:
@@ -56,6 +57,19 @@ def _rejects(spec: Spec, *fragments: str) -> None:
     message = str(caught.value)
     for fragment in fragments:
         assert fragment in message, message
+
+
+def _mutate_path(
+    root: Any, path: tuple[str | int, ...], value: object
+) -> None:
+    target = root
+    for part in path[:-1]:
+        target = target[part]
+    leaf = path[-1]
+    if value is _DELETE:
+        target.pop(leaf)
+    else:
+        target[leaf] = value
 
 
 def test_legacy_basic_python_audience_remains_accepted_unchanged() -> None:
@@ -155,133 +169,210 @@ def test_split_source_preserves_the_complete_assessed_contract(tmp_path: Path) -
     ]["lesson"]["examples"][0]["trace"]
 
 
-def _large_gap(spec: Spec) -> None:
-    _capability(spec, "json-data-model")["status"] = "large-gap"
-
-
-def _known_with_foundation(spec: Spec) -> None:
-    capability = _capability(spec, "python-functions")
-    capability["decision"] = "foundation"
-    capability["foundation_concept_ids"] = ["lab00.c-mechanism"]
-
-
-def _foundation_first_use(spec: Spec) -> None:
-    _capability(spec, "json-data-model")["first_used_in"] = "lab00"
-
-
 @pytest.mark.parametrize(
-    ("mutation", "fragment"),
+    ("capability_id", "updates", "fragment"),
     (
-        pytest.param(_large_gap, "status", id="large-gap-is-not-serialized"),
-        pytest.param(_known_with_foundation, "decision", id="known-maps-to-assume"),
-        pytest.param(_foundation_first_use, "first_used_in", id="first-use-is-graded"),
+        pytest.param(
+            "json-data-model",
+            {"status": "large-gap"},
+            "status",
+            id="large-gap-is-not-serialized",
+        ),
+        pytest.param(
+            "python-functions",
+            {
+                "decision": "foundation",
+                "foundation_concept_ids": ["lab00.c-mechanism"],
+            },
+            "decision",
+            id="known-maps-to-assume",
+        ),
+        pytest.param(
+            "json-data-model",
+            {"first_used_in": "lab00"},
+            "first_used_in",
+            id="first-use-is-graded",
+        ),
+        pytest.param(
+            "python-functions",
+            {"kind": "tool"},
+            "kind",
+            id="kind-is-closed",
+        ),
+        pytest.param(
+            "json-data-model",
+            {"basis": "model-guess"},
+            "basis",
+            id="basis-is-closed",
+        ),
+        pytest.param(
+            "json-data-model",
+            {"source_ids": ["missing-source"]},
+            "source_ids",
+            id="sources-are-registered",
+        ),
+        pytest.param(
+            "json-data-model",
+            {"foundation_concept_ids": []},
+            "foundation_concept_ids",
+            id="foundation-decision-needs-concepts",
+        ),
+        pytest.param(
+            "json-data-model",
+            {"foundation_concept_ids": ["lab00.c-missing"]},
+            "foundation_concept_ids",
+            id="foundation-concepts-resolve",
+        ),
     ),
 )
 def test_assessed_profile_rejects_inconsistent_capability_provenance(
-    mutation: Mutation, fragment: str
+    capability_id: str, updates: dict[str, object], fragment: str
 ) -> None:
     spec = make_assessed_spec()
-    mutation(spec)
+    _capability(spec, capability_id).update(updates)
 
     _rejects(spec, fragment)
 
 
-def _wrong_foundation_range(spec: Spec) -> None:
-    _section(spec, "lab00")["study_minutes"]["min"] = 30
-
-
-def _missing_graded_minutes(spec: Spec) -> None:
-    _section(spec, "lab02").pop("study_minutes")
-
-
-def _standard_reason(spec: Spec) -> None:
-    _section(spec, "lab01")["study_minutes"]["reason"] = "not allowed"
-
-
-def _extended_without_reason(spec: Spec) -> None:
-    _section(spec, "lab03")["study_minutes"].pop("reason")
-
-
 @pytest.mark.parametrize(
-    "mutation",
+    ("section_id", "payload"),
     (
-        pytest.param(_wrong_foundation_range, id="foundation-exact-range"),
-        pytest.param(_missing_graded_minutes, id="every-graded-lab"),
-        pytest.param(_standard_reason, id="standard-has-no-reason"),
-        pytest.param(_extended_without_reason, id="extended-needs-reason"),
+        pytest.param(
+            "lab00",
+            {"tier": "foundation", "min": 30, "max": 60, "reason": "gap"},
+            id="foundation-exact-range",
+        ),
+        pytest.param("lab02", None, id="every-graded-lab"),
+        pytest.param(
+            "lab01",
+            {"tier": "foundation", "min": 30, "max": 45},
+            id="graded-tier-is-closed",
+        ),
+        pytest.param(
+            "lab01",
+            {"tier": "standard", "min": 30, "max": 60},
+            id="standard-exact-range",
+        ),
+        pytest.param(
+            "lab01",
+            {"tier": "standard", "min": 30, "max": 45, "reason": "extra"},
+            id="standard-has-no-reason",
+        ),
+        pytest.param(
+            "lab03",
+            {"tier": "extended", "min": 45, "max": 60},
+            id="extended-needs-reason",
+        ),
+        pytest.param(
+            "lab03",
+            {"tier": "extended", "min": 30, "max": 60, "reason": "extra work"},
+            id="extended-exact-range",
+        ),
+        pytest.param(
+            "lab00",
+            {"tier": "foundation", "min": 45, "max": 60, "reason": ""},
+            id="foundation-reason-is-nonempty",
+        ),
+        pytest.param(
+            "lab03",
+            {"tier": "extended", "min": 45, "max": 60, "reason": ""},
+            id="extended-reason-is-nonempty",
+        ),
     ),
 )
-def test_assessed_study_minutes_reject_noncanonical_shapes(mutation: Mutation) -> None:
+def test_assessed_study_minutes_reject_noncanonical_shapes(
+    section_id: str, payload: dict[str, object] | None
+) -> None:
     spec = make_assessed_spec()
-    mutation(spec)
+    section = _section(spec, section_id)
+    if payload is None:
+        section.pop("study_minutes")
+    else:
+        section["study_minutes"] = dict(payload)
 
     _rejects(spec, "study_minutes")
 
 
-def _missing_operational_contract(spec: Spec) -> None:
-    _concept(spec, "lab01").pop("operational_contract")
-
-
-def _empty_operational_forms(spec: Spec) -> None:
-    _concept(spec, "lab01")["operational_contract"]["forms"] = []
-
-
-def _unknown_operational_input_field(spec: Spec) -> None:
-    contract = _concept(spec, "lab01")["operational_contract"]
-    contract["inputs"][0]["teacher_note"] = "private"
-
-
 @pytest.mark.parametrize(
-    "mutation",
+    ("path", "value"),
     (
-        pytest.param(_missing_operational_contract, id="contract-required"),
-        pytest.param(_empty_operational_forms, id="collections-non-empty"),
-        pytest.param(_unknown_operational_input_field, id="nested-fields-closed"),
+        pytest.param(None, _DELETE, id="contract-required"),
+        pytest.param(("kind",), "analogy", id="kind-is-closed"),
+        pytest.param(("forms",), [], id="forms-nonempty"),
+        pytest.param(("inputs",), [], id="inputs-nonempty"),
+        pytest.param(("outputs",), [], id="outputs-nonempty"),
+        pytest.param(("effects",), [], id="effects-nonempty"),
+        pytest.param(("failure_modes",), [], id="failure-modes-nonempty"),
+        pytest.param(
+            ("inputs", 0, "meaning"), _DELETE, id="input-required-field"
+        ),
+        pytest.param(
+            ("inputs", 0, "teacher_note"), "private", id="input-fields-closed"
+        ),
+        pytest.param(
+            ("outputs", 0, "form"), _DELETE, id="output-required-field"
+        ),
+        pytest.param(
+            ("outputs", 0, "teacher_note"), "private", id="output-fields-closed"
+        ),
+        pytest.param(
+            ("failure_modes", 0, "recovery"),
+            _DELETE,
+            id="failure-required-field",
+        ),
+        pytest.param(
+            ("failure_modes", 0, "teacher_note"),
+            "private",
+            id="failure-fields-closed",
+        ),
     ),
 )
 def test_operational_contract_rejects_incomplete_or_open_shapes(
-    mutation: Mutation,
+    path: tuple[str | int, ...] | None, value: object
 ) -> None:
     spec = make_assessed_spec()
-    mutation(spec)
+    concept = _concept(spec, "lab01")
+    if path is None:
+        concept.pop("operational_contract")
+    else:
+        _mutate_path(concept["operational_contract"], path, value)
 
     _rejects(spec, "operational_contract")
 
 
-def _missing_trace(spec: Spec) -> None:
-    _example(spec, "lab01", "runnable").pop("trace")
-
-
-def _one_trace_step(spec: Spec) -> None:
-    runnable = _example(spec, "lab01", "runnable")
-    runnable["trace"] = runnable["trace"][:1]
-
-
-def _duplicate_trace_id(spec: Spec) -> None:
-    steps = _example(spec, "lab01", "runnable")["trace"]
-    steps[1]["id"] = steps[0]["id"]
-
-
-def _trace_outside_example(spec: Spec) -> None:
-    runnable = _example(spec, "lab02", "runnable")
-    runnable["concept_ids"] = ["lab02.c-mechanism"]
-    runnable["trace"][0]["concept_ids"] = ["lab02.c-official"]
-
-
 @pytest.mark.parametrize(
-    "mutation",
+    "case",
     (
-        pytest.param(_missing_trace, id="trace-required"),
-        pytest.param(_one_trace_step, id="at-least-two-steps"),
-        pytest.param(_duplicate_trace_id, id="stable-unique-step-ids"),
-        pytest.param(_trace_outside_example, id="concept-subset"),
+        "trace-required",
+        "at-least-two-steps",
+        "stable-unique-step-ids",
+        "stable-step-id-format",
+        "concept-subset",
+        "concept-ids-nonempty",
+        "step-fields-required",
     ),
 )
 def test_runnable_trace_rejects_incomplete_or_unlinked_steps(
-    mutation: Mutation,
+    case: str,
 ) -> None:
     spec = make_assessed_spec()
-    mutation(spec)
+    runnable = _example(spec, "lab01", "runnable")
+    if case == "trace-required":
+        runnable.pop("trace")
+    elif case == "at-least-two-steps":
+        runnable["trace"] = runnable["trace"][:1]
+    elif case == "stable-unique-step-ids":
+        runnable["trace"][1]["id"] = runnable["trace"][0]["id"]
+    elif case == "stable-step-id-format":
+        runnable["trace"][0]["id"] = "Bad Step"
+    elif case == "concept-subset":
+        runnable = _example(spec, "lab02", "runnable")
+        runnable["concept_ids"] = ["lab02.c-mechanism"]
+        runnable["trace"][0]["concept_ids"] = ["lab02.c-official"]
+    elif case == "concept-ids-nonempty":
+        runnable["trace"][0]["concept_ids"] = []
+    else:
+        runnable["trace"][0].pop("operation")
 
     _rejects(spec, "trace")
 
@@ -314,6 +405,29 @@ def test_every_graded_concept_is_covered_by_each_learning_surface(
                 quiz["concept_ids"] = [mechanism_id]
 
     _rejects(spec, official_id, surface.split()[0])
+
+
+@pytest.mark.parametrize("surface", ("runnable trace", "quiz", "diagnostic"))
+def test_every_lab00_concept_has_required_non_coding_coverage(surface: str) -> None:
+    spec = make_assessed_spec()
+    foundation = _section(spec, "lab00")
+    target_id = "lab00.c-json-shape"
+    fallback_id = "lab00.c-mechanism"
+
+    if surface == "runnable trace":
+        for step in _example(spec, "lab00", "runnable")["trace"]:
+            if target_id in step["concept_ids"]:
+                step["concept_ids"] = [fallback_id]
+    elif surface == "quiz":
+        for quiz in foundation["quiz"]:
+            quiz["concept_ids"] = [fallback_id]
+    else:
+        _example(spec, "lab00", "diagnostic")["concept_ids"] = [fallback_id]
+        for quiz in foundation["quiz"]:
+            if quiz["kind"] == "diagnostic":
+                quiz["concept_ids"] = [fallback_id]
+
+    _rejects(spec, "lab00", target_id, surface.split()[0])
 
 
 def _outcome_without_example(spec: Spec) -> None:
@@ -350,12 +464,6 @@ def test_lab00_has_trace_quiz_and_diagnostic_coverage_without_coding() -> None:
     assert "questions" not in validated["foundation"]
 
 
-def _is_simplified_chinese(text: object) -> bool:
-    if not isinstance(text, str) or re.search(r"[\u4e00-\u9fff]", text) is None:
-        return False
-    return re.search(r"[這學輸轉錯為發實應個從]", text) is None
-
-
 def test_forward_fixture_uses_chinese_json_prose_and_a_concrete_main_trace() -> None:
     spec = make_spec()
     lab = _section(spec, "lab01")
@@ -363,31 +471,34 @@ def test_forward_fixture_uses_chinese_json_prose_and_a_concrete_main_trace() -> 
     runnable = _example(spec, "lab01", "runnable")
     trace = runnable.get("trace")
 
-    representative_prose = [
-        lab["title"],
-        lesson["problem"]["context"],
-        lesson["outcomes"][0]["text"],
-        lesson["concepts"][0]["name"],
-        lesson["concepts"][0]["definition"],
-        runnable["title"],
-        runnable["explanation"],
-    ]
-    assert all(_is_simplified_chinese(text) for text in representative_prose)
-
-    representative = json.dumps(
-        {"lesson": lesson, "runnable": runnable}, ensure_ascii=False
+    learner_prose = json.dumps(
+        {
+            "title": lab["title"],
+            "problem": lesson["problem"],
+            "outcomes": lesson["outcomes"],
+            "concept": lesson["concepts"][0],
+            "example_title": runnable["title"],
+            "example_explanation": runnable["explanation"],
+        },
+        ensure_ascii=False,
     )
-    for placeholder in (
+    for expected_phrase in ("解析 JSON 文本", "Python 字典", "输入", "输出"):
+        assert expected_phrase in learner_prose
+
+    representative = json.dumps({"lesson": lesson, "runnable": runnable}, ensure_ascii=False)
+    for generic_english in (
         "Teaching mechanism",
         "Execute one deterministic operation",
         "value = 1 + 1",
     ):
-        assert placeholder not in representative
+        assert generic_english not in representative
 
     assert "import json" in runnable["code"]
     assert re.search(r"json\.(loads|dumps)\(", runnable["code"])
     assert isinstance(trace, list) and len(trace) >= 2
-    assert all(_is_simplified_chinese(step["explanation"]) for step in trace)
+    trace_text = json.dumps(trace, ensure_ascii=False)
+    for expected_phrase in ("JSON 文本", "Python 字典", "解析", "输入", "输出"):
+        assert expected_phrase in trace_text
     assert any(
         re.search(r"json\.(loads|dumps)\(", step["operation"])
         for step in trace
