@@ -2,12 +2,17 @@
 
 Use this positive recipe after the readiness sequence and before route, specification, or lesson design. The goal is natural Simplified-Chinese teaching material whose depth is visible in concrete values, contracts, traces, and aligned practice.
 
+Read the [complete teaching example](complete-teaching-example.md) before writing learner-facing prose. It demonstrates the recipe as connected teaching rather than as a field inventory.
+
 ## Contents
 
 - [Turn readiness evidence into Lab 00](#turn-readiness-evidence-into-lab-00)
+- [Teach every evidenced gap completely](#teach-every-evidenced-gap-completely)
+- [Expand every graded chapter](#expand-every-graded-chapter)
 - [Use one chapter sequence](#use-one-chapter-sequence)
 - [Close the operational contract](#close-the-operational-contract)
 - [Carry one value through the trace](#carry-one-value-through-the-trace)
+- [Prove every declared boundary end to end](#prove-every-declared-boundary-end-to-end)
 - [Write natural learner-facing Chinese](#write-natural-learner-facing-chinese)
 - [Adapt the recipe to the concept kind](#adapt-the-recipe-to-the-concept-kind)
 - [Align every activity](#align-every-activity)
@@ -22,6 +27,33 @@ Build a **two-layer Lab 00** from the assessed prerequisite profile:
 2. Teach the **route-specific library and domain foundations** needed before Lab 01, such as a data model, shape convention, unit, or lifecycle vocabulary.
 
 Treat unseen new material as new teaching, not as review. Map every `foundation` capability to the Lab 00 concepts that teach it and to the official sources that support it. A capability marked `assume` needs no foundation concept. If several prerequisite layers cannot form one focused Lab 00, stop and offer a prerequisite course or narrower route.
+
+## Teach every evidenced gap completely
+
+Keep the **general-Python layer** and the **route-specific library/domain layer** visibly separate. Within those two layers, give every `foundation` capability one complete explanation in this order:
+
+1. **existing cognitive anchor** — begin with a behavior, value, or code pattern the learner's evidence shows they already understand;
+2. **define the term** — introduce one precise term in plain language and distinguish it from the nearby idea most likely to be confused with it;
+3. **why the current route needs it now** — name the next Lab operation or capstone decision that would otherwise be unpredictable;
+4. **complete concrete example and value flow** — carry one real value from its starting form through each relevant intermediate form to the observable result;
+5. **common misconception or applicability boundary** — show one plausible wrong prediction or out-of-scope input and the symptom it produces;
+6. **recovery and check** — repair that exact case, run or inspect it again, and ask the learner to predict or verify the recovered result.
+
+Do not collapse several gaps into one generic prerequisite paragraph. If two capabilities share a concept, name both evidence-to-need connections while teaching the shared value flow once.
+
+## Expand every graded chapter
+
+Give each graded chapter one new knowledge mainline and expand it in this order:
+
+1. **project problem** — identify the capstone behavior this chapter must add;
+2. **plain-language predictive model** — state the ordinary-language idea that lets the learner predict what the code will do;
+3. **precise inputs, outputs, effects, and failures** — state the closed behavior before discussing implementation detail;
+4. **same concrete value through the complete flow** — reuse one input across every named transition and show each intermediate form that affects the result;
+5. **valid case and boundary case** — compare a normal input with a nearby input that changes validity or interpretation;
+6. **diagnosis and recovery** — connect the boundary to its symptom and cause, apply the recovery, then show the corrected observable;
+7. **quiz, coding question, and capstone increment** — make all three practice surfaces apply the same concept and outcome introduced by the value flow.
+
+An official bridge may reinforce the preceding mechanism, but it does not replace this chapter's new mainline or justify another unrelated topic.
 
 ## Use one chapter sequence
 
@@ -85,6 +117,18 @@ read-field
 
 The runnable example contains this value flow and exact expected output. The diagnostic example perturbs one constraint and follows wrong code -> symptom -> cause -> fix.
 
+## Prove every declared boundary end to end
+
+For each declared `failure_modes` entry and each independently stated boundary, build one **boundary witness** before delivery. Reuse one witness when both declarations describe the same condition; leave neither declaration without a witness.
+
+1. Choose a representative invalid input or state that satisfies the stated condition.
+2. For that counterexample, execute the actual example or reference path.
+3. Record the exact observed output or exception, then compare it with the declared observable.
+4. Then apply the declared recovery, re-execute the corrected path, and record the recovered observable to prove that the recovery works.
+5. Keep that condition, observable, and recovery identical across the prose contract, runnable or diagnostic code, expected output, diagnostic quiz and, for graded concepts, the coding prompt plus public and hidden tests.
+
+Reject delivery when a declared failure or boundary is merely listed but its counterexample and recovery are not implemented and exercised on every applicable activity and test surface.
+
 ## Write natural learner-facing Chinese
 
 Render the open learning path with these learner-safe labels:
@@ -92,6 +136,8 @@ Render the open learning path with these learner-safe labels:
 - `先这样理解`
 - `输入和输出是什么`
 - `拿一个具体输入走一遍`
+
+Write the connected explanation in natural Simplified Chinese. Define the term in one clear sentence. In the very next sentence, connect it to the current task. Add a natural transition into a concrete value, then explain what changes and why before naming the next structure. Never turn `definition -> purpose -> mechanism -> boundaries -> pitfalls` into a learner-facing author-field inventory; those authoring fields must read as one connected explanation, not stacked labels.
 
 Define a term at first use, then immediately connect it to the current capstone problem. Use short transitions such as “先看输入”, “现在走一步”, and “这在这里重要，因为…”. Alternate explanation with concrete values instead of presenting a schema-field dump. Prefer connected sentences over a stiff glossary, and explain jargon before using it in a prediction or exercise.
 

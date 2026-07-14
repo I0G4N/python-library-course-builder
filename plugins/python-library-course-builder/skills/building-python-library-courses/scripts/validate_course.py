@@ -63,6 +63,17 @@ AUTHOR_QUESTION_FIELDS = {
     "hidden_test",
 }
 QUIZ_KINDS = {"execution_trace", "diagnostic"}
+QUIZ_QUESTION_FIELDS = {
+    "id",
+    "kind",
+    "prompt",
+    "choices",
+    "answer_id",
+    "explanation",
+    "concept_ids",
+    "outcome_ids",
+}
+QUIZ_CHOICE_FIELDS = {"id", "text", "feedback"}
 CONCEPT_LIST_FIELDS = {
     "mechanism",
     "design_reasons",
@@ -72,6 +83,58 @@ CONCEPT_LIST_FIELDS = {
     "boundaries",
     "pitfalls",
 }
+LESSON_FIELDS = {
+    "prerequisites",
+    "problem",
+    "outcomes",
+    "concepts",
+    "examples",
+    "capstone_bridge",
+    "summary",
+}
+PREREQUISITE_FIELDS = {"id", "title", "why", "refresh"}
+PROBLEM_FIELDS = {"context", "naive_approach", "failure"}
+OUTCOME_FIELDS = {"id", "text"}
+CONCEPT_FIELDS = {
+    "id",
+    "name",
+    "definition",
+    "purpose",
+    "mental_model",
+    "source_claims",
+    *CONCEPT_LIST_FIELDS,
+}
+SOURCE_CLAIM_FIELDS = {"source_id", "claim", "status"}
+EXAMPLE_COMMON_FIELDS = {
+    "id",
+    "title",
+    "kind",
+    "explanation",
+    "concept_ids",
+    "outcome_ids",
+}
+RUNNABLE_EXAMPLE_FIELDS = {
+    *EXAMPLE_COMMON_FIELDS,
+    "path",
+    "code",
+    "command",
+    "expected_output",
+}
+DIAGNOSTIC_EXAMPLE_FIELDS = {
+    *EXAMPLE_COMMON_FIELDS,
+    "wrong_code",
+    "symptom",
+    "cause",
+    "fix_code",
+}
+CAPSTONE_BRIDGE_FIELDS = {"input", "output", "increment", "next"}
+BASIC_AUDIENCE_FIELDS = {
+    "level",
+    "assumes",
+    "does_not_assume",
+    "lab_minutes",
+}
+BASIC_LAB_MINUTES_FIELDS = {"min", "max"}
 ASSESSED_AUDIENCE_FIELDS = {"level", "prerequisite_profile"}
 PREREQUISITE_PROFILE_FIELDS = {"assessment", "capabilities"}
 CAPABILITY_FIELDS = {
@@ -105,6 +168,31 @@ TRACE_STEP_FIELDS = {
     "output_state",
     "explanation",
 }
+AUTHOR_COURSE_FIELDS = {
+    "id",
+    "title",
+    "description",
+    "language",
+    "python_requires",
+    "size",
+    "capstone",
+    "audience",
+}
+AUTHOR_COURSE_OPTIONAL_FIELDS = {"dependencies"}
+AUTHOR_FOUNDATION_FIELDS = {"id", "title", "lesson", "quiz"}
+AUTHOR_FOUNDATION_OPTIONAL_FIELDS = {"study_minutes"}
+AUTHOR_LAB_FIELDS = {
+    "id",
+    "title",
+    "depends_on",
+    "lesson",
+    "sources",
+    "files",
+    "questions",
+    "quiz",
+    "module_cycle",
+}
+AUTHOR_LAB_OPTIONAL_FIELDS = {"official_bridge", "study_minutes"}
 
 
 class SpecValidationError(ValueError):
@@ -431,16 +519,30 @@ def _require_exact_fields(
         )
 
 
+def _reject_unknown_fields(
+    mapping: dict[str, Any], allowed: set[str], label: str
+) -> None:
+    unknown = sorted(set(mapping) - allowed)
+    if unknown:
+        raise SpecValidationError(
+            f"{label} has unknown field(s): {', '.join(unknown)}"
+        )
+
+
 def _validate_audience(course: dict[str, Any]) -> dict[str, Any] | None:
     audience = _object(course.get("audience"), "course.audience")
     level = _text(audience, "level", "course.audience")
     if level == "basic-python":
+        _require_exact_fields(audience, BASIC_AUDIENCE_FIELDS, "course.audience")
         _string_array(audience.get("assumes"), "course.audience.assumes")
         _string_array(
             audience.get("does_not_assume"), "course.audience.does_not_assume"
         )
         duration = _object(
             audience.get("lab_minutes"), "course.audience.lab_minutes"
+        )
+        _require_exact_fields(
+            duration, BASIC_LAB_MINUTES_FIELDS, "course.audience.lab_minutes"
         )
         if duration.get("min") != 30 or duration.get("max") != 45:
             raise SpecValidationError(
@@ -533,6 +635,7 @@ def _validate_assessed_profile_references(
     foundation_concept_sources: dict[str, set[str]],
 ) -> None:
     capabilities = profile["capabilities"]
+    mapped_foundation_concept_ids: set[str] = set()
     for index, capability in enumerate(capabilities):
         label = f"course.audience.prerequisite_profile.capabilities[{index}]"
         unknown_sources = sorted(set(capability["source_ids"]) - source_ids)
@@ -553,6 +656,9 @@ def _validate_assessed_profile_references(
                 f"{label}.foundation_concept_ids reference unknown Lab 00 concept(s): {', '.join(unknown_concepts)}"
             )
         if capability["decision"] == "foundation":
+            mapped_foundation_concept_ids.update(
+                capability["foundation_concept_ids"]
+            )
             cited_sources = {
                 source_id
                 for concept_id in capability["foundation_concept_ids"]
@@ -562,6 +668,19 @@ def _validate_assessed_profile_references(
                 raise SpecValidationError(
                     f"capability {capability['id']} foundation_concept_ids must cite at least one capability source_ids value"
                 )
+    if not mapped_foundation_concept_ids:
+        raise SpecValidationError(
+            "course.audience.prerequisite_profile must contain at least one "
+            "foundation capability for an evidenced prerequisite gap"
+        )
+    orphan_concept_ids = sorted(
+        foundation_concept_ids - mapped_foundation_concept_ids
+    )
+    if orphan_concept_ids:
+        raise SpecValidationError(
+            "Lab 00 concept(s) must be mapped from at least one foundation "
+            f"capability: {', '.join(orphan_concept_ids)}"
+        )
 
 
 def _validate_study_minutes(value: Any, *, label: str, foundation: bool) -> None:
@@ -768,6 +887,7 @@ def _validate_lesson(
     assessed: bool = False,
 ) -> tuple[set[str], set[str]]:
     lesson = _object(value, label)
+    _require_exact_fields(lesson, LESSON_FIELDS, label)
     prerequisites = _array(lesson.get("prerequisites"), f"{label}.prerequisites")
     if not prerequisites:
         raise SpecValidationError(f"{label}.prerequisites must not be empty")
@@ -775,6 +895,7 @@ def _validate_lesson(
     for index, raw in enumerate(prerequisites):
         item_label = f"{label}.prerequisites[{index}]"
         item = _object(raw, item_label)
+        _require_exact_fields(item, PREREQUISITE_FIELDS, item_label)
         item_id = _stable_id(item, item_label)
         if item_id in prerequisite_ids:
             raise SpecValidationError(f"duplicate prerequisite id: {item_id}")
@@ -783,6 +904,7 @@ def _validate_lesson(
             _text(item, key, item_label)
 
     problem = _object(lesson.get("problem"), f"{label}.problem")
+    _require_exact_fields(problem, PROBLEM_FIELDS, f"{label}.problem")
     for key in ("context", "naive_approach", "failure"):
         _text(problem, key, f"{label}.problem")
 
@@ -793,6 +915,7 @@ def _validate_lesson(
     for index, raw in enumerate(outcomes):
         item_label = f"{label}.outcomes[{index}]"
         item = _object(raw, item_label)
+        _require_exact_fields(item, OUTCOME_FIELDS, item_label)
         outcome_id = _stable_id(item, item_label)
         if outcome_id in outcome_ids:
             raise SpecValidationError(f"duplicate outcome id: {outcome_id}")
@@ -806,6 +929,8 @@ def _validate_lesson(
     for index, raw in enumerate(concepts):
         item_label = f"{label}.concepts[{index}]"
         concept = _object(raw, item_label)
+        concept_fields = CONCEPT_FIELDS | ({"operational_contract"} if assessed else set())
+        _require_exact_fields(concept, concept_fields, item_label)
         concept_id = _stable_id(concept, item_label)
         if concept_id in concept_ids:
             raise SpecValidationError(f"duplicate concept id: {concept_id}")
@@ -822,6 +947,7 @@ def _validate_lesson(
         for claim_index, raw_claim in enumerate(claims):
             claim_label = f"{item_label}.source_claims[{claim_index}]"
             claim = _object(raw_claim, claim_label)
+            _require_exact_fields(claim, SOURCE_CLAIM_FIELDS, claim_label)
             source_id = _text(claim, "source_id", claim_label)
             if source_id not in source_ids:
                 raise SpecValidationError(
@@ -862,6 +988,13 @@ def _validate_lesson(
         kind = _text(example, "kind", item_label)
         if kind not in {"runnable", "diagnostic"}:
             raise SpecValidationError(f"{item_label}.kind must be runnable or diagnostic")
+        example_fields = (
+            RUNNABLE_EXAMPLE_FIELDS
+            | ({"trace"} if assessed or "trace" in example else set())
+            if kind == "runnable"
+            else DIAGNOSTIC_EXAMPLE_FIELDS
+        )
+        _require_exact_fields(example, example_fields, item_label)
         example_kinds.add(kind)
         _text(example, "explanation", item_label)
         _validate_mappings(
@@ -871,7 +1004,7 @@ def _validate_lesson(
             outcome_ids=outcome_ids,
         )
         if kind == "runnable":
-            if assessed:
+            if assessed or "trace" in example:
                 _validate_trace(example, label=item_label, concept_ids=concept_ids)
             path = _safe_path(_text(example, "path", item_label), f"{item_label}.path")
             if path.suffix != ".py" or path.as_posix() in example_paths:
@@ -895,6 +1028,7 @@ def _validate_lesson(
             )
             _python_module(str(example["fix_code"]), f"{item_label}.fix_code")
     bridge = _object(lesson.get("capstone_bridge"), f"{label}.capstone_bridge")
+    _require_exact_fields(bridge, CAPSTONE_BRIDGE_FIELDS, f"{label}.capstone_bridge")
     for key in ("input", "output", "increment", "next"):
         _text(bridge, key, f"{label}.capstone_bridge")
     _string_array(lesson.get("summary"), f"{label}.summary")
@@ -936,6 +1070,7 @@ def _validate_quiz(
     for index, raw in enumerate(questions):
         item_label = f"{label}[{index}]"
         question = _object(raw, item_label)
+        _require_exact_fields(question, QUIZ_QUESTION_FIELDS, item_label)
         question_id = _stable_id(question, item_label)
         if question_id in quiz_ids:
             raise SpecValidationError(f"duplicate quiz id: {question_id}")
@@ -955,6 +1090,7 @@ def _validate_quiz(
         for choice_index, raw_choice in enumerate(choices):
             choice_label = f"{item_label}.choices[{choice_index}]"
             choice = _object(raw_choice, choice_label)
+            _require_exact_fields(choice, QUIZ_CHOICE_FIELDS, choice_label)
             choice_id = _stable_id(choice, choice_label)
             if choice_id in choice_ids:
                 raise SpecValidationError(f"duplicate choice id: {choice_id}")
@@ -1000,6 +1136,11 @@ def validate_spec(payload: Any) -> dict[str, Any]:
         raise SpecValidationError("schema_version must be 2")
 
     course = _object(spec.get("course"), "course")
+    _reject_unknown_fields(
+        course,
+        AUTHOR_COURSE_FIELDS | AUTHOR_COURSE_OPTIONAL_FIELDS,
+        "course",
+    )
     course_id = _text(course, "id", "course")
     if not ID_PATTERN.fullmatch(course_id):
         raise SpecValidationError("course.id must be lowercase kebab-case")
@@ -1078,10 +1219,15 @@ def validate_spec(payload: Any) -> dict[str, Any]:
         raise SpecValidationError("research.notes must contain at least one finding")
 
     foundation = _object(spec.get("foundation"), "foundation")
+    _reject_unknown_fields(
+        foundation,
+        AUTHOR_FOUNDATION_FIELDS | AUTHOR_FOUNDATION_OPTIONAL_FIELDS,
+        "foundation",
+    )
     if _text(foundation, "id", "foundation") != "lab00":
         raise SpecValidationError("foundation.id must be lab00")
     _text(foundation, "title", "foundation")
-    if assessed_profile is not None:
+    if assessed_profile is not None or "study_minutes" in foundation:
         _validate_study_minutes(
             foundation.get("study_minutes"),
             label="foundation.study_minutes",
@@ -1133,6 +1279,11 @@ def validate_spec(payload: Any) -> dict[str, Any]:
     for offset, raw in enumerate(labs, start=1):
         label = f"labs[{offset - 1}]"
         lab = _object(raw, label)
+        _reject_unknown_fields(
+            lab,
+            AUTHOR_LAB_FIELDS | AUTHOR_LAB_OPTIONAL_FIELDS,
+            label,
+        )
         lab_id = _text(lab, "id", label)
         expected_id = f"lab{offset:02d}"
         if lab_id != expected_id or not LAB_PATTERN.fullmatch(lab_id):
@@ -1141,7 +1292,7 @@ def validate_spec(payload: Any) -> dict[str, Any]:
         if _text(lab, "depends_on", label) != previous:
             raise SpecValidationError(f"{lab_id} must depend on {previous}")
         _text(lab, "title", label)
-        if assessed_profile is not None:
+        if assessed_profile is not None or "study_minutes" in lab:
             _validate_study_minutes(
                 lab.get("study_minutes"),
                 label=f"{label}.study_minutes",

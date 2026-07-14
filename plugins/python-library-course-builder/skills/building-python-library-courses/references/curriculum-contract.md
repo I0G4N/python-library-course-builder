@@ -131,6 +131,8 @@ Each capability contains exactly `"id"`, `"kind"`, `"subject"`, `"title"`, `"sta
 
 Capability IDs are stable and unique; `subject` and `title` are nonempty; `source_ids` is nonempty and unique; and `foundation_concept_ids` contains unique stable IDs. A `known` capability uses `assume` and an empty `foundation_concept_ids`. Every other status uses `foundation` and at least one mapped Lab 00 concept. Source IDs resolve to the official-source registry, `first_used_in` resolves to a graded Lab, foundation concept IDs resolve inside Lab 00, and each mapped foundation capability shares at least one cited source with its teaching concept.
 
+Lab 00 keeps a **general-Python layer** separate from a **route-specific library/domain layer**. In those layers, each `foundation` capability is taught through its **existing cognitive anchor**, **define the term**, **why the current route needs it now**, **complete concrete example and value flow**, **common misconception or applicability boundary**, and **recovery and check**. Express that sequence through the existing lesson concepts, examples, trace, quiz, and summary; **do not add parallel teaching-sequence fields** to the schema.
+
 A **large gap** is a pre-specification route decision, not a third capability decision. If the required capabilities need multiple prerequisite layers that cannot fit one focused Lab 00, stop **before** writing the target specification or destination and offer a prerequisite course or narrower route. A completed assessed specification therefore contains only `assume` and `foundation` decisions.
 
 Every assessed unit owns an exact `study_minutes` object:
@@ -269,6 +271,8 @@ Lab 00 and every graded Lab use the same `lesson` object:
 ```
 
 Write each new lesson from the assessed readiness evidence and its unit-specific `study_minutes`, not from a universal beginner label or duration. Each concept still defines the term, purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source claims.
+
+Every graded lesson expands one new knowledge mainline through the existing fields in this order: **project problem**, **plain-language predictive model**, **precise inputs, outputs, effects, and failures**, **same concrete value through the complete flow**, **valid case and boundary case**, **diagnosis and recovery**, then **quiz, coding question, and capstone increment**. Those practice surfaces map to the same concept and outcome. Render them as connected natural Simplified Chinese, not as an author-field inventory.
 
 In assessed mode every concept also has a closed `operational_contract` with exactly:
 

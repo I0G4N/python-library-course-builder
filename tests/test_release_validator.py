@@ -136,6 +136,29 @@ def test_inventory_scan_allows_contract_literals_under_tests(tmp_path: Path) -> 
     assert validator.scan_inventory(tmp_path, (contract,)) == []
 
 
+def test_release_template_token_allowlist_matches_the_shipped_template() -> None:
+    validator = load_validator()
+    template_root = (
+        ROOT
+        / "plugins"
+        / "python-library-course-builder"
+        / "skills"
+        / "building-python-library-courses"
+        / "assets"
+        / "course-template"
+    )
+    shipped_tokens = {
+        token
+        for path in template_root.rglob("*")
+        if path.is_file()
+        for token in validator.TEMPLATE_TOKEN_RE.findall(
+            path.read_text(encoding="utf-8")
+        )
+    }
+
+    assert validator.EXPECTED_TEMPLATE_TOKENS == shipped_tokens
+
+
 def test_npm_lock_validation_rejects_root_dependency_mismatch(tmp_path: Path) -> None:
     validator = load_validator()
     package_path = tmp_path / "package.json"

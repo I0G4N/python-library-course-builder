@@ -28,6 +28,7 @@ Reject the route if a core learning outcome depends on unverifiable behavior.
 - Lab 00 gets a new learner from setup to one passing smoke command.
 - The `assessed` profile records **evidence-based readiness** rather than a beginner/intermediate label. Reuse user-supplied evidence and ask only about selected-route capabilities that remain unknown.
 - A **two-layer Lab 00** fills only evidenced **general-Python gaps**, then teaches the **route-specific library and domain foundations** needed before Lab 01. Treat unseen **new material** as teaching, not **review**.
+- In each layer, every evidenced gap follows one complete path: **existing cognitive anchor** -> **define the term** -> **why the current route needs it now** -> **complete concrete example and value flow** -> **common misconception or applicability boundary** -> **recovery and check**. Do not replace this with a generic prerequisite summary.
 - Lab 00 uses 45-60 minutes with a gap-specific reason. An ordinary graded Lab uses 30-45 minutes. Only a genuinely combined, derivation-heavy, or lifecycle-heavy Lab uses 45-60 minutes with a specific reason.
 - Each graded Lab has only the prerequisites it needs and depends on the previous Lab.
 - Reject prerequisite leakage: do not label syntax, framework behavior, or mathematics as a refresh unless an earlier lesson actually taught it.
@@ -47,6 +48,10 @@ For a broad library, prefer one deep product track over a catalog of unrelated s
 
 Use one visible sequence: concrete capstone problem -> plain-language understanding -> exact operational contract -> complete real-value execution trace -> boundary and error reasoning -> runnable and diagnostic examples -> knowledge check -> coding/capstone increment. Render the open core with the learner-safe labels `先这样理解`, `输入和输出是什么`, and `拿一个具体输入走一遍` before deeper implementation and source details.
 
+For every graded chapter, make the deeper teaching route inspectable as: **project problem** -> **plain-language predictive model** -> **precise inputs, outputs, effects, and failures** -> **same concrete value through the complete flow** -> **valid case and boundary case** -> **diagnosis and recovery** -> **quiz, coding question, and capstone increment**. The final three practice surfaces exercise the same concept and outcome, and the chapter retains one new knowledge mainline.
+
+Write the learner path as connected natural Simplified Chinese: define a term, connect it to the current task in the next sentence, transition into a concrete value, and explain the value's change before introducing the next structure. Reject an author-field inventory that merely stacks definition, purpose, mechanism, boundaries, and pitfalls as learner-facing labels.
+
 For every concept, check that the structured lesson answers:
 
 - What is the object or operation, in precise plain language?
@@ -60,6 +65,8 @@ For every concept, check that the structured lesson answers:
 The **operational contract** is closed around the tested behavior: kind; visible forms; inputs with meanings, forms, concrete examples, and constraints; outputs with examples; effects; and failure modes that connect condition -> observable -> recovery. Choose `api`, `mechanism`, `formula`, `lifecycle`, or `data-model` deliberately.
 
 The **complete real-value execution trace** carries the same value or state through at least two named transitions. It shows intermediate shape, type, state, or ownership where relevant and uses the exact convention graded by tests. Generic “execute one operation” prose is not a trace.
+
+Before delivery, require a **boundary witness** for every declared failure and every independently stated boundary. Execute one representative counterexample, compare its observed result with the contract, apply the declared recovery, re-execute the corrected path, and record the recovered observable. Keep the condition, observable, and recovery consistent across the prose contract, runnable or diagnostic code, expected output, diagnostic quiz and, for graded concepts, coding prompt plus public and hidden tests. Reject a declaration that is only described but not implemented and exercised.
 
 Every chapter has at least two examples: a complete CPU/offline runnable program with command and expected output, and a diagnostic with wrong code, symptom, cause, and fixed code. The runnable program is executed against the untouched starter projection before coding unlock, so it cannot import or call an incomplete learner TODO; use self-contained code or only fully pre-scaffolded helpers. Examples must be minimal and aligned with the pinned version. Use Python syntax highlighting and a true monospace font in both lecture code blocks and the editor. Render readiness-matched prerequisites, problem, outcomes, and runnable examples first; place deeper principles/design tradeoffs and diagnostics in accessible native disclosures. Keep a complete Markdown fallback. Keep prose readable at ordinary browser zoom; avoid oversized headings, crowded cards, and duplicate panels.
 

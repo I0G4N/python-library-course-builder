@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
-
 
 MISSING = object()
 
@@ -438,144 +436,9 @@ def _operational_contract(kind: str) -> dict[str, Any]:
 
 def make_assessed_spec() -> dict[str, object]:
     """Return the complete assessed-mode contract fixture used by RED tests."""
-    spec = deepcopy(make_spec())
-    lab00_concept_id = "lab00.c-mechanism"
-    spec["course"]["audience"] = {  # type: ignore[index]
-        "level": "assessed",
-        "prerequisite_profile": {
-            "assessment": "learner-self-report",
-            "capabilities": [
-                {
-                    "id": "python-functions",
-                    "kind": "python",
-                    "subject": "Python 函数",
-                    "title": "定义并调用 Python 函数",
-                    "status": "known",
-                    "decision": "assume",
-                    "basis": "explicit-prerequisite",
-                    "source_ids": ["python-docs"],
-                    "first_used_in": "lab01",
-                    "foundation_concept_ids": [],
-                },
-                {
-                    "id": "json-data-model",
-                    "kind": "library",
-                    "subject": "JSON 数据模型",
-                    "title": "把 JSON 值映射为 Python 值",
-                    "status": "partial",
-                    "decision": "foundation",
-                    "basis": "selected-route-usage",
-                    "source_ids": ["python-docs"],
-                    "first_used_in": "lab01",
-                    "foundation_concept_ids": [lab00_concept_id],
-                },
-                {
-                    "id": "domain-boundary",
-                    "kind": "domain",
-                    "subject": "序列化边界",
-                    "title": "识别序列化输入与输出边界",
-                    "status": "missing",
-                    "decision": "foundation",
-                    "basis": "selected-route-usage",
-                    "source_ids": ["python-docs"],
-                    "first_used_in": "lab02",
-                    "foundation_concept_ids": [lab00_concept_id],
-                },
-                {
-                    "id": "json-errors",
-                    "kind": "library",
-                    "subject": "JSON 解析失败",
-                    "title": "诊断格式错误的 JSON 输入",
-                    "status": "unsure",
-                    "decision": "foundation",
-                    "basis": "explicit-prerequisite",
-                    "source_ids": ["python-docs"],
-                    "first_used_in": "lab03",
-                    "foundation_concept_ids": [lab00_concept_id],
-                },
-            ],
-        },
-    }
+    from tests.assessed_course_fixture import make_assessed_course_spec
 
-    foundation = spec["foundation"]  # type: ignore[index]
-    foundation_lesson = foundation["lesson"]  # type: ignore[index]
-    json_shape = deepcopy(foundation_lesson["concepts"][0])
-    json_shape.update(
-        {
-            "id": "lab00.c-json-shape",
-            "name": "JSON 值的 Python 形态",
-            "definition": "JSON 值只会映射到一组明确的 Python 值形态。",
-        }
+    return make_assessed_course_spec(
+        make_spec(),
+        operational_contract=_operational_contract,
     )
-    foundation_lesson["concepts"].append(json_shape)
-    foundation["study_minutes"] = {  # type: ignore[index]
-        "tier": "foundation",
-        "min": 45,
-        "max": 60,
-        "reason": "学习者自评发现本路线会用到的 JSON 前置知识缺口。",
-    }
-
-    operational_kinds = iter(
-        (
-            "api",
-            "data-model",
-            "mechanism",
-            "formula",
-            "lifecycle",
-            "data-model",
-            "api",
-        )
-    )
-    sections = [foundation, *spec["labs"]]  # type: ignore[index]
-    for section in sections:
-        lesson = section["lesson"]
-        concept_ids = [concept["id"] for concept in lesson["concepts"]]
-        for concept in lesson["concepts"]:
-            concept["operational_contract"] = _operational_contract(
-                next(operational_kinds)
-            )
-
-        runnable = next(
-            example for example in lesson["examples"] if example["kind"] == "runnable"
-        )
-        runnable["concept_ids"] = list(concept_ids)
-        runnable["trace"] = [
-            {
-                "id": f"{section['id']}.t-input",
-                "concept_ids": [concept_ids[0]],
-                "input_state": 'JSON 文本输入：text = \'{"ready": true}\'',
-                "operation": "把具体输入传入声明的 JSON 转换边界。",
-                "output_state": "转换操作收到一段已验证的 JSON 文本。",
-                "explanation": "这一步明确输入形式以及调用者对输入的所有权。",
-            },
-            {
-                "id": f"{section['id']}.t-result",
-                "concept_ids": [concept_ids[-1]],
-                "input_state": "经过验证的 JSON 文本已经可以解析。",
-                "operation": "调用 json.loads(text) 解析 JSON 文本。",
-                "output_state": "Python 字典输出：result = {'ready': True}",
-                "explanation": "这一步明确解析后的可观察 Python 字典输出。",
-            },
-        ]
-
-        diagnostic = next(
-            example
-            for example in lesson["examples"]
-            if example["kind"] == "diagnostic"
-        )
-        diagnostic["concept_ids"] = list(concept_ids)
-        for quiz in section["quiz"]:
-            quiz["concept_ids"] = list(concept_ids)
-
-    for index, lab in enumerate(spec["labs"]):  # type: ignore[index]
-        if index < 2:
-            lab["study_minutes"] = {"tier": "standard", "min": 30, "max": 45}
-        else:
-            lab["study_minutes"] = {
-                "tier": "extended",
-                "min": 45,
-                "max": 60,
-                "reason": "最终 Lab 同时组合 JSON 转换、错误诊断和官方接口替换。",
-            }
-
-    return spec

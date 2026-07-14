@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 import re
@@ -26,6 +27,101 @@ def _assert_in_order(document: str, phrases: tuple[str, ...]) -> None:
     assert missing == [], f"missing ordered phrase(s): {missing}"
     positions = [document.index(phrase) for phrase in phrases]
     assert positions == sorted(positions), phrases
+
+
+def _markdown_headings(document: str) -> list[tuple[int, int, str]]:
+    """Return real Markdown headings, ignoring heading-like lines in code fences."""
+
+    headings: list[tuple[int, int, str]] = []
+    in_fence = False
+    for line_number, line in enumerate(document.splitlines()):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        match = re.fullmatch(r"(#{1,6})\s+(.+?)\s*", line)
+        if match:
+            headings.append((line_number, len(match.group(1)), match.group(2)))
+    assert not in_fence, "unclosed Markdown code fence"
+    return headings
+
+
+def _markdown_children(document: str, *, level: int) -> list[tuple[str, str]]:
+    """Return direct sections at one heading level in authored order."""
+
+    lines = document.splitlines()
+    headings = _markdown_headings(document)
+    children: list[tuple[str, str]] = []
+    for heading_index, (start, heading_level, title) in enumerate(headings):
+        if heading_level != level:
+            continue
+        end = len(lines)
+        for next_start, next_level, _ in headings[heading_index + 1 :]:
+            if next_level <= level:
+                end = next_start
+                break
+        children.append((title, "\n".join(lines[start + 1 : end]).strip()))
+    return children
+
+
+def _markdown_section_map(document: str, *, level: int) -> dict[str, str]:
+    sections = _markdown_children(document, level=level)
+    titles = [title for title, _ in sections]
+    assert len(titles) == len(set(titles)), f"duplicate level-{level} headings: {titles}"
+    return dict(sections)
+
+
+def _markdown_lead(document: str, *, child_level: int) -> str:
+    """Return prose before the first direct child heading."""
+
+    lines = document.splitlines()
+    child_starts = [
+        line_number
+        for line_number, level, _ in _markdown_headings(document)
+        if level == child_level
+    ]
+    end = min(child_starts, default=len(lines))
+    return "\n".join(lines[:end]).strip()
+
+
+def _fenced_blocks(document: str, language: str) -> list[str]:
+    return re.findall(
+        rf"```{re.escape(language)}[ \t]*\n(.*?)\n```",
+        document,
+        flags=re.S,
+    )
+
+
+def _load_markdown_function(document: str, function_name: str):
+    """Execute only imports and one named function from a documented Python block."""
+
+    candidates = []
+    for block in _fenced_blocks(document, "python"):
+        module = ast.parse(block)
+        if any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == function_name
+            for node in module.body
+        ):
+            candidates.append(module)
+    assert len(candidates) == 1, (
+        f"expected one Python block defining {function_name}, got {len(candidates)}"
+    )
+
+    body = [
+        node
+        for node in candidates[0].body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        or (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == function_name
+        )
+    ]
+    module = ast.fix_missing_locations(ast.Module(body=body, type_ignores=[]))
+    namespace: dict[str, object] = {}
+    exec(compile(module, "<documented-python>", "exec"), namespace)
+    return namespace[function_name]
 
 
 def test_course_template_contains_no_runtime_generated_artifacts() -> None:
@@ -562,6 +658,333 @@ def test_teaching_depth_reference_defines_positive_chapter_recipe() -> None:
     assert "with a specific reason naming that work" in time_contract
 
 
+def test_skill_links_the_complete_positive_teaching_example_directly() -> None:
+    skill = _read("SKILL.md")
+    depth = _read("references/teaching-depth-contract.md")
+    example_path = SKILL_ROOT / "references/complete-teaching-example.md"
+    example_link = (
+        "[complete-teaching-example.md](references/complete-teaching-example.md)"
+    )
+    relative_link = "[complete teaching example](complete-teaching-example.md)"
+
+    assert example_path.is_file(), "the Skill needs one first-class positive example"
+    assert example_link in skill
+    assert relative_link in depth
+    assert "before authoring learner-facing prose" in skill
+
+
+def test_teaching_depth_contract_expands_each_gap_and_graded_chapter() -> None:
+    depth = _read("references/teaching-depth-contract.md")
+    foundation = depth.split("## Teach every evidenced gap completely", 1)[1].split(
+        "## Expand every graded chapter", 1
+    )[0]
+    graded = depth.split("## Expand every graded chapter", 1)[1].split(
+        "## Close the operational contract", 1
+    )[0]
+
+    assert "general-Python layer" in foundation
+    assert "route-specific library/domain layer" in foundation
+    _assert_in_order(
+        foundation,
+        (
+            "existing cognitive anchor",
+            "define the term",
+            "why the current route needs it now",
+            "complete concrete example and value flow",
+            "common misconception or applicability boundary",
+            "recovery and check",
+        ),
+    )
+    assert "every `foundation` capability" in foundation
+    assert "one complete explanation" in foundation
+
+    _assert_in_order(
+        graded,
+        (
+            "project problem",
+            "plain-language predictive model",
+            "precise inputs, outputs, effects, and failures",
+            "same concrete value through the complete flow",
+            "valid case and boundary case",
+            "diagnosis and recovery",
+            "quiz, coding question, and capstone increment",
+        ),
+    )
+    assert "one new knowledge mainline" in graded
+    assert "same concept and outcome" in graded
+
+
+def test_teaching_contract_requires_connected_natural_simplified_chinese() -> None:
+    depth = _read("references/teaching-depth-contract.md")
+    natural = depth.split("## Write natural learner-facing Chinese", 1)[1].split(
+        "## Adapt the recipe to the concept kind", 1
+    )[0]
+
+    _assert_in_order(
+        natural,
+        (
+            "Define the term in one clear sentence",
+            "very next sentence",
+            "current task",
+            "natural transition",
+            "concrete value",
+        ),
+    )
+    assert "Simplified Chinese" in natural
+    assert "author-field inventory" in natural
+    assert "definition -> purpose -> mechanism" in natural
+    assert "connected explanation" in natural
+
+
+def test_complete_example_models_two_structured_lab00_layers() -> None:
+    path = SKILL_ROOT / "references/complete-teaching-example.md"
+    assert path.is_file()
+    example = path.read_text(encoding="utf-8")
+
+    assert len(example.splitlines()) < 460
+    top_level_sections = _markdown_section_map(example, level=2)
+    lab00 = top_level_sections["Lab 00：只补证据指向的缺口"]
+    layers = _markdown_children(lab00, level=3)
+    assert [title for title, _ in layers] == [
+        "第一层：通用 Python 缺口",
+        "第二层：路线专属的库与领域基础",
+    ]
+
+    six_steps = (
+        "你已经会什么",
+        "先把术语说清楚",
+        "为什么这条路线现在需要它",
+        "拿一个完整的值走一遍",
+        "常见误区与边界",
+        "怎样恢复并检查",
+    )
+    for layer_title, layer in layers:
+        steps = _markdown_children(layer, level=4)
+        assert [title for title, _ in steps] == list(six_steps), layer_title
+        assert all(body.strip() for _, body in steps), layer_title
+
+
+def test_complete_example_executes_every_lab00_boundary_recovery(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    example = _read("references/complete-teaching-example.md")
+    lab00 = dict(_markdown_children(example, level=2))[
+        "Lab 00：只补证据指向的缺口"
+    ]
+    layers = dict(_markdown_children(lab00, level=3))
+    expected = {
+        "第一层：通用 Python 缺口": {
+            "缺少必填键：补键后重试": ("KeyError", True),
+        },
+        "第二层：路线专属的库与领域基础": {
+            "JSON 布尔拼写：改用 Python 值后重试": ("NameError", True),
+            "顶层数组：改成 object 后重试": (
+                "TypeError: top-level JSON must be an object",
+                True,
+            ),
+        },
+    }
+
+    assert set(layers) == set(expected)
+    for layer_title, expected_witnesses in expected.items():
+        recovery = dict(_markdown_children(layers[layer_title], level=4))[
+            "怎样恢复并检查"
+        ]
+        witnesses = dict(_markdown_children(recovery, level=5))
+        assert set(witnesses) == set(expected_witnesses), layer_title
+
+        for witness_title, (observed, recovered) in expected_witnesses.items():
+            blocks = _fenced_blocks(witnesses[witness_title], "python")
+            assert len(blocks) == 1, (layer_title, witness_title)
+            namespace: dict[str, object] = {}
+            exec(
+                compile(blocks[0], f"<{layer_title}/{witness_title}>", "exec"),
+                namespace,
+            )
+            captured = capsys.readouterr().out.strip().splitlines()
+            assert captured == [observed, repr(recovered)]
+            assert namespace["observed_exception"] == observed
+            assert namespace["recovered_observable"] is recovered
+
+
+def test_complete_example_keeps_the_graded_chapter_to_one_mainline() -> None:
+    example = _read("references/complete-teaching-example.md")
+    top_level_sections = _markdown_section_map(example, level=2)
+    graded = top_level_sections["计分章节：把 JSON 文本变成可验证的配置值"]
+    lead = _markdown_lead(graded, child_level=3)
+
+    assert "只保留" in lead
+    assert "一条新知识主线" in lead
+    assert "`load_settings`" in lead
+
+    graded_sections = _markdown_section_map(graded, level=3)
+    for section_title in (
+        "先预测会发生什么",
+        "输入和输出是什么",
+        "有效案例与边界案例",
+        "诊断与恢复",
+        "知识检查",
+        "编码任务与 capstone 增量",
+    ):
+        assert section_title in graded_sections
+
+    activity_mapping = graded_sections["编码任务与 capstone 增量"]
+    concept_match = re.search(r"concept_ids:\s*\[([^\]]+)]", activity_mapping)
+    assert concept_match is not None
+    concept_ids = [
+        item.strip() for item in concept_match.group(1).split(",") if item.strip()
+    ]
+    assert concept_ids == ["lab01.c-json-object-boundary"]
+    assert "schema_version" not in example
+    assert "完整课程 JSON fixture" in example
+
+
+def test_complete_example_executes_load_settings_and_both_recoveries(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    example = _read("references/complete-teaching-example.md")
+    graded = _markdown_section_map(example, level=2)[
+        "计分章节：把 JSON 文本变成可验证的配置值"
+    ]
+    graded_sections = _markdown_section_map(graded, level=3)
+
+    load_settings = _load_markdown_function(
+        graded_sections["完整可运行例子"], "load_settings"
+    )
+    valid_text = '{"enabled": true, "retries": 2}'
+    assert load_settings(valid_text) == {"enabled": True, "retries": 2}
+    assert valid_text == '{"enabled": true, "retries": 2}'
+    with pytest.raises(json.JSONDecodeError):
+        load_settings('{"enabled": true,}')
+    with pytest.raises(TypeError, match="top-level JSON must be an object"):
+        load_settings('["enabled"]')
+    assert load_settings('{"enabled": true, "retries": 3}') == {
+        "enabled": True,
+        "retries": 3,
+    }
+    assert load_settings('{"enabled": false}') == {"enabled": False}
+
+    diagnostic = graded_sections["诊断与恢复"]
+    boundary_sections = _markdown_section_map(diagnostic, level=4)
+    expected_witnesses = {
+        "JSON 语法错误：修正文本后重试": {
+            "wrong_text": '{"enabled": true,}',
+            "recovery_text": '{"enabled": true, "retries": 3}',
+            "observed_exception": "JSONDecodeError",
+            "recovered_observable": {"enabled": True, "retries": 3},
+        },
+        "顶层数组：改成 object 后重试": {
+            "wrong_text": '["enabled"]',
+            "recovery_text": '{"enabled": false}',
+            "observed_exception": "TypeError: top-level JSON must be an object",
+            "recovered_observable": {"enabled": False},
+        },
+    }
+    assert set(boundary_sections) == set(expected_witnesses)
+    for title, expected in expected_witnesses.items():
+        blocks = _fenced_blocks(boundary_sections[title], "python")
+        assert len(blocks) == 1, title
+        assert re.search(r"^import json$", blocks[0], flags=re.M), title
+        namespace: dict[str, object] = {}
+        exec(compile(blocks[0], f"<{title}>", "exec"), namespace)
+        captured = capsys.readouterr().out.strip().splitlines()
+        expected_output = [
+            expected["observed_exception"],
+            repr(expected["recovered_observable"]),
+        ]
+        assert captured == expected_output
+        documented_outputs = _fenced_blocks(boundary_sections[title], "text")
+        assert len(documented_outputs) == 1, title
+        assert documented_outputs[0].splitlines() == expected_output
+        for name, value in expected.items():
+            assert namespace[name] == value, (title, name)
+
+
+def test_authoring_and_curriculum_require_the_deeper_teaching_sequences() -> None:
+    authoring = _read("references/authoring-rubric.md")
+    curriculum = _read("references/curriculum-contract.md")
+
+    for document in (authoring, curriculum):
+        for phrase in (
+            "existing cognitive anchor",
+            "define the term",
+            "why the current route needs it now",
+            "complete concrete example and value flow",
+            "common misconception or applicability boundary",
+            "recovery and check",
+            "plain-language predictive model",
+            "same concrete value through the complete flow",
+            "valid case and boundary case",
+            "diagnosis and recovery",
+            "quiz, coding question, and capstone increment",
+        ):
+            assert phrase in document
+    assert "general-Python layer" in curriculum
+    assert "route-specific library/domain layer" in curriculum
+    assert "do not add parallel teaching-sequence fields" in curriculum
+
+
+def test_teaching_contract_requires_end_to_end_boundary_witnesses() -> None:
+    depth = _read("references/teaching-depth-contract.md")
+    authoring = _read("references/authoring-rubric.md")
+    forward = _read("references/forward-test-rubric.md")
+
+    heading = "## Prove every declared boundary end to end"
+    assert heading in depth
+    witness = depth.split(heading, 1)[1].split(
+        "## Write natural learner-facing Chinese", 1
+    )[0]
+    _assert_in_order(
+        witness,
+        (
+            "For each declared `failure_modes` entry and each independently stated boundary",
+            "representative invalid input or state",
+            "execute the actual example or reference path",
+            "exact observed output or exception",
+            "declared observable",
+            "apply the declared recovery",
+            "re-execute the corrected path",
+            "recovered observable",
+            "condition, observable, and recovery",
+            "runnable or diagnostic code",
+            "expected output",
+            "diagnostic quiz",
+            "coding prompt",
+            "public and hidden tests",
+            "Reject delivery",
+        ),
+    )
+    assert "merely listed" in witness
+    lesson_quality = authoring.split("## 3. Lesson quality", 1)[1].split(
+        "## 4. Exercise design", 1
+    )[0]
+    source_matrix = forward.split("### Source and structure", 1)[1].split(
+        "### TDD projections", 1
+    )[0]
+    rubric_witnesses = (
+        next(
+            paragraph
+            for paragraph in lesson_quality.split("\n\n")
+            if "boundary witness" in paragraph
+        ),
+        next(line for line in source_matrix.splitlines() if "boundary witness" in line),
+    )
+    for document in rubric_witnesses:
+        assert "boundary witness" in document
+        assert "every declared failure" in document
+        assert "every independently stated boundary" in document
+        assert "representative counterexample" in document
+        assert "apply" in document and "recovery" in document
+        assert "re-execute" in document
+        assert "recovered observable" in document
+        assert "condition, observable, and recovery" in document
+        assert "prose contract" in document
+        assert "expected output" in document
+        assert "diagnostic quiz" in document
+        assert "coding prompt" in document
+        assert "public and hidden tests" in document
+
+
 def test_authoring_contract_requires_adaptive_depth_and_activity_alignment() -> None:
     authoring = _read("references/authoring-rubric.md")
     authoring_lower = authoring.lower()
@@ -617,34 +1040,71 @@ def test_authoring_contract_requires_adaptive_depth_and_activity_alignment() -> 
     assert "every outcome maps to an example and to an assessment" in curriculum
 
 
-def test_forward_rubric_defines_projection_and_paired_skill_score_gates() -> None:
-    forward = _read("references/forward-test-rubric.md")
-    paired = forward.split("## Paired Skill-output evaluation", 1)[1].split(
-        "## Optional small-target transfer test", 1
-    )[0]
+def test_skill_docs_reject_old_agent_evaluation_terms_and_keep_local_acceptance() -> None:
+    documents = {
+        "SKILL.md": _read("SKILL.md"),
+        "teaching-depth-contract.md": _read(
+            "references/teaching-depth-contract.md"
+        ),
+        "authoring-rubric.md": _read("references/authoring-rubric.md"),
+        "curriculum-contract.md": _read("references/curriculum-contract.md"),
+        "complete-teaching-example.md": _read(
+            "references/complete-teaching-example.md"
+        ),
+        "forward-test-rubric.md": _read("references/forward-test-rubric.md"),
+    }
+    forward = documents["forward-test-rubric.md"]
+    assert "## Required fail-closed negative tests" in forward
+    assert "## Required generated-project acceptance matrix" in forward
+    assert "### Repository quality" in forward
+    assert "local generated project" in forward
+    assert "verify_learning_project.py" in forward
 
-    assert (
-        "required for any change to readiness or teaching-depth Skill guidance"
-        in paired
+    forbidden_patterns = {
+        "fresh-agent evaluation": r"\bfresh[- ]agent\b",
+        "paired output evaluation": r"\bpaired(?: skill)?[- ]output\b",
+        "old/new output comparison": (
+            r"\b(?:compare|evaluate|score)\b[^\n]{0,120}\bold output\b"
+            r"[^\n]{0,120}\bnew output\b|"
+            r"\bold output\b[^\n]{0,120}\bnew output\b[^\n]{0,80}"
+            r"\b(?:evaluation|comparison|score|gate)\b"
+        ),
+        "old score gate": (
+            r"\b(?:pass|score|gate)[^\n]{0,80}\b10/12\b|"
+            r"\b10/12\b[^\n]{0,80}\b(?:dimension|score|gate)\b"
+        ),
+        "transfer evaluation": (
+            r"\btransfer (?:evaluation|comparison|score|gate|test)\b|"
+            r"\b(?:red/green|small-target|large-target) transfer\b"
+        ),
+        "no-skill baseline": r"\bno[- ]skill baseline\b",
+        "agent/output baseline": (
+            r"\b(?:agent|output|course)[- ]baseline\b|"
+            r"\bbaseline (?:agent|output|comparison|evaluation|score|gate)\b"
+        ),
+    }
+    regressions = {
+        document_name: [
+            label
+            for label, pattern in forbidden_patterns.items()
+            if re.search(pattern, document, flags=re.I)
+        ]
+        for document_name, document in documents.items()
+    }
+    assert regressions == {name: [] for name in documents}
+
+    old_new_pattern = forbidden_patterns["old/new output comparison"]
+    assert not re.search(
+        old_new_pattern,
+        "The old output file is renamed to the new output file.",
+        flags=re.I,
     )
-    assert "Preserve one user-style prompt and target" in paired
-    assert (
-        "the same prompt and revised Skill to a fresh isolated agent that cannot "
-        "see the old result, expected answer, or score"
-        in paired
-    )
-    assert "Every score needs an **evidence citation**" in paired
-    assert (
-        "Pass only with **no zero**, at least **10/12**, and **exactly 2** on "
-        "dimensions 3 and 4."
-        in paired
-    )
-    assert (
-        "If the new output misses any gate, strengthen the reusable Skill/reference "
-        "wording and rerun with another fresh isolated agent; do not reinterpret "
-        "the same evidence upward."
-        in paired
-    )
+    for prohibited in (
+        "Compare the old output with the new output before delivery.",
+        "The old output and new output evaluation is a release gate.",
+    ):
+        assert re.search(old_new_pattern, prohibited, flags=re.I), prohibited
+
     for phrase in (
         "prerequisite profile",
         "gap decision",
@@ -660,19 +1120,6 @@ def test_forward_rubric_defines_projection_and_paired_skill_score_gates() -> Non
         "learner-safe labels",
     ):
         assert phrase in forward
-
-    for phrase in (
-        "old output",
-        "new output",
-        "route-relevant readiness assessment",
-        "evidence-based two-layer foundation plan",
-        "precise operational contract",
-        "complete concrete-value worked trace",
-        "concept-to-quiz/coding/capstone alignment",
-        "natural Simplified-Chinese explanation",
-        "evidence citation",
-    ):
-        assert phrase in paired
 
 
 def test_skill_requires_executable_content_quality() -> None:

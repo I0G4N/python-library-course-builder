@@ -207,25 +207,30 @@ def test_skill_routes_references_at_point_of_use() -> None:
         "Read [architecture.md](references/architecture.md) before validating "
         "the generated runtime and ownership boundaries.",
         "Use [forward-test-rubric.md](references/forward-test-rubric.md) for "
-        "the required generated-project acceptance matrix; treat its "
-        "fresh-agent transfer evaluation as optional.",
+        "the required local generated-project acceptance matrix.",
     )
     for route in point_of_use_routes:
         assert route in body, f"SKILL.md needs point-of-use routing: {route}"
 
 
-def test_fresh_agent_transfer_evaluation_is_advisory() -> None:
+def test_forward_acceptance_is_local_generated_project_only() -> None:
     forward = _required_text(SKILL_ROOT / "references" / "forward-test-rubric.md")
 
-    assert (
-        "Fresh-agent transfer evaluation is optional and is not a standard "
-        "release gate."
-    ) in forward
-    assert "## Optional small-target transfer test" in forward
-    assert "## Optional large-target gate test" in forward
-    assert "A no-Skill baseline is optional" in forward
-    assert "## Required small-target transfer test" not in forward
-    assert "## Required large-target gate test" not in forward
+    assert "acceptance gate for a **local generated project**" in forward
+    assert "scripts/verify_learning_project.py" in forward
+    assert "## Required fail-closed negative tests" in forward
+    assert "## Required generated-project acceptance matrix" in forward
+    for removed_gate in (
+        "fresh-agent",
+        "fresh agent",
+        "paired skill-output",
+        "old output",
+        "new output",
+        "10/12",
+        "transfer evaluation",
+        "no-skill baseline",
+    ):
+        assert removed_gate not in forward.lower()
 
 
 def test_skill_preserves_specification_to_split_source_boundary() -> None:

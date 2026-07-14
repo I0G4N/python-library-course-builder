@@ -16,7 +16,10 @@ SKILL_ROOT = (
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 sys.path.insert(0, str(SKILL_ROOT / "assets" / "course-template" / "platform"))
 
-from coursekit.compiler import load_course_source  # noqa: E402
+from coursekit.compiler import (  # noqa: E402
+    SourceValidationError,
+    load_course_source,
+)
 from scaffold_course import write_canonical_source  # noqa: E402
 from validate_course import SpecValidationError, validate_spec  # noqa: E402
 from tests.course_v2_fixture import make_assessed_spec, make_spec  # noqa: E402
@@ -54,6 +57,20 @@ def _example(spec: Spec, section_id: str, kind: str) -> dict[str, Any]:
 def _rejects(spec: Spec, *fragments: str) -> None:
     with pytest.raises(SpecValidationError) as caught:
         validate_spec(spec)
+    message = str(caught.value)
+    for fragment in fragments:
+        assert fragment in message, message
+
+
+def _rejects_in_author_and_split_source(
+    tmp_path: Path, spec: Spec, *fragments: str
+) -> None:
+    _rejects(spec, *fragments)
+
+    platform = tmp_path / "platform"
+    write_canonical_source(platform, spec)
+    with pytest.raises(SourceValidationError) as caught:
+        load_course_source(platform / "course" / "source")
     message = str(caught.value)
     for fragment in fragments:
         assert fragment in message, message
@@ -123,18 +140,24 @@ def test_complete_assessed_spec_preserves_depth_and_trace_contracts() -> None:
     assert validated["labs"][2]["study_minutes"]["reason"]
 
     sections = [validated["foundation"], *validated["labs"]]
-    contracts = [
-        concept["operational_contract"]
+    concepts = {
+        concept["id"]: concept
         for section in sections
         for concept in section["lesson"]["concepts"]
-    ]
-    assert {contract["kind"] for contract in contracts} == {
-        "api",
-        "mechanism",
-        "formula",
-        "lifecycle",
-        "data-model",
     }
+    assert {
+        concept_id: concept["operational_contract"]["kind"]
+        for concept_id, concept in concepts.items()
+    } == {
+        "lab00.c-mechanism": "api",
+        "lab00.c-json-shape": "data-model",
+        "lab01.c-mechanism": "mechanism",
+        "lab02.c-official": "api",
+        "lab02.c-mechanism": "mechanism",
+        "lab03.c-official": "api",
+        "lab03.c-mechanism": "mechanism",
+    }
+    contracts = [concept["operational_contract"] for concept in concepts.values()]
     assert all(
         all(contract[field] for field in ("forms", "inputs", "outputs", "effects", "failure_modes"))
         for contract in contracts
@@ -167,6 +190,94 @@ def test_split_source_preserves_the_complete_assessed_contract(tmp_path: Path) -
     assert course.labs[0].lesson_outline["examples"][0]["trace"] == spec["labs"][
         0
     ]["lesson"]["examples"][0]["trace"]
+
+
+def test_assessed_course_requires_an_evidenced_foundation_gap(
+    tmp_path: Path,
+) -> None:
+    spec = make_assessed_spec()
+    capabilities = _audience(spec)["prerequisite_profile"]["capabilities"]
+    for capability in capabilities:
+        capability.update(
+            {
+                "status": "known",
+                "decision": "assume",
+                "foundation_concept_ids": [],
+            }
+        )
+
+    _rejects_in_author_and_split_source(
+        tmp_path, spec, "at least one", "foundation capability"
+    )
+
+
+def test_every_lab00_concept_is_explained_by_a_foundation_capability(
+    tmp_path: Path,
+) -> None:
+    spec = make_assessed_spec()
+    _capability(spec, "json-data-model")["foundation_concept_ids"] = [
+        "lab00.c-mechanism"
+    ]
+
+    _rejects_in_author_and_split_source(
+        tmp_path, spec, "lab00.c-json-shape", "foundation capability"
+    )
+
+
+def test_assumed_capability_cannot_claim_foundation_concept_coverage(
+    tmp_path: Path,
+) -> None:
+    spec = make_assessed_spec()
+    _capability(spec, "python-functions")["foundation_concept_ids"] = [
+        "lab00.c-json-shape"
+    ]
+
+    _rejects_in_author_and_split_source(
+        tmp_path, spec, "foundation_concept_ids", "status is known"
+    )
+
+
+def test_multiple_foundation_capabilities_may_share_one_lab00_concept(
+    tmp_path: Path,
+) -> None:
+    spec = make_assessed_spec()
+    shared_id = "lab00.c-mechanism"
+    _capability(spec, "domain-boundary")["foundation_concept_ids"] = [shared_id]
+    _capability(spec, "json-errors")["foundation_concept_ids"] = [shared_id]
+
+    validated = validate_spec(spec)
+    platform = tmp_path / "platform"
+    write_canonical_source(platform, spec)
+    compiled = load_course_source(platform / "course" / "source")
+
+    assert validated["course"]["audience"] == spec["course"]["audience"]
+    assert compiled.course["audience"] == spec["course"]["audience"]
+
+
+def test_assessed_fixture_closes_all_lab00_concepts_from_foundation_gaps(
+    tmp_path: Path,
+) -> None:
+    spec = make_assessed_spec()
+    capabilities = _audience(spec)["prerequisite_profile"]["capabilities"]
+    covered = {
+        concept_id
+        for capability in capabilities
+        if capability["decision"] == "foundation"
+        for concept_id in capability["foundation_concept_ids"]
+    }
+    lab00_concepts = {
+        concept["id"]
+        for concept in _section(spec, "lab00")["lesson"]["concepts"]
+    }
+
+    validated = validate_spec(spec)
+    platform = tmp_path / "platform"
+    write_canonical_source(platform, spec)
+    compiled = load_course_source(platform / "course" / "source")
+
+    assert covered == lab00_concepts
+    assert validated["course"]["audience"] == spec["course"]["audience"]
+    assert compiled.course["audience"] == spec["course"]["audience"]
 
 
 @pytest.mark.parametrize(
@@ -415,7 +526,9 @@ def test_every_graded_concept_is_covered_by_each_learning_surface(
         for question in lab["questions"]:
             question["concept_ids"] = [mechanism_id]
     else:
-        _example(spec, "lab02", "diagnostic")["concept_ids"] = [mechanism_id]
+        for example in lab["lesson"]["examples"]:
+            if example["kind"] == "diagnostic":
+                example["concept_ids"] = [mechanism_id]
         for quiz in lab["quiz"]:
             if quiz["kind"] == "diagnostic":
                 quiz["concept_ids"] = [mechanism_id]
@@ -480,25 +593,16 @@ def test_lab00_has_trace_quiz_and_diagnostic_coverage_without_coding() -> None:
     assert "questions" not in validated["foundation"]
 
 
-def test_forward_fixture_uses_chinese_json_prose_and_a_concrete_main_trace() -> None:
-    spec = make_spec()
-    lab = _section(spec, "lab01")
-    lesson = lab["lesson"]
-    runnable = _example(spec, "lab01", "runnable")
-    trace = runnable.get("trace")
+def test_forward_fixture_uses_chinese_json_prose_and_a_concrete_cumulative_route() -> None:
+    spec = make_assessed_spec()
+    labs = [_section(spec, lab_id) for lab_id in ("lab01", "lab02", "lab03")]
+    runnables = [
+        _example(spec, lab_id, "runnable")
+        for lab_id in ("lab01", "lab02", "lab03")
+    ]
 
-    learner_prose = json.dumps(
-        {
-            "title": lab["title"],
-            "problem": lesson["problem"],
-            "outcomes": lesson["outcomes"],
-            "concept": lesson["concepts"][0],
-            "example_title": runnable["title"],
-            "example_explanation": runnable["explanation"],
-        },
-        ensure_ascii=False,
-    )
-    for expected_phrase in ("解析 JSON 文本", "Python 字典", "输入", "输出"):
+    learner_prose = json.dumps(labs, ensure_ascii=False)
+    for expected_phrase in ("序列化", "解析", "校验", "输入", "输出"):
         assert expected_phrase in learner_prose
 
     representative = json.dumps(spec, ensure_ascii=False)
@@ -512,18 +616,27 @@ def test_forward_fixture_uses_chinese_json_prose_and_a_concrete_main_trace() -> 
     ):
         assert generic_english not in representative
 
-    assert "import json" in runnable["code"]
-    assert re.search(r"json\.(loads|dumps)\(", runnable["code"])
-    assert isinstance(trace, list) and len(trace) >= 2
-    trace_text = json.dumps(trace, ensure_ascii=False)
-    for expected_phrase in ("JSON 文本", "Python 字典", "解析", "输入", "输出"):
-        assert expected_phrase in trace_text
-    assert any(
-        re.search(r"json\.(loads|dumps)\(", step["operation"])
-        for step in trace
+    lab01_code, lab02_code, lab03_code = (
+        runnable["code"] for runnable in runnables
     )
+    assert "import json" not in lab01_code
+    assert not re.search(r"json\.(loads|dumps)\(", lab01_code)
+    assert "'{\"ready\":true}' if ready else '{\"ready\":false}'" in lab01_code
+    assert "answer_1(True)" in lab01_code and "answer_1(False)" in lab01_code
+    assert re.search(r"json\.dumps\(", lab02_code)
+    assert not re.search(r"json\.loads\(", lab02_code)
+    assert re.search(r"json\.loads\(", lab03_code)
+    assert re.search(r"json\.dumps\(", lab03_code)
+
+    for runnable in runnables:
+        trace = runnable.get("trace")
+        assert isinstance(trace, list) and len(trace) >= 2
+        assert any(step["input_state"].strip() for step in trace)
+        assert any(step["output_state"].strip() for step in trace)
+
     assert any(
-        "{" in step["input_state"] and ":" in step["input_state"]
-        for step in trace
+        "紧凑" in step["output_state"] or "{\"ready\":" in step["output_state"]
+        for step in runnables[0]["trace"]
     )
-    assert any(step["output_state"].strip() for step in trace)
+    assert any("json.dumps" in step["operation"] for step in runnables[1]["trace"])
+    assert any("json.loads" in step["operation"] for step in runnables[2]["trace"])

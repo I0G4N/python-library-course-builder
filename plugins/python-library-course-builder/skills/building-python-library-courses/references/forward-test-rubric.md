@@ -1,81 +1,12 @@
 # Forward-test rubric
 
-This rubric separates the required generated-project acceptance matrix from optional instruction-transfer evaluation. Fresh-agent transfer evaluation is optional and is not a standard release gate.
+This rubric is the required acceptance gate for a **local generated project**. Generate into an empty destination, run `scripts/verify_learning_project.py`, inspect the resulting learner and teacher projections, and accept only current local evidence from the generated repository.
 
 ## Contents
 
-- [Optional fresh-agent transfer evaluation](#optional-fresh-agent-transfer-evaluation)
-- [Paired Skill-output evaluation](#paired-skill-output-evaluation)
-- [Optional small-target transfer test](#optional-small-target-transfer-test)
-- [Optional large-target gate test](#optional-large-target-gate-test)
 - [Required fail-closed negative tests](#required-fail-closed-negative-tests)
 - [Required generated-project acceptance matrix](#required-generated-project-acceptance-matrix)
 - [Repository quality](#repository-quality)
-- [Optional RED/GREEN transfer comparison](#optional-redgreen-transfer-comparison)
-
-## Optional fresh-agent transfer evaluation
-
-Use this advisory evaluation when measuring whether the Skill transfers to a new target without replaying an existing course. When running it, use a fresh agent or context with only the user-style request, the Skill, a target name, and an empty destination. Do not provide an existing course specification, reference implementation, expected Lab titles, or prior verification report. Record the exact prompt, target version, output path, commands, exit codes, and failures.
-
-Always generate outside the source repository. The destination must not exist or must be empty. Afterward, inspect for symlinks and absolute references back to the Skill or originating project.
-
-The generated route must use a route-relevant prerequisite profile and gap decision, an evidence-based Lab 00, exact per-unit `study_minutes`, and the teaching-equivalent -> official bridge cycle. A reviewer must be able to trace that no downstream source or capstone imports a prior mini implementation.
-
-## Paired Skill-output evaluation
-
-This paired gate is **required for any change to readiness or teaching-depth Skill guidance**. Preserve one user-style prompt and target, score the **old output**, then give the same prompt and revised Skill to a fresh isolated agent that cannot see the old result, expected answer, or score. Save the exact prompt, Skill revision, output, source/version state, and scoring evidence for the **new output**. Fresh-agent transfer remains optional for ordinary course generation when the Skill guidance itself is unchanged.
-
-Score six dimensions from 0-2. Every score needs an **evidence citation** to a concrete output section, value flow, mapping, or source decision:
-
-1. **route-relevant readiness assessment and gap decision** — 0 absent; 1 useful prose but incomplete evidence/routing; 2 reuses evidence, asks only unresolved route capabilities, groups decisions, and stops a large gap before a spec.
-2. **evidence-based two-layer foundation plan** — 0 generic prerequisites; 1 some gaps addressed; 2 separates evidenced general-Python gaps from route-specific library/domain foundations and gives mapped, justified Lab 00 work.
-3. **precise operational contract** — 0 absent; 1 partially specifies behavior; 2 closes visible forms, constrained example inputs, example outputs, effects, and condition/observable/recovery failures around the tested convention.
-4. **complete concrete-value worked trace** — 0 absent/generic; 1 concrete but incomplete or unmapped; 2 carries one real value/state through at least two named transitions with relevant intermediate shape/type/state/ownership and matches tests.
-5. **concept-to-quiz/coding/capstone alignment** — 0 absent; 1 plausible narrative mapping; 2 gives inspectable concept/outcome mappings across the required activity surfaces and a real cumulative increment.
-6. **natural Simplified-Chinese explanation with source/version discipline** — 0 unusable or unsupported; 1 understandable with gaps; 2 defines terms at first use, alternates explanation with values, uses primary official evidence, and resolves or explicitly blocks version uncertainty.
-
-Pass only with **no zero**, at least **10/12**, and **exactly 2** on dimensions 3 and 4. If the new output misses any gate, strengthen the reusable Skill/reference wording and rerun with another fresh isolated agent; do not reinterpret the same evidence upward.
-
-Record the result with this template:
-
-```markdown
-| Dimension | Old | New | Old evidence citation | New evidence citation |
-|---|---:|---:|---|---|
-| Readiness and gap decision | /2 | /2 | | |
-| Two-layer foundation | /2 | /2 | | |
-| Operational contract | /2 | /2 | | |
-| Concrete worked trace | /2 | /2 | | |
-| Activity/capstone alignment | /2 | /2 | | |
-| Natural Chinese and sources | /2 | /2 | | |
-
-Old total: /12
-New total: /12
-Gate: PASS/FAIL
-Unresolved questions:
-```
-
-## Optional small-target transfer test
-
-Use a bounded standard-library target such as `pathlib`:
-
-1. Inspect the installed Python version.
-2. Research the matching official Python documentation and CPython source.
-3. Classify it as small unless the researched scope justifies otherwise.
-4. Produce Lab 00 plus 3-5 graded Labs and one cumulative, local-filesystem capstone.
-5. Run the complete project verifier and save its JSON report.
-
-The route must cover a coherent progression rather than mechanically copying another library's Lab names. The generated prose, symbols, examples, tests, capstone, branding, and official links must all belong to the target.
-
-## Optional large-target gate test
-
-Invoke the Skill for a broad multi-product target such as Ray without naming a track. A passing response:
-
-- uses official evidence to present 2-4 coherent choices such as Core, Data, Train/Tune, or Serve;
-- explains the distinct capstone and environment implications of each choice;
-- requests one selection;
-- creates no specification, course directory, or partial template before selection.
-
-After a track is selected, only that track is eligible for the 6-10 Lab route. A shallow all-products survey fails.
 
 ## Required fail-closed negative tests
 
@@ -108,6 +39,9 @@ Run every check from fresh output.
 - scans reject legacy target-specific course branding, fixed `lab12`, and fixed score denominators in a course with a different subject or size.
 - every lesson defines purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source-backed claims for every concept;
 - every assessed concept has a closed operational contract; every runnable example has a complete concrete-value trace of at least two steps; concept/outcome activity coverage satisfies the assessed Lab 00 versus graded-Lab surfaces;
+- every evidenced Lab 00 gap appears in the general-Python or route-specific library/domain layer and connects an existing cognitive anchor, term definition, current-route need, complete value flow, misconception or boundary, and recovery check;
+- every graded chapter keeps one new knowledge mainline and connects its project problem, plain-language predictive model, precise contract, one same-value complete flow, valid/boundary cases, diagnosis/recovery, quiz, coding question, and capstone increment in natural Simplified Chinese;
+- a boundary witness for every declared failure and every independently stated boundary must execute one representative counterexample, apply its recovery, re-execute the corrected path, record the recovered observable, and prove its prose contract, runnable or diagnostic code, expected output, diagnostic quiz and, for graded concepts, coding prompt plus public and hidden tests agree on the condition, observable, and recovery;
 - every lesson has at least two examples: a CPU/offline runnable example with exact command/output and a diagnostic wrong -> symptom -> cause -> fix example;
 - every runnable command is exactly `python {path}` for its declared lesson-relative file;
 - every quiz bank includes execution-trace and diagnostic questions, maps them to concepts/outcomes, gives feedback per stable choice ID, uses all answer positions, and keeps every position at or below 40%;
@@ -171,20 +105,3 @@ These controls are a workflow gate, not source secrecy. Acceptance must not clai
 - lint, build, compile checks, and course drift checks pass;
 - README commands work in a clean environment and state required Python/Node tooling;
 - a clean Git baseline checkpoint excludes runtime state and caches; if it includes the author projection, the README clearly states that public hosting exposes reference answers and hidden tests.
-
-## Optional RED/GREEN transfer comparison
-
-A no-Skill baseline is optional and applies only when measuring the effect of the Skill. If you run that comparison, keep the baseline and Skill-assisted result as separate reports. Compare at least:
-
-- official evidence and version lock;
-- adaptive curriculum and cumulative capstone;
-- canonical source/compiler contract;
-- starter/reference/hidden separation;
-- starter RED and reference GREEN evidence;
-- CLI completeness;
-- pytest grading quality;
-- Web editor and Runner behavior;
-- progress and Git checkpoints;
-- privacy, residue, path safety, and deployment documentation.
-
-Do not mark an optional transfer evaluation GREEN if any Critical or Important issue remains. When a failure generalizes to other targets, patch the Skill, script, or template, regenerate from an empty directory, and rerun the required generated-project matrix.

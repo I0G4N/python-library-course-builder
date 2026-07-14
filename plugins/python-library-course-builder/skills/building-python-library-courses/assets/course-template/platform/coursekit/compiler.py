@@ -79,6 +79,17 @@ PUBLIC_QUESTION_FIELDS = (
 )
 SOURCE_QUESTION_FIELDS = frozenset((*PUBLIC_QUESTION_FIELDS, "tests"))
 QUIZ_KINDS = {"execution_trace", "diagnostic"}
+QUIZ_QUESTION_FIELDS = {
+    "id",
+    "kind",
+    "prompt",
+    "choices",
+    "answer_id",
+    "explanation",
+    "concept_ids",
+    "outcome_ids",
+}
+QUIZ_CHOICE_FIELDS = {"id", "text", "feedback"}
 CONCEPT_LIST_FIELDS = {
     "mechanism",
     "design_reasons",
@@ -88,6 +99,57 @@ CONCEPT_LIST_FIELDS = {
     "boundaries",
     "pitfalls",
 }
+LESSON_FIELDS = {
+    "prerequisites",
+    "problem",
+    "outcomes",
+    "concepts",
+    "examples",
+    "capstone_bridge",
+    "summary",
+}
+PREREQUISITE_FIELDS = {"id", "title", "why", "refresh"}
+PROBLEM_FIELDS = {"context", "naive_approach", "failure"}
+OUTCOME_FIELDS = {"id", "text"}
+CONCEPT_FIELDS = {
+    "id",
+    "name",
+    "definition",
+    "purpose",
+    "mental_model",
+    "source_claims",
+    *CONCEPT_LIST_FIELDS,
+}
+SOURCE_CLAIM_FIELDS = {"source_id", "claim", "status"}
+EXAMPLE_COMMON_FIELDS = {
+    "id",
+    "title",
+    "kind",
+    "explanation",
+    "concept_ids",
+    "outcome_ids",
+}
+RUNNABLE_EXAMPLE_FIELDS = {
+    *EXAMPLE_COMMON_FIELDS,
+    "path",
+    "command",
+    "expected_output",
+}
+DIAGNOSTIC_EXAMPLE_FIELDS = {
+    *EXAMPLE_COMMON_FIELDS,
+    "wrong_code",
+    "symptom",
+    "cause",
+    "fix_code",
+}
+CAPSTONE_BRIDGE_FIELDS = {"input", "output", "increment", "next"}
+BASIC_AUDIENCE_FIELDS = {
+    "level",
+    "assumes",
+    "does_not_assume",
+    "lab_minutes",
+}
+BASIC_LAB_MINUTES_FIELDS = {"min", "max"}
 ASSESSED_AUDIENCE_FIELDS = {"level", "prerequisite_profile"}
 PREREQUISITE_PROFILE_FIELDS = {"assessment", "capabilities"}
 CAPABILITY_FIELDS = {
@@ -121,6 +183,72 @@ TRACE_STEP_FIELDS = {
     "output_state",
     "explanation",
 }
+COURSE_MANIFEST_FIELDS = {
+    "schema_version",
+    "layout_version",
+    "course_id",
+    "curriculum_id",
+    "title",
+    "brand",
+    "project",
+    "language",
+    "audience",
+    "python_requires",
+    "starter_root",
+    "source_root",
+    "reference_root",
+    "capstone",
+    "target",
+}
+COURSE_MANIFEST_OPTIONAL_FIELDS = {"adapter", "python", "reference_components"}
+COURSE_MANIFEST_CAPSTONE_FIELDS = {"name", "description"}
+COURSE_MANIFEST_TARGET_FIELDS = {"name", "kind", "version", "track"}
+COURSE_MANIFEST_TEXT_FIELDS = (
+    "course_id",
+    "curriculum_id",
+    "title",
+    "brand",
+    "project",
+    "language",
+    "python_requires",
+)
+COURSE_MANIFEST_PATH_FIELDS = ("starter_root", "source_root", "reference_root")
+CHECKPOINT_FIELDS = {
+    "require_submit",
+    "git_initialized",
+    "git_clean",
+    "min_commits",
+}
+GIT_CHECKPOINT_FIELDS = {"title", "commands"}
+MANIFEST_TEST_FIELDS = {"public", "sample", "hidden", "submit"}
+FOUNDATION_MANIFEST_FIELDS = {
+    "id",
+    "order",
+    "title",
+    "description",
+    "graded",
+    "directory",
+    "readme",
+    "git_scope",
+    "checkpoint",
+}
+FOUNDATION_MANIFEST_OPTIONAL_FIELDS = {"demos", "examples", "tests"}
+FOUNDATION_MANIFEST_TEXT_FIELDS = ("id", "title", "description")
+FOUNDATION_MANIFEST_PATH_FIELDS = ("directory", "readme", "git_scope")
+LAB_MANIFEST_FIELDS = {
+    "order",
+    "description",
+    "file",
+    "directory",
+    "readme",
+    "git_scope",
+    "checkpoint",
+    "git_checkpoint",
+    "tests",
+}
+LAB_MANIFEST_TEXT_FIELDS = ("description",)
+LAB_MANIFEST_PATH_FIELDS = ("file", "directory", "readme", "git_scope")
+STUDY_MINUTES_FIELDS = {"tier", "min", "max", "reason"}
 
 
 def _mapping(payload: Any, *, label: str) -> dict[str, Any]:
@@ -457,10 +585,27 @@ def _require_exact_fields(
         )
 
 
+def _require_fields_with_optional(
+    payload: dict[str, Any],
+    required: set[str],
+    optional: set[str],
+    *,
+    label: str,
+) -> None:
+    _require_exact_fields(
+        payload,
+        required | (set(payload) & optional),
+        label=label,
+    )
+
+
 def _validate_audience(payload: dict[str, Any]) -> dict[str, Any]:
     audience = _mapping(payload.get("audience"), label="course.audience")
     level = _text(audience, "level", label="course.audience")
     if level == "basic-python":
+        _require_exact_fields(
+            audience, BASIC_AUDIENCE_FIELDS, label="course.audience"
+        )
         _strings(audience.get("assumes"), label="course.audience.assumes")
         _strings(
             audience.get("does_not_assume"),
@@ -468,6 +613,11 @@ def _validate_audience(payload: dict[str, Any]) -> dict[str, Any]:
         )
         duration = _mapping(
             audience.get("lab_minutes"), label="course.audience.lab_minutes"
+        )
+        _require_exact_fields(
+            duration,
+            BASIC_LAB_MINUTES_FIELDS,
+            label="course.audience.lab_minutes",
         )
         if duration.get("min") != 30 or duration.get("max") != 45:
             raise SourceValidationError(
@@ -562,6 +712,264 @@ def _validate_audience(payload: dict[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(audience)
 
 
+def _manifest_boolean(
+    payload: dict[str, Any], key: str, *, label: str
+) -> bool:
+    value = payload.get(key)
+    if type(value) is not bool:
+        raise SourceValidationError(f"{label}.{key} must be a boolean")
+    return value
+
+
+def _manifest_non_negative_integer(
+    payload: dict[str, Any], key: str, *, label: str, minimum: int = 0
+) -> int:
+    value = payload.get(key)
+    if type(value) is not int or value < minimum:
+        raise SourceValidationError(
+            f"{label}.{key} must be an integer greater than or equal to {minimum}"
+        )
+    return value
+
+
+def _manifest_relative_path(
+    payload: dict[str, Any], key: str, *, label: str
+) -> str:
+    value = _text(payload, key, label=label)
+    _relative(value, label=f"{label}.{key}")
+    return value
+
+
+def _manifest_string_list(
+    payload: dict[str, Any],
+    key: str,
+    *,
+    label: str,
+    minimum: int = 0,
+    paths: bool = False,
+) -> list[str]:
+    item_label = f"{label}.{key}"
+    values = _list(payload.get(key), label=item_label)
+    if len(values) < minimum or not all(
+        isinstance(value, str) and value.strip() for value in values
+    ):
+        raise SourceValidationError(
+            f"{item_label} must contain at least {minimum} non-empty string(s)"
+        )
+    if paths:
+        for index, value in enumerate(values):
+            _relative(value, label=f"{item_label}[{index}]")
+    return values
+
+
+def _require_manifest_fields(
+    payload: dict[str, Any], expected: set[str], *, label: str, exact: bool
+) -> None:
+    if exact:
+        _require_exact_fields(payload, expected, label=label)
+        return
+    missing = sorted(expected - set(payload))
+    if missing:
+        raise SourceValidationError(
+            f"{label} is missing required field(s): {', '.join(missing)}"
+        )
+
+
+def _validate_manifest_checkpoint(
+    payload: Any, *, label: str, exact: bool = True
+) -> dict[str, Any]:
+    checkpoint = _mapping(payload, label=label)
+    _require_manifest_fields(
+        checkpoint, CHECKPOINT_FIELDS, label=label, exact=exact
+    )
+    for key in ("require_submit", "git_initialized", "git_clean"):
+        _manifest_boolean(checkpoint, key, label=label)
+    _manifest_non_negative_integer(checkpoint, "min_commits", label=label)
+    return checkpoint
+
+
+def _validate_manifest_tests(
+    payload: Any, *, label: str, exact: bool = True
+) -> dict[str, Any]:
+    tests = _mapping(payload, label=label)
+    _require_manifest_fields(tests, MANIFEST_TEST_FIELDS, label=label, exact=exact)
+    for key in ("public", "sample", "hidden", "submit"):
+        _manifest_string_list(tests, key, label=label)
+    return tests
+
+
+def _validate_course_manifest_shape(
+    manifest: dict[str, Any], *, label: str, exact: bool = True
+) -> dict[str, Any]:
+    if exact:
+        _require_fields_with_optional(
+            manifest,
+            COURSE_MANIFEST_FIELDS,
+            COURSE_MANIFEST_OPTIONAL_FIELDS,
+            label=label,
+        )
+    else:
+        _require_manifest_fields(
+            manifest, COURSE_MANIFEST_FIELDS, label=label, exact=False
+        )
+    if (
+        type(manifest.get("schema_version")) is not int
+        or manifest["schema_version"] != 2
+    ):
+        raise SourceValidationError(f"{label}.schema_version must be 2")
+    if (
+        type(manifest.get("layout_version")) is not int
+        or manifest["layout_version"] != 3
+    ):
+        raise SourceValidationError(f"{label}.layout_version must be 3")
+    for key in COURSE_MANIFEST_TEXT_FIELDS:
+        _text(manifest, key, label=label)
+    for key in COURSE_MANIFEST_PATH_FIELDS:
+        _manifest_relative_path(manifest, key, label=label)
+
+    capstone_label = f"{label}.capstone"
+    capstone = _mapping(manifest.get("capstone"), label=capstone_label)
+    _require_manifest_fields(
+        capstone,
+        COURSE_MANIFEST_CAPSTONE_FIELDS,
+        label=capstone_label,
+        exact=exact,
+    )
+    for key in ("name", "description"):
+        _text(capstone, key, label=capstone_label)
+
+    target_label = f"{label}.target"
+    target = _mapping(manifest.get("target"), label=target_label)
+    _require_manifest_fields(
+        target,
+        COURSE_MANIFEST_TARGET_FIELDS,
+        label=target_label,
+        exact=exact,
+    )
+    for key in ("name", "kind", "version"):
+        _text(target, key, label=target_label)
+    track = target.get("track")
+    if track is not None and (not isinstance(track, str) or not track.strip()):
+        raise SourceValidationError(
+            f"{target_label}.track must be null or a non-empty string"
+        )
+
+    _validate_audience({"audience": manifest.get("audience")})
+    if "adapter" in manifest:
+        _manifest_relative_path(manifest, "adapter", label=label)
+    if "python" in manifest:
+        _text(manifest, "python", label=label)
+    if "reference_components" in manifest:
+        _manifest_string_list(
+            manifest,
+            "reference_components",
+            label=label,
+            paths=True,
+        )
+    return manifest
+
+
+def _validate_course_manifest(
+    course: dict[str, Any], *, audience: dict[str, Any]
+) -> None:
+    label = "course.manifest"
+    manifest = _mapping(course.get("manifest"), label=label)
+    _validate_course_manifest_shape(manifest, label=label)
+    manifest_audience = _validate_audience(
+        {"audience": manifest.get("audience")}
+    )
+    if manifest_audience != audience:
+        raise SourceValidationError(
+            "course.manifest.audience must match course.audience"
+        )
+
+
+def _validate_foundation_manifest_shape(
+    manifest: dict[str, Any], *, label: str, exact: bool = True
+) -> dict[str, Any]:
+    if exact:
+        _require_fields_with_optional(
+            manifest,
+            FOUNDATION_MANIFEST_FIELDS,
+            FOUNDATION_MANIFEST_OPTIONAL_FIELDS,
+            label=label,
+        )
+    else:
+        _require_manifest_fields(
+            manifest, FOUNDATION_MANIFEST_FIELDS, label=label, exact=False
+        )
+    for key in FOUNDATION_MANIFEST_TEXT_FIELDS:
+        _text(manifest, key, label=label)
+    if _manifest_non_negative_integer(manifest, "order", label=label) != 0:
+        raise SourceValidationError(f"{label}.order must be 0")
+    _manifest_boolean(manifest, "graded", label=label)
+    for key in FOUNDATION_MANIFEST_PATH_FIELDS:
+        _manifest_relative_path(manifest, key, label=label)
+    _validate_manifest_checkpoint(
+        manifest.get("checkpoint"),
+        label=f"{label}.checkpoint",
+        exact=exact,
+    )
+    for key in ("demos", "examples"):
+        if key in manifest:
+            _manifest_string_list(manifest, key, label=label, paths=True)
+    if "tests" in manifest:
+        _validate_manifest_tests(
+            manifest["tests"], label=f"{label}.tests", exact=exact
+        )
+    return manifest
+
+
+def _validate_foundation_manifest(foundations: dict[str, Any]) -> None:
+    label = "foundation.manifest"
+    manifest = _mapping(foundations.get("manifest"), label=label)
+    _validate_foundation_manifest_shape(manifest, label=label)
+    if "demos" in foundations:
+        _manifest_string_list(
+            foundations, "demos", label="foundation", paths=True
+        )
+
+
+def _validate_lab_manifest_shape(
+    manifest: dict[str, Any], *, label: str, exact: bool = True
+) -> dict[str, Any]:
+    _require_manifest_fields(
+        manifest, LAB_MANIFEST_FIELDS, label=label, exact=exact
+    )
+    for key in LAB_MANIFEST_TEXT_FIELDS:
+        _text(manifest, key, label=label)
+    _manifest_non_negative_integer(manifest, "order", label=label, minimum=1)
+    for key in LAB_MANIFEST_PATH_FIELDS:
+        _manifest_relative_path(manifest, key, label=label)
+    _validate_manifest_checkpoint(
+        manifest.get("checkpoint"),
+        label=f"{label}.checkpoint",
+        exact=exact,
+    )
+    git_label = f"{label}.git_checkpoint"
+    git_checkpoint = _mapping(manifest.get("git_checkpoint"), label=git_label)
+    _require_manifest_fields(
+        git_checkpoint,
+        GIT_CHECKPOINT_FIELDS,
+        label=git_label,
+        exact=exact,
+    )
+    _text(git_checkpoint, "title", label=git_label)
+    _manifest_string_list(
+        git_checkpoint, "commands", label=git_label, minimum=1
+    )
+    _validate_manifest_tests(
+        manifest.get("tests"), label=f"{label}.tests", exact=exact
+    )
+    return manifest
+
+
+def _validate_lab_manifest(payload: dict[str, Any], *, label: str) -> None:
+    manifest_label = f"{label}.manifest"
+    manifest = _mapping(payload.get("manifest"), label=manifest_label)
+    _validate_lab_manifest_shape(manifest, label=manifest_label)
+
+
 def _validate_assessed_profile_references(
     profile: dict[str, Any],
     *,
@@ -571,6 +979,7 @@ def _validate_assessed_profile_references(
     foundation_concept_sources: dict[str, set[str]],
 ) -> None:
     capabilities = profile["capabilities"]
+    mapped_foundation_concept_ids: set[str] = set()
     for index, capability in enumerate(capabilities):
         item_label = (
             f"course.audience.prerequisite_profile.capabilities[{index}]"
@@ -592,6 +1001,9 @@ def _validate_assessed_profile_references(
                 f"{item_label}.foundation_concept_ids reference unknown Lab 00 concept(s): {', '.join(unknown_concepts)}"
             )
         if capability["decision"] == "foundation":
+            mapped_foundation_concept_ids.update(
+                capability["foundation_concept_ids"]
+            )
             cited_sources = {
                 source_id
                 for concept_id in capability["foundation_concept_ids"]
@@ -601,6 +1013,19 @@ def _validate_assessed_profile_references(
                 raise SourceValidationError(
                     f"capability {capability['id']} foundation_concept_ids must cite at least one capability source_ids value"
                 )
+    if not mapped_foundation_concept_ids:
+        raise SourceValidationError(
+            "course.audience.prerequisite_profile must contain at least one "
+            "foundation capability for an evidenced prerequisite gap"
+        )
+    orphan_concept_ids = sorted(
+        foundation_concept_ids - mapped_foundation_concept_ids
+    )
+    if orphan_concept_ids:
+        raise SourceValidationError(
+            "Lab 00 concept(s) must be mapped from at least one foundation "
+            f"capability: {', '.join(orphan_concept_ids)}"
+        )
 
 
 def _validate_study_minutes(
@@ -888,6 +1313,7 @@ def _load_lesson(
     assessed: bool = False,
 ) -> tuple[dict[str, Any], set[str], set[str]]:
     lesson = _read_json(path, label=label)
+    _require_exact_fields(lesson, LESSON_FIELDS, label=label)
     prerequisites = _list(
         lesson.get("prerequisites"), label=f"{label}.prerequisites"
     )
@@ -897,6 +1323,7 @@ def _load_lesson(
     for index, raw in enumerate(prerequisites):
         item_label = f"{label}.prerequisites[{index}]"
         item = _mapping(raw, label=item_label)
+        _require_exact_fields(item, PREREQUISITE_FIELDS, label=item_label)
         item_id = _stable_id(item, label=item_label)
         if item_id in prerequisite_ids:
             raise SourceValidationError(f"duplicate prerequisite id: {item_id}")
@@ -905,6 +1332,7 @@ def _load_lesson(
             _text(item, key, label=item_label)
 
     problem = _mapping(lesson.get("problem"), label=f"{label}.problem")
+    _require_exact_fields(problem, PROBLEM_FIELDS, label=f"{label}.problem")
     for key in ("context", "naive_approach", "failure"):
         _text(problem, key, label=f"{label}.problem")
 
@@ -915,6 +1343,7 @@ def _load_lesson(
     for index, raw in enumerate(outcomes):
         item_label = f"{label}.outcomes[{index}]"
         item = _mapping(raw, label=item_label)
+        _require_exact_fields(item, OUTCOME_FIELDS, label=item_label)
         outcome_id = _stable_id(item, label=item_label)
         if outcome_id in outcome_ids:
             raise SourceValidationError(f"duplicate outcome id: {outcome_id}")
@@ -928,6 +1357,8 @@ def _load_lesson(
     for index, raw in enumerate(concepts):
         item_label = f"{label}.concepts[{index}]"
         concept = _mapping(raw, label=item_label)
+        concept_fields = CONCEPT_FIELDS | ({"operational_contract"} if assessed else set())
+        _require_exact_fields(concept, concept_fields, label=item_label)
         concept_id = _stable_id(concept, label=item_label)
         if concept_id in concept_ids:
             raise SourceValidationError(f"duplicate concept id: {concept_id}")
@@ -944,6 +1375,7 @@ def _load_lesson(
         for claim_index, raw_claim in enumerate(claims):
             claim_label = f"{item_label}.source_claims[{claim_index}]"
             claim = _mapping(raw_claim, label=claim_label)
+            _require_exact_fields(claim, SOURCE_CLAIM_FIELDS, label=claim_label)
             source_id = _text(claim, "source_id", label=claim_label)
             if source_id not in source_ids:
                 raise SourceValidationError(
@@ -977,6 +1409,13 @@ def _load_lesson(
         kind = _text(example, "kind", label=item_label)
         if kind not in {"runnable", "diagnostic"}:
             raise SourceValidationError(f"{item_label}.kind must be runnable or diagnostic")
+        example_fields = (
+            RUNNABLE_EXAMPLE_FIELDS
+            | ({"trace"} if assessed or "trace" in example else set())
+            if kind == "runnable"
+            else DIAGNOSTIC_EXAMPLE_FIELDS
+        )
+        _require_exact_fields(example, example_fields, label=item_label)
         kinds.add(kind)
         _text(example, "explanation", label=item_label)
         _validate_mappings(
@@ -986,7 +1425,7 @@ def _load_lesson(
             outcome_ids=outcome_ids,
         )
         if kind == "runnable":
-            if assessed:
+            if assessed or "trace" in example:
                 _validate_trace(example, label=item_label, concept_ids=concept_ids)
             if "code" in example:
                 raise SourceValidationError(
@@ -1022,6 +1461,9 @@ def _load_lesson(
 
     bridge = _mapping(
         lesson.get("capstone_bridge"), label=f"{label}.capstone_bridge"
+    )
+    _require_exact_fields(
+        bridge, CAPSTONE_BRIDGE_FIELDS, label=f"{label}.capstone_bridge"
     )
     for key in ("input", "output", "increment", "next"):
         _text(bridge, key, label=f"{label}.capstone_bridge")
@@ -1518,6 +1960,7 @@ def _validate_quiz(
     for index, raw in enumerate(questions):
         item_label = f"{label}[{index}]"
         question = _mapping(raw, label=item_label)
+        _require_exact_fields(question, QUIZ_QUESTION_FIELDS, label=item_label)
         question_id = _stable_id(question, label=item_label)
         if question_id in seen:
             raise SourceValidationError(f"duplicate quiz id: {question_id}")
@@ -1536,6 +1979,7 @@ def _validate_quiz(
         for choice_index, raw_choice in enumerate(choices):
             choice_label = f"{item_label}.choices[{choice_index}]"
             choice = _mapping(raw_choice, label=choice_label)
+            _require_exact_fields(choice, QUIZ_CHOICE_FIELDS, label=choice_label)
             choice_id = _stable_id(choice, label=choice_label)
             if choice_id in choice_ids:
                 raise SourceValidationError(f"duplicate choice id: {choice_id}")
@@ -1756,6 +2200,7 @@ def load_course_source(source_root: Path | str) -> CourseSource:
     title = _text(course, "title", label="course")
     description = _text(course, "description", label="course")
     audience = _validate_audience(course)
+    _validate_course_manifest(course, audience=audience)
     assessed_profile = (
         _mapping(
             audience.get("prerequisite_profile"),
@@ -1843,12 +2288,13 @@ def load_course_source(source_root: Path | str) -> CourseSource:
     _strings(research.get("notes"), label="research.notes")
 
     foundations = _mapping(course.get("foundations"), label="course.foundations")
+    _validate_foundation_manifest(foundations)
     foundation_id = _identifier(
         _text(foundations, "id", label="foundations"), label="foundations.id"
     )
     if foundation_id != "lab00":
         raise SourceValidationError("foundation id must be lab00")
-    if assessed_profile is not None:
+    if assessed_profile is not None or "study_minutes" in foundations:
         _validate_study_minutes(
             foundations.get("study_minutes"),
             label="foundation.study_minutes",
@@ -1938,6 +2384,7 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             raise SourceValidationError(f"labs must be ordered linearly as {expected_id}")
         lab_root = root / "labs" / _relative(lab_id, label="lab id")
         payload = _read_json(lab_root / "lab.json", label=f"{lab_id}/lab.json")
+        _validate_lab_manifest(payload, label=lab_id)
         declared_id = _text(payload, "id", label=f"{lab_id}/lab.json")
         if declared_id != lab_id:
             raise SourceValidationError(
@@ -1948,7 +2395,7 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             raise SourceValidationError(
                 f"{lab_id} must depend on {previous}, not {depends_on}"
             )
-        if assessed_profile is not None:
+        if assessed_profile is not None or "study_minutes" in payload:
             _validate_study_minutes(
                 payload.get("study_minutes"),
                 label=f"{lab_id}.study_minutes",
@@ -2428,7 +2875,14 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
             )
             questions.append(rendered_question)
 
-        rendered_lab = copy.deepcopy(lab.raw.get("manifest", {}))
+        raw_lab_manifest = _mapping(
+            lab.raw.get("manifest", {}), label=f"{lab.lab_id}.manifest"
+        )
+        rendered_lab = (
+            _project_lab_manifest(raw_lab_manifest)
+            if learner
+            else copy.deepcopy(raw_lab_manifest)
+        )
         rendered_lab.update(
             {
                 "id": lab.lab_id,
@@ -2441,7 +2895,11 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
             }
         )
         if "study_minutes" in lab.raw:
-            rendered_lab["study_minutes"] = copy.deepcopy(lab.raw["study_minutes"])
+            rendered_lab["study_minutes"] = (
+                _project_study_minutes(lab.raw["study_minutes"])
+                if learner
+                else copy.deepcopy(lab.raw["study_minutes"])
+            )
         if learner and isinstance(rendered_lab.get("tests"), dict):
             public = list(
                 dict.fromkeys(
@@ -2463,7 +2921,14 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
         )
         prior_course_roots.append(lab.lab_id)
 
-    base = copy.deepcopy(course.course.get("manifest", {}))
+    raw_course_manifest = _mapping(
+        course.course.get("manifest", {}), label="course.manifest"
+    )
+    base = (
+        _project_course_manifest(raw_course_manifest)
+        if learner
+        else copy.deepcopy(raw_course_manifest)
+    )
     # Curriculum schema is compiler-owned; canonical metadata cannot downgrade it.
     base["schema_version"] = 2
     base.setdefault("layout_version", 3)
@@ -2475,7 +2940,11 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
             "curriculum_id": course.curriculum_id,
             "compatible_curriculum_ids": list(course.compatible_curriculum_ids),
             "language": course.language,
-            "audience": copy.deepcopy(course.audience),
+            "audience": (
+                _project_audience(course.audience)
+                if learner
+                else copy.deepcopy(course.audience)
+            ),
             "content": "content.json" if not learner else "_course/content.json",
             "extensions": list(course.extensions),
             "total_points": course.total_points,
@@ -2502,7 +2971,14 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
     if "capstone" not in base:
         base["capstone"] = course.capstone
 
-    foundation = copy.deepcopy(course.foundation.get("manifest", {}))
+    raw_foundation_manifest = _mapping(
+        course.foundation.get("manifest", {}), label="foundation.manifest"
+    )
+    foundation = (
+        _project_foundation_manifest(raw_foundation_manifest)
+        if learner
+        else copy.deepcopy(raw_foundation_manifest)
+    )
     foundation.update(
         {
             "id": course.foundation["id"],
@@ -2513,8 +2989,10 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
         }
     )
     if "study_minutes" in course.foundation:
-        foundation["study_minutes"] = copy.deepcopy(
-            course.foundation["study_minutes"]
+        foundation["study_minutes"] = (
+            _project_study_minutes(course.foundation["study_minutes"])
+            if learner
+            else copy.deepcopy(course.foundation["study_minutes"])
         )
     if "examples" not in foundation:
         foundation["examples"] = [
@@ -2523,7 +3001,13 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
             if example["kind"] == "runnable"
         ]
     if "demos" in course.foundation:
-        foundation["demos"] = copy.deepcopy(course.foundation["demos"])
+        if learner:
+            _manifest_string_list(
+                course.foundation, "demos", label="foundation", paths=True
+            )
+            foundation["demos"] = list(course.foundation["demos"])
+        else:
+            foundation["demos"] = copy.deepcopy(course.foundation["demos"])
     if learner and isinstance(foundation.get("tests"), dict):
         public = list(
             dict.fromkeys(
@@ -2562,18 +3046,227 @@ def _knowledge(course: CourseSource) -> dict[str, Any]:
         "labs": {
             course.foundation["id"]: {
                 "title": course.foundation["title"],
-                "questions": list(course.foundation_quiz),
+                "questions": [
+                    _project_quiz_question(question)
+                    for question in course.foundation_quiz
+                ],
             },
             **{
-                lab.lab_id: {"title": lab.title, "questions": list(lab.quiz)}
+                lab.lab_id: {
+                    "title": lab.title,
+                    "questions": [
+                        _project_quiz_question(question)
+                        for question in lab.quiz
+                    ],
+                }
                 for lab in course.labs
             },
         },
     }
 
 
+def _project_fields(
+    payload: dict[str, Any], allowed: set[str]
+) -> dict[str, Any]:
+    return {
+        key: copy.deepcopy(value)
+        for key, value in payload.items()
+        if key in allowed
+    }
+
+
+def _project_audience(audience: dict[str, Any]) -> dict[str, Any]:
+    if audience.get("level") == "basic-python":
+        projected = _project_fields(audience, BASIC_AUDIENCE_FIELDS)
+        projected["lab_minutes"] = _project_fields(
+            audience["lab_minutes"], BASIC_LAB_MINUTES_FIELDS
+        )
+        return projected
+
+    projected = _project_fields(audience, ASSESSED_AUDIENCE_FIELDS)
+    profile = _project_fields(
+        audience["prerequisite_profile"], PREREQUISITE_PROFILE_FIELDS
+    )
+    profile["capabilities"] = [
+        _project_fields(capability, CAPABILITY_FIELDS)
+        for capability in audience["prerequisite_profile"]["capabilities"]
+    ]
+    projected["prerequisite_profile"] = profile
+    return projected
+
+
+def _project_study_minutes(minutes: dict[str, Any]) -> dict[str, Any]:
+    return _project_fields(minutes, STUDY_MINUTES_FIELDS)
+
+
+def _project_manifest_tests(tests: dict[str, Any]) -> dict[str, Any]:
+    _validate_manifest_tests(tests, label="manifest.tests", exact=False)
+    return {
+        key: list(tests[key])
+        for key in ("public", "sample", "hidden", "submit")
+    }
+
+
+def _project_manifest_checkpoint(
+    checkpoint: dict[str, Any], *, label: str
+) -> dict[str, Any]:
+    _validate_manifest_checkpoint(checkpoint, label=label, exact=False)
+    return {
+        "require_submit": checkpoint["require_submit"],
+        "git_initialized": checkpoint["git_initialized"],
+        "git_clean": checkpoint["git_clean"],
+        "min_commits": checkpoint["min_commits"],
+    }
+
+
+def _project_course_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    _validate_course_manifest_shape(
+        manifest, label="course.manifest", exact=False
+    )
+    projected = {
+        "schema_version": manifest["schema_version"],
+        "layout_version": manifest["layout_version"],
+        **{key: manifest[key] for key in COURSE_MANIFEST_TEXT_FIELDS},
+        **{key: manifest[key] for key in COURSE_MANIFEST_PATH_FIELDS},
+    }
+    projected["audience"] = _project_audience(manifest["audience"])
+    projected["capstone"] = {
+        "name": manifest["capstone"]["name"],
+        "description": manifest["capstone"]["description"],
+    }
+    projected["target"] = {
+        "name": manifest["target"]["name"],
+        "kind": manifest["target"]["kind"],
+        "version": manifest["target"]["version"],
+        "track": manifest["target"]["track"],
+    }
+    if "adapter" in manifest:
+        projected["adapter"] = manifest["adapter"]
+    if "python" in manifest:
+        projected["python"] = manifest["python"]
+    if "reference_components" in manifest:
+        projected["reference_components"] = list(manifest["reference_components"])
+    return projected
+
+
+def _project_foundation_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    _validate_foundation_manifest_shape(
+        manifest, label="foundation.manifest", exact=False
+    )
+    projected = {
+        **{key: manifest[key] for key in FOUNDATION_MANIFEST_TEXT_FIELDS},
+        **{key: manifest[key] for key in FOUNDATION_MANIFEST_PATH_FIELDS},
+        "order": manifest["order"],
+        "graded": manifest["graded"],
+    }
+    projected["checkpoint"] = _project_manifest_checkpoint(
+        manifest["checkpoint"], label="foundation.manifest.checkpoint"
+    )
+    for key in ("demos", "examples"):
+        if key in manifest:
+            projected[key] = list(manifest[key])
+    if "tests" in manifest:
+        projected["tests"] = _project_manifest_tests(manifest["tests"])
+    return projected
+
+
+def _project_lab_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    _validate_lab_manifest_shape(manifest, label="lab.manifest", exact=False)
+    projected = {
+        **{key: manifest[key] for key in LAB_MANIFEST_TEXT_FIELDS},
+        **{key: manifest[key] for key in LAB_MANIFEST_PATH_FIELDS},
+        "order": manifest["order"],
+    }
+    projected["checkpoint"] = _project_manifest_checkpoint(
+        manifest["checkpoint"], label="lab.manifest.checkpoint"
+    )
+    projected["git_checkpoint"] = {
+        "title": manifest["git_checkpoint"]["title"],
+        "commands": list(manifest["git_checkpoint"]["commands"]),
+    }
+    projected["tests"] = _project_manifest_tests(manifest["tests"])
+    return projected
+
+
+def _project_quiz_question(question: dict[str, Any]) -> dict[str, Any]:
+    projected = _project_fields(question, QUIZ_QUESTION_FIELDS)
+    projected["choices"] = [
+        _project_fields(choice, QUIZ_CHOICE_FIELDS)
+        for choice in question["choices"]
+    ]
+    return projected
+
+
+def _project_operational_contract(contract: dict[str, Any]) -> dict[str, Any]:
+    projected = _project_fields(contract, OPERATIONAL_CONTRACT_FIELDS)
+    projected["inputs"] = [
+        _project_fields(item, OPERATIONAL_INPUT_FIELDS)
+        for item in contract["inputs"]
+    ]
+    projected["outputs"] = [
+        _project_fields(item, OPERATIONAL_OUTPUT_FIELDS)
+        for item in contract["outputs"]
+    ]
+    projected["failure_modes"] = [
+        _project_fields(item, OPERATIONAL_FAILURE_FIELDS)
+        for item in contract["failure_modes"]
+    ]
+    return projected
+
+
+def _project_lesson_outline(
+    lesson: dict[str, Any], *, assessed: bool
+) -> dict[str, Any]:
+    projected = _project_fields(lesson, LESSON_FIELDS)
+    projected["prerequisites"] = [
+        _project_fields(item, PREREQUISITE_FIELDS)
+        for item in lesson["prerequisites"]
+    ]
+    projected["problem"] = _project_fields(lesson["problem"], PROBLEM_FIELDS)
+    projected["outcomes"] = [
+        _project_fields(item, OUTCOME_FIELDS) for item in lesson["outcomes"]
+    ]
+
+    concept_fields = CONCEPT_FIELDS | ({"operational_contract"} if assessed else set())
+    concepts: list[dict[str, Any]] = []
+    for concept in lesson["concepts"]:
+        item = _project_fields(concept, concept_fields)
+        item["source_claims"] = [
+            _project_fields(claim, SOURCE_CLAIM_FIELDS)
+            for claim in concept["source_claims"]
+        ]
+        if assessed:
+            item["operational_contract"] = _project_operational_contract(
+                concept["operational_contract"]
+            )
+        concepts.append(item)
+    projected["concepts"] = concepts
+
+    examples: list[dict[str, Any]] = []
+    for example in lesson["examples"]:
+        if example["kind"] == "runnable":
+            allowed = RUNNABLE_EXAMPLE_FIELDS | {"code"}
+            if "trace" in example:
+                allowed.add("trace")
+            item = _project_fields(example, allowed)
+            if "trace" in example:
+                item["trace"] = [
+                    _project_fields(step, TRACE_STEP_FIELDS)
+                    for step in example["trace"]
+                ]
+        else:
+            item = _project_fields(example, DIAGNOSTIC_EXAMPLE_FIELDS)
+        examples.append(item)
+    projected["examples"] = examples
+    projected["capstone_bridge"] = _project_fields(
+        lesson["capstone_bridge"], CAPSTONE_BRIDGE_FIELDS
+    )
+    return projected
+
+
 def _content(course: CourseSource) -> dict[str, Any]:
     sources = {source.source_id: source for source in course.sources}
+    assessed = course.course["audience"]["level"] == "assessed"
 
     def source_payload(source_id: str) -> dict[str, str]:
         source = sources[source_id]
@@ -2583,7 +3276,9 @@ def _content(course: CourseSource) -> dict[str, Any]:
         "id": course.foundations["id"],
         "title": course.foundations["title"],
         "lesson": course.foundation_lesson,
-        "lesson_outline": copy.deepcopy(course.foundation_lesson_outline),
+        "lesson_outline": _project_lesson_outline(
+            course.foundation_lesson_outline, assessed=assessed
+        ),
         "sources": [
             source_payload(source_id)
             for source_id in dict.fromkeys(
@@ -2594,7 +3289,9 @@ def _content(course: CourseSource) -> dict[str, Any]:
         ],
     }
     if "study_minutes" in course.foundation:
-        foundation["study_minutes"] = copy.deepcopy(course.foundation["study_minutes"])
+        foundation["study_minutes"] = _project_study_minutes(
+            course.foundation["study_minutes"]
+        )
     foundation_links = _derive_practice_links(
         course.foundation_lesson_outline,
         course.foundation_quiz,
@@ -2609,13 +3306,17 @@ def _content(course: CourseSource) -> dict[str, Any]:
             "id": lab.lab_id,
             "title": lab.title,
             "lesson": lab.lesson,
-            "lesson_outline": copy.deepcopy(lab.lesson_outline),
+            "lesson_outline": _project_lesson_outline(
+                lab.lesson_outline, assessed=assessed
+            ),
             "sources": [source_payload(source_id) for source_id in lab.source_ids],
             "concepts": list(lab.concepts),
             "capstone_increment": lab.capstone_increment,
         }
         if "study_minutes" in lab.raw:
-            payload["study_minutes"] = copy.deepcopy(lab.raw["study_minutes"])
+            payload["study_minutes"] = _project_study_minutes(
+                lab.raw["study_minutes"]
+            )
         links = _derive_practice_links(
             lab.lesson_outline,
             lab.questions,

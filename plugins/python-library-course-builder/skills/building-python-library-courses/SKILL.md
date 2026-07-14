@@ -65,6 +65,8 @@ Author new specifications with `course.audience.level: assessed`, a `learner-sel
 
 Use Lab 00 only for evidenced foundations. Give each graded Lab one new knowledge mainline and one usable increment to the same capstone. Lab 02+ may also begin with the prior mechanism's graded official bridge; that bridge does not justify a second unrelated mainline. Apply the exact adaptive time tiers and positive chapter recipe from the teaching-depth contract.
 
+Before authoring learner-facing prose, read [complete-teaching-example.md](references/complete-teaching-example.md) as the positive depth model. For every evidenced Lab 00 gap, connect the learner's existing cognitive anchor to a definition, current-route need, complete concrete value flow, misconception or boundary, and a recovery check. For every graded chapter, move from its project problem and plain-language prediction through the exact contract and one complete value flow into valid/boundary cases, diagnosis, quiz, coding, and the capstone increment. Keep the two Lab 00 layers explicit and keep one new knowledge mainline per graded chapter.
+
 Enforce the teaching-equivalent -> official bridge cycle:
 
 1. Make Lab 01 handwrite a small teaching-equivalent from lower-level CPU/offline primitives without importing the target API it explains.
@@ -109,7 +111,7 @@ Require fresh completion evidence that:
 - the private reference projection is GREEN for every public and hidden test; and
 - CLI, Web, Runner, the three progression gates, learner-artifact privacy, path safety, and residue checks are GREEN.
 
-Use [forward-test-rubric.md](references/forward-test-rubric.md) for the required generated-project acceptance matrix; treat its fresh-agent transfer evaluation as optional. Fix systematic failures in the Skill, generator, or template; regenerate into an empty destination and rerun the full verifier instead of hand-editing one generated course.
+Use [forward-test-rubric.md](references/forward-test-rubric.md) for the required local generated-project acceptance matrix. Fix systematic failures in the Skill, generator, or template; regenerate into an empty destination and rerun the full verifier instead of hand-editing one generated course.
 
 ### 7. Hand off the learning loop
 
@@ -119,6 +121,7 @@ Copy the exact setup, launch, first-Lab, test, score, and shutdown commands from
 
 - Read [curriculum-contract.md](references/curriculum-contract.md) for the schema, sizing, lesson, question, source-policy, and mechanism-cycle contracts.
 - Read [teaching-depth-contract.md](references/teaching-depth-contract.md) before readiness, route, or lesson design for adaptive foundations, operational depth, concrete traces, activity alignment, and time tiers.
+- Read [complete-teaching-example.md](references/complete-teaching-example.md) before authoring learner-facing prose for a complete Lab 00 and graded-JSON positive example.
 - Read [authoring-rubric.md](references/authoring-rubric.md) for teaching depth, exercise quality, and grader quality.
 - Read [architecture.md](references/architecture.md) for generated-project ownership, runtime, security, progression, and UI contracts.
-- Read [forward-test-rubric.md](references/forward-test-rubric.md) for required generated-project checks and optional fresh-agent transfer evaluation.
+- Read [forward-test-rubric.md](references/forward-test-rubric.md) for required local generated-project checks.
