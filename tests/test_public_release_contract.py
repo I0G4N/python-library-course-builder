@@ -551,8 +551,24 @@ def test_ci_is_read_only_pinned_and_runs_the_root_release_validator() -> None:
     validator = ROOT / "scripts" / "validate_release.py"
 
     assert validator.is_file(), "root scripts/validate_release.py is missing"
+    assert re.search(r"\bsecrets\s*(?:\.|\[)", workflow, re.IGNORECASE) is None
     payload = yaml.load(workflow, Loader=yaml.BaseLoader)
     assert isinstance(payload, dict), "CI workflow must be a YAML mapping"
+
+    def assert_no_secret_context(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                assert not (
+                    isinstance(key, str) and key.casefold() == "secrets"
+                ), "CI must not declare or inherit a secrets mapping"
+                assert_no_secret_context(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                assert_no_secret_context(nested)
+        elif isinstance(value, str):
+            assert re.search(r"\bsecrets\b", value, re.IGNORECASE) is None
+
+    assert_no_secret_context(payload)
 
     root_permissions = payload.get("permissions")
     assert isinstance(root_permissions, dict)
@@ -571,32 +587,152 @@ def test_ci_is_read_only_pinned_and_runs_the_root_release_validator() -> None:
         assert not _permission_has_write(job.get("permissions", {}))
         job_steps = job.get("steps", [])
         assert isinstance(job_steps, list)
-        steps.extend(step for step in job_steps if isinstance(step, dict))
+        typed_steps = [step for step in job_steps if isinstance(step, dict)]
+        steps.extend(typed_steps)
+        job_checkouts = [
+            step
+            for step in typed_steps
+            if isinstance(step.get("uses"), str)
+            and step["uses"].startswith("actions/checkout@")
+        ]
+        job_uv_setups = [
+            step
+            for step in typed_steps
+            if isinstance(step.get("uses"), str)
+            and step["uses"].startswith("astral-sh/setup-uv@")
+        ]
+        assert len(job_checkouts) == 1
+        assert len(job_uv_setups) == 1
+        checkout_options = job_checkouts[0].get("with")
+        uv_options = job_uv_setups[0].get("with")
+        assert isinstance(checkout_options, dict)
+        assert isinstance(uv_options, dict)
+        assert checkout_options.get("persist-credentials") == "false"
+        assert uv_options.get("version") == "0.11.7"
+        assert any(step.get("run") == "uv sync --locked" for step in typed_steps)
 
     uses = [step["uses"] for step in steps if isinstance(step.get("uses"), str)]
     assert uses, "CI must use pinned setup actions"
     for action in uses:
         assert re.fullmatch(r"[^/\s]+/[^@\s]+@[0-9a-fA-F]{40}", action), action
 
-    python_steps = [
+    uv_steps = [
         step
         for step in steps
         if isinstance(step.get("uses"), str)
-        and step["uses"].startswith("actions/setup-python@")
+        and step["uses"].startswith("astral-sh/setup-uv@")
     ]
-    node_steps = [
+    checkout_steps = [
         step
         for step in steps
         if isinstance(step.get("uses"), str)
-        and step["uses"].startswith("actions/setup-node@")
+        and step["uses"].startswith("actions/checkout@")
     ]
 
     def version(step: dict[str, Any], key: str) -> Any:
         options = step.get("with", {})
         return options.get(key) if isinstance(options, dict) else None
 
-    assert any(version(step, "python-version") == "3.13" for step in python_steps)
-    assert any(version(step, "node-version") == "22" for step in node_steps)
+    for job in jobs.values():
+        assert isinstance(job, dict)
+        job_steps = job.get("steps")
+        assert isinstance(job_steps, list)
+        typed_steps = [step for step in job_steps if isinstance(step, dict)]
+        job_python = [
+            step
+            for step in typed_steps
+            if isinstance(step.get("uses"), str)
+            and step["uses"].startswith("actions/setup-python@")
+        ]
+        job_node = [
+            step
+            for step in typed_steps
+            if isinstance(step.get("uses"), str)
+            and step["uses"].startswith("actions/setup-node@")
+        ]
+        assert len(job_python) == 1
+        assert len(job_node) == 1
+        assert version(job_python[0], "python-version") == "3.13"
+        assert version(job_node[0], "node-version") == "22"
+
+    assert len(uv_steps) == len(jobs)
+    assert all(version(step, "version") == "0.11.7" for step in uv_steps)
+    assert len(checkout_steps) == len(jobs)
+    assert all(
+        version(step, "persist-credentials") == "false"
+        for step in checkout_steps
+    )
 
     run_steps = [step["run"] for step in steps if isinstance(step.get("run"), str)]
-    assert any("uv run python scripts/validate_release.py" in command for command in run_steps)
+    assert run_steps.count("uv sync --locked") == len(jobs)
+
+    forward = jobs.get("forward")
+    assert isinstance(forward, dict)
+    assert forward.get("needs") == "validate"
+    assert forward.get("if") == (
+        "github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/v')"
+    )
+    forward_steps = forward.get("steps")
+    assert isinstance(forward_steps, list)
+    forward_runs = [
+        step.get("run") for step in forward_steps if isinstance(step, dict)
+    ]
+    assert "uv run python scripts/validate_release.py --forward" in forward_runs
+
+    validate = jobs.get("validate")
+    assert isinstance(validate, dict)
+    assert validate.get("if") is None
+    validate_steps = validate.get("steps")
+    assert isinstance(validate_steps, list)
+    validate_runs = [
+        step.get("run") for step in validate_steps if isinstance(step, dict)
+    ]
+    assert validate_runs.count("uv run python scripts/validate_release.py") == 1
+
+    assert isinstance(events, dict)
+    assert "schedule" in events
+    push = events.get("push")
+    assert isinstance(push, dict)
+    assert push.get("tags") == ["v*"]
+
+
+def test_dependabot_covers_every_release_lock_ecosystem_and_path() -> None:
+    dependabot = yaml.load(
+        _required_text(ROOT / ".github" / "dependabot.yml"),
+        Loader=yaml.BaseLoader,
+    )
+    assert isinstance(dependabot, dict)
+    assert dependabot.get("version") == "2"
+    updates = dependabot.get("updates")
+    assert isinstance(updates, list) and len(updates) == 4
+
+    matrix = {
+        (update.get("package-ecosystem"), update.get("directory"))
+        for update in updates
+        if isinstance(update, dict)
+    }
+    platform = (
+        "/plugins/python-library-course-builder/skills/"
+        "building-python-library-courses/assets/course-template/platform"
+    )
+    assert matrix == {
+        ("uv", "/"),
+        ("uv", platform),
+        ("npm", platform),
+        ("github-actions", "/"),
+    }
+    intervals = {
+        (update.get("package-ecosystem"), update.get("directory")): (
+            update.get("schedule", {}).get("interval")
+            if isinstance(update.get("schedule"), dict)
+            else None
+        )
+        for update in updates
+        if isinstance(update, dict)
+    }
+    assert intervals == {
+        ("uv", "/"): "weekly",
+        ("uv", platform): "weekly",
+        ("npm", platform): "weekly",
+        ("github-actions", "/"): "monthly",
+    }

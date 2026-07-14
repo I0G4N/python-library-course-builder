@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -14,10 +16,16 @@ import sys
 import tempfile
 import tomllib
 from typing import Iterable, Mapping, NamedTuple, Sequence
+from urllib.parse import urlsplit
 
 
 PLUGIN_NAME = "python-library-course-builder"
 SKILL_NAME = "building-python-library-courses"
+AUTHOR_NAME = "I0G4N"
+AUTHOR_URL = "https://github.com/I0G4N"
+REPOSITORY_URL = f"{AUTHOR_URL}/{PLUGIN_NAME}"
+HOMEPAGE_URL = f"{REPOSITORY_URL}#readme"
+DISPLAY_NAME = "Python Library Course Builder"
 EXPECTED_UV_VERSION = "0.11.7"
 MINIMUM_NODE_VERSION = (22, 13, 0)
 FORWARD_ENVIRONMENT_NAMES = frozenset(
@@ -74,18 +82,61 @@ EXPECTED_TEMPLATE_TOKENS = {
     "__COURSEKIT_TITLE__",
 }
 SECRET_PATTERNS = (
-    ("private key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
-    ("AWS access key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
-    ("OpenAI API key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
+    ("private key", re.compile(br"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+    ("AWS access key", re.compile(br"\bAKIA[0-9A-Z]{16}\b")),
+    ("GitHub token", re.compile(br"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
+    ("OpenAI API key", re.compile(br"\bsk-[A-Za-z0-9_-]{20,}\b")),
 )
 PRIVATE_HOST_PATTERNS = (
-    re.compile(r"/Users/[A-Za-z0-9._-]+/"),
-    re.compile(r"/home/[A-Za-z0-9._-]+/"),
-    re.compile(r"/private/(?:tmp|var/folders)/[A-Za-z0-9._/-]+"),
-    re.compile(r"[A-Za-z]:\\Users\\[^\\\s]+\\"),
+    re.compile(br"/Users/[A-Za-z0-9._-]+/"),
+    re.compile(br"/home/[A-Za-z0-9._-]+/"),
+    re.compile(br"/root/[A-Za-z0-9._/-]+"),
+    re.compile(br"/private/(?:tmp|var/folders)/[A-Za-z0-9._/-]+"),
+    re.compile(br"/var/folders/[A-Za-z0-9._/-]+"),
+    re.compile(br"[A-Za-z]:/Users/[A-Za-z0-9._/-]+"),
+    re.compile(br"[A-Za-z]:\\Users\\[^\\\s]+\\"),
 )
 TEMPLATE_TOKEN_RE = re.compile(r"__COURSEKIT_[A-Z0-9_]+__")
+STRICT_SEMVER_RE = re.compile(
+    r"^(0|[1-9]\d*)\."
+    r"(0|[1-9]\d*)\."
+    r"(0|[1-9]\d*)"
+    r"(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\."
+    r"(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+PLUGIN_MANIFEST_FIELDS = frozenset(
+    {
+        "name",
+        "version",
+        "description",
+        "author",
+        "homepage",
+        "repository",
+        "license",
+        "keywords",
+        "skills",
+        "interface",
+    }
+)
+PLUGIN_AUTHOR_FIELDS = frozenset({"name", "url"})
+PLUGIN_INTERFACE_FIELDS = frozenset(
+    {
+        "displayName",
+        "shortDescription",
+        "longDescription",
+        "developerName",
+        "category",
+        "capabilities",
+        "websiteURL",
+        "defaultPrompt",
+    }
+)
+MARKETPLACE_FIELDS = frozenset({"name", "interface", "plugins"})
+MARKETPLACE_INTERFACE_FIELDS = frozenset({"displayName"})
+MARKETPLACE_PLUGIN_FIELDS = frozenset({"name", "source", "policy", "category"})
+MARKETPLACE_SOURCE_FIELDS = frozenset({"source", "path"})
+MARKETPLACE_POLICY_FIELDS = frozenset({"installation", "authentication"})
 
 
 class CommandStep(NamedTuple):
@@ -146,7 +197,12 @@ def _residue_reason(relative: Path) -> str | None:
     matching_parts = sorted(folded_parts & RESIDUE_PARTS)
     if matching_parts:
         return f"forbidden path segment {matching_parts[0]!r}"
-    if relative.name in {".DS_Store", "coverage.xml", "course-verification.json"}:
+    if relative.name in {
+        ".DS_Store",
+        ".coverage",
+        "coverage.xml",
+        "course-verification.json",
+    }:
         return f"forbidden generated file {relative.name!r}"
     if relative.suffix.casefold() in RESIDUE_SUFFIXES:
         return f"forbidden generated suffix {relative.suffix!r}"
@@ -184,15 +240,15 @@ def scan_inventory(root: Path, files: Iterable[Path]) -> list[str]:
         except OSError as error:
             errors.append(f"unable to read inventory entry {label}: {error}")
             continue
+        for secret_name, pattern in SECRET_PATTERNS:
+            if pattern.search(raw):
+                errors.append(f"possible secret ({secret_name}) in {label}")
+        if any(pattern.search(raw) for pattern in PRIVATE_HOST_PATTERNS):
+            errors.append(f"private host path in {label}")
         if b"\0" in raw:
             continue
         text = raw.decode("utf-8", errors="replace")
         is_contract_fixture = bool(relative.parts and relative.parts[0] == "tests")
-        for secret_name, pattern in SECRET_PATTERNS:
-            if pattern.search(text):
-                errors.append(f"possible secret ({secret_name}) in {label}")
-        if any(pattern.search(text) for pattern in PRIVATE_HOST_PATTERNS):
-            errors.append(f"private host path in {label}")
         if not is_contract_fixture and todo_marker in text:
             errors.append(f"unresolved TODO marker in {label}")
         if not is_contract_fixture:
@@ -215,6 +271,297 @@ def _load_json_object(path: Path) -> tuple[dict[str, object] | None, list[str]]:
     return payload, []
 
 
+def _npm_dependency_parts(name: str) -> tuple[str, ...] | None:
+    parts = tuple(name.split("/"))
+    if name.startswith("@"):
+        valid = (
+            len(parts) == 2
+            and parts[0].startswith("@")
+            and len(parts[0]) > 1
+            and bool(parts[1])
+        )
+    else:
+        valid = len(parts) == 1 and bool(parts[0])
+    if not valid or any(part in {".", ".."} for part in parts):
+        return None
+    return parts
+
+
+def _npm_dependency_candidates(package_path: str, name: str) -> tuple[str, ...]:
+    dependency_parts = _npm_dependency_parts(name)
+    if dependency_parts is None:
+        return ()
+    prefix = PurePosixPath(package_path).parts if package_path else ()
+    candidates: list[str] = []
+    if prefix and "node_modules" not in prefix:
+        while prefix:
+            candidates.append(
+                PurePosixPath(*prefix, "node_modules", *dependency_parts).as_posix()
+            )
+            prefix = prefix[:-1]
+        candidates.append(
+            PurePosixPath("node_modules", *dependency_parts).as_posix()
+        )
+        return tuple(candidates)
+    while True:
+        candidates.append(
+            PurePosixPath(*prefix, "node_modules", *dependency_parts).as_posix()
+        )
+        node_modules = [
+            index for index, part in enumerate(prefix) if part == "node_modules"
+        ]
+        if not node_modules:
+            break
+        prefix = prefix[: node_modules[-1]]
+    return tuple(candidates)
+
+
+def _npm_package_name(package_path: str) -> str | None:
+    parts = PurePosixPath(package_path).parts
+    node_modules = [index for index, part in enumerate(parts) if part == "node_modules"]
+    if not node_modules:
+        return None
+    tail = parts[node_modules[-1] + 1 :]
+    if len(tail) == 1 and tail[0]:
+        return tail[0]
+    if len(tail) == 2 and tail[0].startswith("@") and tail[1]:
+        return f"{tail[0]}/{tail[1]}"
+    return None
+
+
+def _npm_parent_package_path(package_path: str) -> str | None:
+    parts = PurePosixPath(package_path).parts
+    node_modules = [index for index, part in enumerate(parts) if part == "node_modules"]
+    if len(node_modules) < 2:
+        return None
+    return PurePosixPath(*parts[: node_modules[-1]]).as_posix()
+
+
+def _npm_local_resolution_errors(
+    resolved: object,
+    package_path: str,
+    *,
+    link: bool,
+) -> list[str]:
+    if not isinstance(resolved, str) or not resolved:
+        return [f"npm lock package {package_path!r} needs a local resolved path"]
+    raw_path = resolved[5:] if resolved.startswith("file:") else resolved
+    candidate = PurePosixPath(raw_path)
+    portable_parts = tuple(part for part in re.split(r"[\\/]", raw_path) if part)
+    windows_drive = re.match(r"^[A-Za-z]:", raw_path) is not None
+    non_file_scheme = (
+        not resolved.startswith("file:")
+        and re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", resolved) is not None
+    )
+    if (
+        not raw_path
+        or candidate.is_absolute()
+        or raw_path.startswith("\\")
+        or windows_drive
+        or non_file_scheme
+        or "%" in raw_path
+        or "\\" in raw_path
+        or any(part in {".", ".."} for part in portable_parts)
+        or "\0" in raw_path
+        or (not link and not resolved.startswith("file:"))
+    ):
+        return [f"npm lock package {package_path!r} has an invalid local resolved path"]
+    return []
+
+
+def _npm_linked_local_targets(packages: Mapping[str, object]) -> frozenset[str]:
+    targets: set[str] = set()
+    for package_path, entry in packages.items():
+        if not isinstance(package_path, str) or not isinstance(entry, dict):
+            continue
+        if entry.get("link") is not True:
+            continue
+        resolved = entry.get("resolved")
+        if _npm_local_resolution_errors(resolved, package_path, link=True):
+            continue
+        assert isinstance(resolved, str)
+        raw_path = resolved[5:] if resolved.startswith("file:") else resolved
+        targets.add(PurePosixPath(raw_path).as_posix())
+    return frozenset(targets)
+
+
+def _npm_registry_metadata_errors(
+    package_path: str,
+    entry: Mapping[str, object],
+    packages: Mapping[str, object],
+) -> list[str]:
+    errors: list[str] = []
+    if entry.get("link") is True:
+        # Lockfile v3 workspace links point at a local path and intentionally
+        # omit registry version, tarball, and integrity metadata.
+        errors.extend(
+            _npm_local_resolution_errors(
+                entry.get("resolved"),
+                package_path,
+                link=True,
+            )
+        )
+        return errors
+
+    version = entry.get("version")
+    if not isinstance(version, str) or STRICT_SEMVER_RE.fullmatch(version) is None:
+        errors.append(f"npm lock package {package_path!r} has an invalid version")
+
+    if entry.get("inBundle") is True:
+        # npm omits tarball metadata for the optional WASM packages bundled by
+        # @tailwindcss/oxide-wasm32-wasi. Keep this exception structural: the
+        # nearest parent must explicitly list the package as bundled.
+        package_name = _npm_package_name(package_path)
+        parent_path = _npm_parent_package_path(package_path)
+        parent = packages.get(parent_path) if parent_path is not None else None
+        bundled = parent.get("bundleDependencies") if isinstance(parent, dict) else None
+        if (
+            entry.get("optional") is not True
+            or package_name is None
+            or not isinstance(bundled, list)
+            or package_name not in bundled
+        ):
+            errors.append(
+                f"npm lock package {package_path!r} uses an invalid bundled-package metadata exception"
+            )
+        return errors
+
+    resolved = entry.get("resolved")
+    if isinstance(resolved, str) and resolved.startswith("file:"):
+        # Local file dependencies are the other non-registry lockfile form.
+        errors.extend(
+            _npm_local_resolution_errors(resolved, package_path, link=False)
+        )
+        return errors
+
+    if not isinstance(resolved, str):
+        errors.append(
+            f"npm lock registry package {package_path!r} is missing resolved metadata"
+        )
+    else:
+        valid_registry_url = False
+        try:
+            parsed = urlsplit(resolved)
+            hostname = parsed.hostname
+            port = parsed.port
+        except ValueError:
+            pass
+        else:
+            valid_registry_url = (
+                parsed.scheme == "https"
+                and hostname == "registry.npmjs.org"
+                and port in {None, 443}
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.path.endswith(".tgz")
+                and not parsed.query
+                and not parsed.fragment
+            )
+        if not valid_registry_url:
+            errors.append(
+                f"npm lock registry package {package_path!r} has an invalid resolved HTTPS registry URL"
+            )
+
+    integrity = entry.get("integrity")
+    valid_integrity = False
+    if isinstance(integrity, str) and integrity.startswith("sha512-"):
+        try:
+            digest = base64.b64decode(integrity.removeprefix("sha512-"), validate=True)
+        except (binascii.Error, ValueError, TypeError):
+            digest = b""
+        valid_integrity = len(digest) == 64
+    if not valid_integrity:
+        errors.append(
+            f"npm lock registry package {package_path!r} integrity must be one sha512 digest"
+        )
+    return errors
+
+
+def _npm_dependency_graph_errors(packages: Mapping[str, object]) -> list[str]:
+    errors: list[str] = []
+    linked_local_targets = _npm_linked_local_targets(packages)
+    for package_path, raw_entry in sorted(packages.items()):
+        if not isinstance(package_path, str) or not isinstance(raw_entry, dict):
+            continue
+        if raw_entry.get("link") is not True:
+            continue
+        resolved = raw_entry.get("resolved")
+        if _npm_local_resolution_errors(resolved, package_path, link=True):
+            continue
+        assert isinstance(resolved, str)
+        raw_target = resolved[5:] if resolved.startswith("file:") else resolved
+        target = PurePosixPath(raw_target).as_posix()
+        if target not in packages:
+            errors.append(
+                f"npm lock link target {target!r} for package {package_path!r} is missing"
+            )
+    for package_path, raw_entry in sorted(packages.items()):
+        if not isinstance(package_path, str) or not isinstance(raw_entry, dict):
+            errors.append(f"npm lock package entry {package_path!r} must be an object")
+            continue
+        if package_path:
+            parts = PurePosixPath(package_path).parts
+            package_name = _npm_package_name(package_path)
+            if (
+                PurePosixPath(package_path).is_absolute()
+                or ".." in parts
+                or "\\" in package_path
+                or "%" in package_path
+            ):
+                errors.append(f"npm lock package path {package_path!r} is invalid")
+                continue
+            if package_name is None:
+                if package_path not in linked_local_targets:
+                    errors.append(f"npm lock package path {package_path!r} is invalid")
+                    continue
+                version = raw_entry.get("version")
+                if (
+                    not isinstance(version, str)
+                    or STRICT_SEMVER_RE.fullmatch(version) is None
+                ):
+                    errors.append(
+                        f"npm lock workspace package {package_path!r} has an invalid version"
+                    )
+            else:
+                errors.extend(
+                    _npm_registry_metadata_errors(package_path, raw_entry, packages)
+                )
+
+        dependency_fields = ["dependencies", "optionalDependencies", "peerDependencies"]
+        if package_path == "":
+            dependency_fields.append("devDependencies")
+        peer_meta = raw_entry.get("peerDependenciesMeta", {})
+        for field in dependency_fields:
+            dependencies = raw_entry.get(field, {})
+            if not isinstance(dependencies, dict):
+                errors.append(f"npm lock package {package_path!r} {field} must be an object")
+                continue
+            for dependency, requirement in sorted(dependencies.items()):
+                label = f"npm lock package {package_path!r} {field} dependency {dependency!r}"
+                if not isinstance(dependency, str) or not isinstance(requirement, str):
+                    errors.append(f"{label} must use string name and requirement metadata")
+                    continue
+                if (
+                    field == "peerDependencies"
+                    and isinstance(peer_meta, dict)
+                    and isinstance(peer_meta.get(dependency), dict)
+                    and peer_meta[dependency].get("optional") is True
+                ):
+                    continue
+                # Transitive requirements and versions come from the same lock
+                # artifact, so this offline structural check proves Node-style
+                # resolution and validates the resolved entry's own metadata;
+                # it deliberately does not reimplement npm's range language.
+                candidates = _npm_dependency_candidates(package_path, dependency)
+                if not candidates:
+                    errors.append(f"{label} has an invalid package name")
+                elif not any(candidate in packages for candidate in candidates):
+                    errors.append(
+                        f"{label} does not resolve through the locked Node ancestor graph"
+                    )
+    return errors
+
+
 def npm_lock_errors(package_path: Path, lock_path: Path) -> list[str]:
     package, errors = _load_json_object(package_path)
     lock, lock_errors = _load_json_object(lock_path)
@@ -223,6 +570,11 @@ def npm_lock_errors(package_path: Path, lock_path: Path) -> list[str]:
         return errors
     if lock.get("lockfileVersion") != 3:
         errors.append("package-lock.json must use lockfileVersion 3")
+    if lock.get("requires") is not True:
+        errors.append("package-lock.json must declare requires=true")
+    for field in ("name", "version"):
+        if lock.get(field) != package.get(field):
+            errors.append(f"package-lock top-level {field} does not match package.json")
     packages = lock.get("packages")
     if not isinstance(packages, dict):
         return errors + ["package-lock.json packages must be an object"]
@@ -244,12 +596,34 @@ def npm_lock_errors(package_path: Path, lock_path: Path) -> list[str]:
             if not isinstance(locked, dict):
                 errors.append(f"package-lock is missing direct dependency {name}")
                 continue
+            if locked.get("link") is True:
+                if not (
+                    isinstance(required_version, str)
+                    and required_version.startswith(("workspace:", "file:"))
+                ):
+                    errors.append(
+                        f"package-lock direct dependency {name} uses a local override for non-local requirement {required_version!r}"
+                    )
+                continue
+            if (
+                isinstance(locked.get("resolved"), str)
+                and locked["resolved"].startswith("file:")
+            ):
+                if not (
+                    isinstance(required_version, str)
+                    and required_version.startswith("file:")
+                ):
+                    errors.append(
+                        f"package-lock direct dependency {name} uses a local override for non-local requirement {required_version!r}"
+                    )
+                continue
             if locked.get("version") != required_version:
                 errors.append(
                     "package-lock direct dependency "
                     f"{name} version {locked.get('version')!r} does not match "
                     f"package.json {required_version!r}"
                 )
+    errors.extend(_npm_dependency_graph_errors(packages))
     return errors
 
 
@@ -295,6 +669,242 @@ def version_parity_errors(
             f"project/plugin version {project_version}"
         ]
     return []
+
+
+def _fixed_object_fields_errors(
+    payload: Mapping[str, object],
+    expected_fields: frozenset[str],
+    label: str,
+) -> list[str]:
+    errors = [
+        f"{label}.{field} is an unsupported field"
+        for field in sorted(set(payload) - expected_fields)
+    ]
+    errors.extend(
+        f"{label}.{field} is a required field"
+        for field in sorted(expected_fields - set(payload))
+    )
+    return errors
+
+
+def _non_empty_string_errors(value: object, field: str) -> list[str]:
+    if not isinstance(value, str) or not value.strip():
+        return [f"{field} must be a non-empty string"]
+    return []
+
+
+def _https_url_errors(value: object, field: str) -> list[str]:
+    if not isinstance(value, str):
+        return [f"{field} must be an absolute HTTPS URL"]
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError:
+        return [f"{field} must be a well-formed absolute HTTPS URL"]
+    if (
+        value != value.strip()
+        or parsed.scheme != "https"
+        or hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return [f"{field} must be an absolute HTTPS URL without credentials"]
+    return []
+
+
+def plugin_manifest_errors(manifest: Mapping[str, object]) -> list[str]:
+    """Validate the repository's fixed, Skill-only plugin manifest schema."""
+
+    errors = _fixed_object_fields_errors(
+        manifest,
+        PLUGIN_MANIFEST_FIELDS,
+        "plugin manifest",
+    )
+    for field in ("name", "version", "description", "license", "skills"):
+        errors.extend(_non_empty_string_errors(manifest.get(field), field))
+    if manifest.get("name") != PLUGIN_NAME:
+        errors.append(f"plugin manifest name must be {PLUGIN_NAME!r}")
+    version = manifest.get("version")
+    if not isinstance(version, str) or STRICT_SEMVER_RE.fullmatch(version) is None:
+        errors.append("version must use strict semantic versioning")
+    for field in ("homepage", "repository"):
+        errors.extend(_https_url_errors(manifest.get(field), field))
+    if manifest.get("license") != "Apache-2.0":
+        errors.append("license must be 'Apache-2.0'")
+    if manifest.get("skills") != "./skills/":
+        errors.append("skills must be './skills/'")
+
+    author = manifest.get("author")
+    if not isinstance(author, dict):
+        errors.append("author must be an object")
+    else:
+        errors.extend(
+            _fixed_object_fields_errors(author, PLUGIN_AUTHOR_FIELDS, "author")
+        )
+        errors.extend(_non_empty_string_errors(author.get("name"), "author.name"))
+        errors.extend(_https_url_errors(author.get("url"), "author.url"))
+        if author.get("name") != AUTHOR_NAME:
+            errors.append(f"author.name must be {AUTHOR_NAME!r}")
+        if author.get("url") != AUTHOR_URL:
+            errors.append(f"author.url must be {AUTHOR_URL!r}")
+
+    if manifest.get("homepage") != HOMEPAGE_URL:
+        errors.append(f"homepage must be {HOMEPAGE_URL!r}")
+    if manifest.get("repository") != REPOSITORY_URL:
+        errors.append(f"repository must be {REPOSITORY_URL!r}")
+
+    keywords = manifest.get("keywords")
+    if (
+        not isinstance(keywords, list)
+        or not keywords
+        or not all(isinstance(value, str) and value.strip() for value in keywords)
+        or len({value.casefold() for value in keywords if isinstance(value, str)})
+        != len(keywords)
+    ):
+        errors.append("keywords must be a non-empty array of unique, non-empty strings")
+
+    interface = manifest.get("interface")
+    if not isinstance(interface, dict):
+        errors.append("interface must be an object")
+        return errors
+    errors.extend(
+        _fixed_object_fields_errors(
+            interface,
+            PLUGIN_INTERFACE_FIELDS,
+            "interface",
+        )
+    )
+    for field in (
+        "displayName",
+        "shortDescription",
+        "longDescription",
+        "developerName",
+        "category",
+    ):
+        errors.extend(
+            _non_empty_string_errors(interface.get(field), f"interface.{field}")
+        )
+    if interface.get("category") != "Productivity":
+        errors.append("interface.category must be 'Productivity'")
+    if interface.get("displayName") != DISPLAY_NAME:
+        errors.append(f"interface.displayName must be {DISPLAY_NAME!r}")
+    if interface.get("developerName") != AUTHOR_NAME:
+        errors.append(f"interface.developerName must be {AUTHOR_NAME!r}")
+    if interface.get("capabilities") != []:
+        errors.append("interface.capabilities must be an empty array for a Skill-only plugin")
+    errors.extend(
+        _https_url_errors(interface.get("websiteURL"), "interface.websiteURL")
+    )
+    if interface.get("websiteURL") != REPOSITORY_URL:
+        errors.append(f"interface.websiteURL must be {REPOSITORY_URL!r}")
+    prompts = interface.get("defaultPrompt")
+    if (
+        not isinstance(prompts, list)
+        or not 1 <= len(prompts) <= 3
+        or not all(
+            isinstance(prompt, str) and prompt.strip() and len(prompt) <= 128
+            for prompt in prompts
+        )
+    ):
+        errors.append(
+            "interface.defaultPrompt must contain one to three non-empty strings of at most 128 characters"
+        )
+    elif not any(f"${SKILL_NAME}" in prompt for prompt in prompts):
+        errors.append(f"interface.defaultPrompt must invoke ${SKILL_NAME}")
+    return errors
+
+
+def marketplace_contract_errors(marketplace: Mapping[str, object]) -> list[str]:
+    """Validate the repository's fixed one-plugin marketplace schema."""
+
+    errors = _fixed_object_fields_errors(
+        marketplace,
+        MARKETPLACE_FIELDS,
+        "marketplace",
+    )
+    errors.extend(_non_empty_string_errors(marketplace.get("name"), "marketplace.name"))
+    if marketplace.get("name") != PLUGIN_NAME:
+        errors.append(f"marketplace.name must be {PLUGIN_NAME!r}")
+
+    interface = marketplace.get("interface")
+    if not isinstance(interface, dict):
+        errors.append("marketplace.interface must be an object")
+    else:
+        errors.extend(
+            _fixed_object_fields_errors(
+                interface,
+                MARKETPLACE_INTERFACE_FIELDS,
+                "marketplace.interface",
+            )
+        )
+        errors.extend(
+            _non_empty_string_errors(
+                interface.get("displayName"),
+                "marketplace.interface.displayName",
+            )
+        )
+        if interface.get("displayName") != DISPLAY_NAME:
+            errors.append(
+                f"marketplace.interface.displayName must be {DISPLAY_NAME!r}"
+            )
+
+    plugins = marketplace.get("plugins")
+    if not isinstance(plugins, list) or len(plugins) != 1:
+        errors.append("marketplace.plugins must contain exactly one plugin entry")
+        return errors
+    entry = plugins[0]
+    if not isinstance(entry, dict):
+        errors.append("marketplace.plugins[0] must be an object")
+        return errors
+    errors.extend(
+        _fixed_object_fields_errors(
+            entry,
+            MARKETPLACE_PLUGIN_FIELDS,
+            "marketplace.plugins[0]",
+        )
+    )
+    if entry.get("name") != PLUGIN_NAME:
+        errors.append(f"marketplace.plugins[0].name must be {PLUGIN_NAME!r}")
+    if entry.get("category") != "Productivity":
+        errors.append("marketplace.plugins[0].category must be 'Productivity'")
+
+    source = entry.get("source")
+    if not isinstance(source, dict):
+        errors.append("marketplace.plugins[0].source must be an object")
+    else:
+        errors.extend(
+            _fixed_object_fields_errors(
+                source,
+                MARKETPLACE_SOURCE_FIELDS,
+                "marketplace.plugins[0].source",
+            )
+        )
+        if source.get("source") != "local":
+            errors.append("marketplace.plugins[0].source.source must be 'local'")
+        if source.get("path") != f"./plugins/{PLUGIN_NAME}":
+            errors.append("marketplace.plugins[0].source.path is invalid")
+
+    policy = entry.get("policy")
+    if not isinstance(policy, dict):
+        errors.append("marketplace.plugins[0].policy must be an object")
+    else:
+        errors.extend(
+            _fixed_object_fields_errors(
+                policy,
+                MARKETPLACE_POLICY_FIELDS,
+                "marketplace.plugins[0].policy",
+            )
+        )
+        if policy.get("installation") != "AVAILABLE":
+            errors.append(
+                "marketplace.plugins[0].policy.installation must be 'AVAILABLE'"
+            )
+        if policy.get("authentication") != "ON_INSTALL":
+            errors.append(
+                "marketplace.plugins[0].policy.authentication must be 'ON_INSTALL'"
+            )
+    return errors
 
 
 def forward_verification_plan(
@@ -392,47 +1002,9 @@ def repository_contract_errors(
             )
         )
     if manifest is not None:
-        expected_fields = {
-            "name": PLUGIN_NAME,
-            "license": "Apache-2.0",
-            "skills": "./skills/",
-        }
-        for field, expected in expected_fields.items():
-            if manifest.get(field) != expected:
-                errors.append(f"plugin manifest {field} must be {expected!r}")
-        if "apps" in manifest or "mcpServers" in manifest:
-            errors.append("skill-only plugin must not declare apps or mcpServers")
-        author = manifest.get("author")
-        if not isinstance(author, dict) or "email" in author:
-            errors.append("plugin author must be an object without email")
-        interface = manifest.get("interface")
-        if not isinstance(interface, dict) or interface.get("capabilities") != []:
-            errors.append("plugin direct capabilities must be an empty array")
+        errors.extend(plugin_manifest_errors(manifest))
     if marketplace is not None:
-        if marketplace.get("name") != PLUGIN_NAME:
-            errors.append(f"marketplace name must be {PLUGIN_NAME!r}")
-        entries = marketplace.get("plugins")
-        matches = (
-            [item for item in entries if isinstance(item, dict) and item.get("name") == PLUGIN_NAME]
-            if isinstance(entries, list)
-            else []
-        )
-        if len(matches) != 1:
-            errors.append("marketplace must contain exactly one plugin entry")
-        else:
-            entry = matches[0]
-            if entry.get("source") != {
-                "source": "local",
-                "path": f"./plugins/{PLUGIN_NAME}",
-            }:
-                errors.append("marketplace plugin source path is invalid")
-            if entry.get("policy") != {
-                "installation": "AVAILABLE",
-                "authentication": "ON_INSTALL",
-            }:
-                errors.append("marketplace plugin policy is invalid")
-            if entry.get("category") != "Productivity":
-                errors.append("marketplace plugin category must be 'Productivity'")
+        errors.extend(marketplace_contract_errors(marketplace))
     for legal_name in ("LICENSE", "NOTICE"):
         root_file = root / legal_name
         template_file = paths["template"] / legal_name

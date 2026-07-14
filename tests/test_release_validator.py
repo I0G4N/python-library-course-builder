@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 from types import ModuleType
 
 import pytest
@@ -75,6 +77,51 @@ def test_inventory_scan_detects_windows_private_host_paths(tmp_path: Path) -> No
     assert any("private host path" in error.casefold() for error in errors)
 
 
+@pytest.mark.parametrize(
+    "private_path",
+    (
+        "/" + "root/private-course/spec.json",
+        "C:/" + "Users/alice/private-course/spec.json",
+        "/" + "var/folders/ab/private-course/spec.json",
+    ),
+)
+def test_inventory_scan_detects_additional_private_host_paths(
+    tmp_path: Path,
+    private_path: str,
+) -> None:
+    validator = load_validator()
+    notes = tmp_path / "notes.txt"
+    notes.write_text(f"generated at {private_path}\n", encoding="utf-8")
+
+    errors = validator.scan_inventory(tmp_path, (notes,))
+
+    assert any("private host path" in error.casefold() for error in errors)
+
+
+def test_inventory_scan_rejects_tracked_nul_binary_with_secret(tmp_path: Path) -> None:
+    validator = load_validator()
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    binary = tmp_path / "tracked.bin"
+    binary.write_bytes(b"header\0token=" + b"ghp_" + b"a" * 36 + b"\0tail")
+    subprocess.run(["git", "add", binary.name], cwd=tmp_path, check=True)
+
+    inventory = validator.repository_inventory(tmp_path)
+    errors = validator.scan_inventory(tmp_path, inventory)
+
+    assert binary in inventory
+    assert any("secret" in error.casefold() for error in errors)
+
+
+def test_inventory_scan_rejects_coverage_database_residue(tmp_path: Path) -> None:
+    validator = load_validator()
+    coverage = tmp_path / ".coverage"
+    coverage.write_bytes(b"SQLite format 3\0")
+
+    errors = validator.scan_inventory(tmp_path, (coverage,))
+
+    assert any("residue" in error.casefold() for error in errors)
+
+
 def test_inventory_scan_allows_contract_literals_under_tests(tmp_path: Path) -> None:
     validator = load_validator()
     contract = tmp_path / "tests" / "test_contract.py"
@@ -132,6 +179,364 @@ def test_npm_lock_validation_rejects_root_dependency_mismatch(tmp_path: Path) ->
 
     assert any("dependencies" in error for error in errors)
     assert any("react" in error for error in errors)
+
+
+def test_npm_lock_validation_accepts_complete_platform_graph() -> None:
+    validator = load_validator()
+    platform = (
+        ROOT
+        / "plugins"
+        / "python-library-course-builder"
+        / "skills"
+        / "building-python-library-courses"
+        / "assets"
+        / "course-template"
+        / "platform"
+    )
+
+    assert (
+        validator.npm_lock_errors(
+            platform / "package.json",
+            platform / "package-lock.json",
+        )
+        == []
+    )
+
+
+def test_npm_lock_validation_rejects_missing_transitive_dependency(
+    tmp_path: Path,
+) -> None:
+    validator = load_validator()
+    platform = (
+        ROOT
+        / "plugins"
+        / "python-library-course-builder"
+        / "skills"
+        / "building-python-library-courses"
+        / "assets"
+        / "course-template"
+        / "platform"
+    )
+    package_path = tmp_path / "package.json"
+    lock_path = tmp_path / "package-lock.json"
+    package_path.write_bytes((platform / "package.json").read_bytes())
+    lock = json.loads((platform / "package-lock.json").read_text(encoding="utf-8"))
+    lock["packages"].pop("node_modules/scheduler")
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+
+    errors = validator.npm_lock_errors(package_path, lock_path)
+
+    rendered = "\n".join(errors)
+    assert "scheduler" in rendered
+    assert "dependency" in rendered
+
+
+def test_npm_lock_validation_rejects_corrupt_registry_metadata(tmp_path: Path) -> None:
+    validator = load_validator()
+    platform = (
+        ROOT
+        / "plugins"
+        / "python-library-course-builder"
+        / "skills"
+        / "building-python-library-courses"
+        / "assets"
+        / "course-template"
+        / "platform"
+    )
+    package_path = tmp_path / "package.json"
+    lock_path = tmp_path / "package-lock.json"
+    package_path.write_bytes((platform / "package.json").read_bytes())
+    lock = json.loads((platform / "package-lock.json").read_text(encoding="utf-8"))
+    scheduler = lock["packages"]["node_modules/scheduler"]
+    scheduler["resolved"] = "http://registry.npmjs.org/scheduler/-/scheduler.tgz"
+    scheduler["integrity"] = "sha256-not-a-sha512-digest"
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+
+    errors = validator.npm_lock_errors(package_path, lock_path)
+
+    rendered = "\n".join(errors)
+    assert "scheduler" in rendered
+    assert "resolved" in rendered
+    assert "integrity" in rendered
+    assert "sha512" in rendered
+
+
+def test_npm_lock_metadata_allows_only_local_link_and_file_exceptions() -> None:
+    validator = load_validator()
+    packages = {
+        "node_modules/workspace": {
+            "link": True,
+            "resolved": "packages/workspace",
+        },
+        "node_modules/local-archive": {
+            "version": "1.2.3",
+            "resolved": "file:vendor/local-archive.tgz",
+        },
+    }
+
+    assert (
+        validator._npm_registry_metadata_errors(
+            "node_modules/workspace",
+            packages["node_modules/workspace"],
+            packages,
+        )
+        == []
+    )
+    assert (
+        validator._npm_registry_metadata_errors(
+            "node_modules/local-archive",
+            packages["node_modules/local-archive"],
+            packages,
+        )
+        == []
+    )
+
+    remote_link = {"link": True, "resolved": "https://example.invalid/package"}
+    errors = validator._npm_registry_metadata_errors(
+        "node_modules/remote-link",
+        remote_link,
+        {"node_modules/remote-link": remote_link},
+    )
+
+    assert any("local resolved path" in error for error in errors)
+
+    for resolved in (
+        "file:../../outside.tgz",
+        "file:%2e%2e/outside.tgz",
+        "../outside-workspace",
+        "..\\outside-workspace",
+    ):
+        traversal = {"link": True, "resolved": resolved}
+        traversal_errors = validator._npm_registry_metadata_errors(
+            "node_modules/traversal-link",
+            traversal,
+            {"node_modules/traversal-link": traversal},
+        )
+        assert any("local resolved path" in error for error in traversal_errors)
+
+
+def test_npm_lock_graph_accepts_contained_workspace_link(tmp_path: Path) -> None:
+    validator = load_validator()
+    package = {
+        "name": "demo",
+        "version": "0.1.0",
+        "engines": {"node": ">=22.13.0"},
+        "dependencies": {"workspace": "workspace:*"},
+        "devDependencies": {},
+    }
+    lock = {
+        "name": "demo",
+        "version": "0.1.0",
+        "lockfileVersion": 3,
+        "requires": True,
+        "packages": {
+            "": dict(package),
+            "node_modules/workspace": {
+                "resolved": "packages/workspace",
+                "link": True,
+            },
+            "packages/workspace": {
+                "name": "workspace",
+                "version": "1.0.0",
+            },
+        },
+    }
+    package_path = tmp_path / "package.json"
+    lock_path = tmp_path / "package-lock.json"
+    package_path.write_text(json.dumps(package), encoding="utf-8")
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+
+    assert validator.npm_lock_errors(package_path, lock_path) == []
+
+    lock["packages"].pop("packages/workspace")
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+    missing_target_errors = validator.npm_lock_errors(package_path, lock_path)
+
+    assert any("link target" in error for error in missing_target_errors)
+
+    lock["packages"]["packages/workspace"] = {
+        "name": "workspace",
+        "version": "1.0.0",
+    }
+    package["dependencies"]["workspace"] = "1.0.0"
+    lock["packages"][""]["dependencies"]["workspace"] = "1.0.0"
+    package_path.write_text(json.dumps(package), encoding="utf-8")
+    lock_path.write_text(json.dumps(lock), encoding="utf-8")
+    override_errors = validator.npm_lock_errors(package_path, lock_path)
+
+    assert any("local override" in error for error in override_errors)
+
+
+def test_repository_owned_plugin_and_marketplace_schemas_accept_release_metadata() -> None:
+    validator = load_validator()
+    manifest = json.loads(
+        (
+            ROOT
+            / "plugins"
+            / "python-library-course-builder"
+            / ".codex-plugin"
+            / "plugin.json"
+        ).read_text(encoding="utf-8")
+    )
+    marketplace = json.loads(
+        (ROOT / ".agents" / "plugins" / "marketplace.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert validator.plugin_manifest_errors(manifest) == []
+    assert validator.marketplace_contract_errors(marketplace) == []
+
+
+def test_plugin_schema_rejects_missing_unknown_and_malformed_metadata() -> None:
+    validator = load_validator()
+    manifest_path = (
+        ROOT
+        / "plugins"
+        / "python-library-course-builder"
+        / ".codex-plugin"
+        / "plugin.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    missing_description = deepcopy(manifest)
+    missing_description.pop("description")
+    unknown_field = deepcopy(manifest)
+    unknown_field["unexpected"] = True
+    unsafe_fields = deepcopy(manifest)
+    unsafe_fields.update(
+        {
+            "version": "01.2.3",
+            "homepage": "http://example.invalid/plugin",
+            "keywords": ["python", ""],
+            "apps": "./.app.json",
+            "mcpServers": "./.mcp.json",
+        }
+    )
+    unsafe_fields["author"]["email"] = "private@example.invalid"
+    unsafe_fields["interface"]["capabilities"] = ["Write"]
+    unsafe_fields["interface"]["defaultPrompt"] = "not-a-list"
+
+    missing_errors = validator.plugin_manifest_errors(missing_description)
+    unknown_errors = validator.plugin_manifest_errors(unknown_field)
+    unsafe_errors = validator.plugin_manifest_errors(unsafe_fields)
+
+    assert any("description" in error for error in missing_errors)
+    assert any("unexpected" in error for error in unknown_errors)
+    rendered = "\n".join(unsafe_errors)
+    for field in (
+        "version",
+        "homepage",
+        "keywords",
+        "apps",
+        "mcpServers",
+        "author.email",
+        "capabilities",
+        "defaultPrompt",
+    ):
+        assert field in rendered
+
+
+@pytest.mark.parametrize(
+    ("field_path", "invalid_value"),
+    (
+        (("author", "name"), "Someone Else"),
+        (("author", "url"), "https://example.invalid/author"),
+        (("author", "url"), "https://[::1"),
+        (("homepage",), "https://example.invalid/readme"),
+        (("repository",), "https://example.invalid/repository"),
+        (("repository",), "https://example.invalid:notaport/repository"),
+        (("interface", "displayName"), "Different Plugin"),
+        (("interface", "developerName"), "Someone Else"),
+        (("interface", "websiteURL"), "https://example.invalid/plugin"),
+    ),
+)
+def test_plugin_schema_rejects_wrong_identity_and_malformed_urls(
+    field_path: tuple[str, ...],
+    invalid_value: str,
+) -> None:
+    validator = load_validator()
+    manifest = json.loads(
+        (
+            ROOT
+            / "plugins"
+            / "python-library-course-builder"
+            / ".codex-plugin"
+            / "plugin.json"
+        ).read_text(encoding="utf-8")
+    )
+    target = manifest
+    for key in field_path[:-1]:
+        target = target[key]
+    target[field_path[-1]] = invalid_value
+
+    errors = validator.plugin_manifest_errors(manifest)
+
+    assert any(".".join(field_path) in error for error in errors)
+
+
+def test_marketplace_schema_rejects_missing_display_name_and_unknown_fields() -> None:
+    validator = load_validator()
+    marketplace = json.loads(
+        (ROOT / ".agents" / "plugins" / "marketplace.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    missing_display_name = deepcopy(marketplace)
+    missing_display_name["interface"].pop("displayName")
+    unknown_fields = deepcopy(marketplace)
+    unknown_fields["unexpected"] = True
+    unknown_fields["plugins"][0]["source"]["branch"] = "main"
+    unknown_fields["plugins"][0]["policy"]["products"] = ["codex"]
+
+    missing_errors = validator.marketplace_contract_errors(missing_display_name)
+    unknown_errors = validator.marketplace_contract_errors(unknown_fields)
+
+    assert any("interface.displayName" in error for error in missing_errors)
+    rendered = "\n".join(unknown_errors)
+    assert "unexpected" in rendered
+    assert "source.branch" in rendered
+    assert "policy.products" in rendered
+
+
+def test_marketplace_schema_rejects_wrong_identity_and_extra_entries() -> None:
+    validator = load_validator()
+    marketplace = json.loads(
+        (ROOT / ".agents" / "plugins" / "marketplace.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    wrong_display_name = deepcopy(marketplace)
+    wrong_display_name["interface"]["displayName"] = "Different Marketplace"
+    extra_entry = deepcopy(marketplace)
+    extra_entry["plugins"].append(deepcopy(extra_entry["plugins"][0]))
+
+    identity_errors = validator.marketplace_contract_errors(wrong_display_name)
+    entry_errors = validator.marketplace_contract_errors(extra_entry)
+
+    assert any("interface.displayName" in error for error in identity_errors)
+    assert any("exactly one" in error for error in entry_errors)
+
+
+def test_repository_contract_runs_owned_manifest_and_marketplace_validators(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validator = load_validator()
+    monkeypatch.setattr(
+        validator,
+        "plugin_manifest_errors",
+        lambda manifest: ["owned plugin schema sentinel"],
+    )
+    monkeypatch.setattr(
+        validator,
+        "marketplace_contract_errors",
+        lambda marketplace: ["owned marketplace schema sentinel"],
+    )
+
+    errors = validator.repository_contract_errors(ROOT, {})
+
+    assert "owned plugin schema sentinel" in errors
+    assert "owned marketplace schema sentinel" in errors
 
 
 def test_codex_validator_paths_are_derived_from_codex_home(tmp_path: Path) -> None:
