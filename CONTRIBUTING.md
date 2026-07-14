@@ -24,20 +24,35 @@ Do not weaken a valid test simply to make a reference projection pass. Fix reusa
 
 ## Validation
 
-Install the exact locked development environment, then run the deterministic release validator:
+Install the exact locked development environment:
 
 ```bash
 uv sync --locked
+```
+
+Run the base CI gate:
+
+```bash
 uv run python scripts/validate_release.py
 ```
 
-For a release candidate, also generate and fully verify a temporary standard-library course:
+This is the normal CI gate. It checks repository contracts and hygiene, Python and Node suites, lock files, the public Agent Skills validator, metadata, and worktree stability without requiring a local Codex installation.
+
+Run the local Codex validator gate when Codex is installed and its official validators are available under `CODEX_HOME`:
 
 ```bash
-uv run python scripts/validate_release.py --forward
+uv run python scripts/validate_release.py --codex-validators
 ```
 
-Run these commands from the repository root with the prerequisite Python, uv, Node.js, and Git versions listed above. The deterministic validator checks the Python and Node suites, Skill validation, lock files, metadata, repository hygiene, and worktree stability. Forward validation additionally proves the generated starter/reference RED-GREEN contract and the full local course workflow.
+This runs the base gate plus the official Codex Skill quick validator and plugin validator. Normal CI does not depend on those installation-specific validator paths.
+
+Run the complete release-candidate gate before publishing:
+
+```bash
+uv run python scripts/validate_release.py --codex-validators --forward
+```
+
+This runs both validation layers, then generates, sets up, and fully verifies a temporary standard-library course. CI also runs forward generation on its scheduled and tagged release path without depending on local `CODEX_HOME`. Run all three gates from the repository root with the prerequisite Python, uv, Node.js, and Git versions listed above.
 
 ## Documentation and evidence
 

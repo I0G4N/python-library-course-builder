@@ -16,8 +16,20 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_NAME = "python-library-course-builder"
+SKILL_NAME = "building-python-library-courses"
+SKILL_DESCRIPTION = (
+    "Use when a user asks to build, create, author, or learn through a "
+    "structured hands-on course project for a Python standard-library module, "
+    "PyPI package, framework, or repository instead of receiving a one-off "
+    "explanation."
+)
+SKILL_SHORT_DESCRIPTION = "Build complete Python library learning projects"
+SKILL_DEFAULT_PROMPT = (
+    "Use $building-python-library-courses to create a source-backed, hands-on "
+    "course for a Python library, framework, or repository."
+)
 PLUGIN_ROOT = ROOT / "plugins" / PLUGIN_NAME
-SKILL_ROOT = PLUGIN_ROOT / "skills" / "building-python-library-courses"
+SKILL_ROOT = PLUGIN_ROOT / "skills" / SKILL_NAME
 SCRIPTS_ROOT = SKILL_ROOT / "scripts"
 TEMPLATE_ROOT = SKILL_ROOT / "assets" / "course-template"
 PLATFORM_ROOT = TEMPLATE_ROOT / "platform"
@@ -46,6 +58,19 @@ def _required_text(path: Path) -> str:
 
 def _required_json(path: Path) -> dict[str, Any]:
     return json.loads(_required_text(path))
+
+
+def _skill_frontmatter_and_body() -> tuple[dict[str, Any], str]:
+    document = _required_text(SKILL_ROOT / "SKILL.md")
+    match = re.fullmatch(
+        r"---\n(?P<frontmatter>.*?)\n---\n(?P<body>.*)",
+        document,
+        re.DOTALL,
+    )
+    assert match is not None, "SKILL.md needs one YAML frontmatter block"
+    frontmatter = yaml.safe_load(match.group("frontmatter"))
+    assert isinstance(frontmatter, dict), "SKILL.md frontmatter must be a mapping"
+    return frontmatter, match.group("body")
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -137,6 +162,82 @@ def test_plugin_manifest_and_marketplace_publish_exact_skill_only_metadata() -> 
     }
 
 
+def test_skill_discovery_and_ui_metadata_are_synchronized() -> None:
+    frontmatter, body = _skill_frontmatter_and_body()
+
+    assert frontmatter == {
+        "name": SKILL_NAME,
+        "description": SKILL_DESCRIPTION,
+    }
+    assert SKILL_ROOT.name == frontmatter["name"]
+    assert len(body.split()) <= 1_500, "SKILL.md must use progressive disclosure"
+
+    reference_names = (
+        "architecture.md",
+        "authoring-rubric.md",
+        "curriculum-contract.md",
+        "forward-test-rubric.md",
+    )
+    for name in reference_names:
+        assert f"](references/{name})" in body, f"SKILL.md must route readers to {name}"
+
+    openai = yaml.safe_load(_required_text(SKILL_ROOT / "agents" / "openai.yaml"))
+    assert openai == {
+        "interface": {
+            "display_name": "Python Library Course Builder",
+            "short_description": SKILL_SHORT_DESCRIPTION,
+            "default_prompt": SKILL_DEFAULT_PROMPT,
+        }
+    }
+    assert 25 <= len(SKILL_SHORT_DESCRIPTION) <= 64
+    assert f"${SKILL_NAME}" in SKILL_DEFAULT_PROMPT
+
+    manifest = _required_json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
+    assert manifest["interface"]["shortDescription"] == SKILL_SHORT_DESCRIPTION
+    assert manifest["interface"]["defaultPrompt"] == [SKILL_DEFAULT_PROMPT]
+
+
+def test_skill_routes_references_at_point_of_use() -> None:
+    _, body = _skill_frontmatter_and_body()
+    point_of_use_routes = (
+        "Read [curriculum-contract.md](references/curriculum-contract.md) "
+        "before writing the specification.",
+        "Apply [authoring-rubric.md](references/authoring-rubric.md) while "
+        "designing lessons, exercises, and tests.",
+        "Read [architecture.md](references/architecture.md) before validating "
+        "the generated runtime and ownership boundaries.",
+        "Use [forward-test-rubric.md](references/forward-test-rubric.md) for "
+        "the required generated-project acceptance matrix; treat its "
+        "fresh-agent transfer evaluation as optional.",
+    )
+    for route in point_of_use_routes:
+        assert route in body, f"SKILL.md needs point-of-use routing: {route}"
+
+
+def test_fresh_agent_transfer_evaluation_is_advisory() -> None:
+    forward = _required_text(SKILL_ROOT / "references" / "forward-test-rubric.md")
+
+    assert (
+        "Fresh-agent transfer evaluation is optional and is not a standard "
+        "release gate."
+    ) in forward
+    assert "## Optional small-target transfer test" in forward
+    assert "## Optional large-target gate test" in forward
+    assert "A no-Skill baseline is optional" in forward
+    assert "## Required small-target transfer test" not in forward
+    assert "## Required large-target gate test" not in forward
+
+
+def test_skill_preserves_specification_to_split_source_boundary() -> None:
+    _, body = _skill_frontmatter_and_body()
+    authoring_contract = "Author one UTF-8 schema-v2 JSON specification"
+    generation_contract = "Let the scaffolder create the split canonical source"
+
+    assert authoring_contract in body
+    assert generation_contract in body
+    assert body.index(authoring_contract) < body.index(generation_contract)
+
+
 def test_changelog_publishes_the_release_version_from_project_metadata() -> None:
     changelog = _required_text(ROOT / "CHANGELOG.md")
     release = re.search(
@@ -174,7 +275,11 @@ def test_release_docs_link_the_changelog_and_publish_exact_validation_commands()
     required_commands = {
         "uv sync --locked",
         "uv run python scripts/validate_release.py",
-        "uv run python scripts/validate_release.py --forward",
+        "uv run python scripts/validate_release.py --codex-validators",
+        (
+            "uv run python scripts/validate_release.py "
+            "--codex-validators --forward"
+        ),
     }
     assert required_commands <= commands, (
         "CONTRIBUTING.md must publish copyable locked deterministic and "

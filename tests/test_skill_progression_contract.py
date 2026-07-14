@@ -183,19 +183,17 @@ def test_generated_readme_explains_the_shared_cli_and_web_progression() -> None:
 
 
 def test_author_contract_requires_quiz_first_code_and_question_scoped_files() -> None:
-    skill = _read("SKILL.md")
     architecture = _read("references/architecture.md")
     forward = _read("references/forward-test-rubric.md")
     readme = _read("assets/course-template/README.md")
 
-    for document in (skill, architecture, forward, readme):
+    for document in (architecture, forward, readme):
         assert "Lab 00" in document
         assert "no code workspace" in document
         assert "workflow gate, not source secrecy" in document
 
     assert "GET /api/file?lab_id={lab_id}&question_id={question_id}" in architecture
     assert '"lab_id", "question_id", and "content"' in architecture
-    assert "question-scoped file API" in skill
     assert "question-scoped file API" in forward
     assert "foundation and current-Lab knowledge" in readme
 
@@ -209,28 +207,24 @@ def test_generated_readme_names_the_supported_local_operating_systems() -> None:
 
 
 def test_author_contract_documents_compiler_owned_source_preflight() -> None:
-    skill = _read("SKILL.md")
     curriculum = _read("references/curriculum-contract.md")
     architecture = _read("references/architecture.md")
     forward = _read("references/forward-test-rubric.md")
 
-    assert "source_policy" in skill
     assert "source_policy" in curriculum
     assert "source_policy" in architecture
     assert "source_policy" in forward
     assert "before pytest" in architecture
     assert "target_symbols" in curriculum and "official_symbols" in curriculum
     assert "python {path}" in curriculum
-    assert "python {path}" in skill
 
 
 def test_author_contract_requires_accessible_resizable_desktop_layout() -> None:
-    skill = _read("SKILL.md")
     architecture = _read("references/architecture.md")
     forward = _read("references/forward-test-rubric.md")
     readme = _read("assets/course-template/README.md")
 
-    for document in (skill, architecture, forward, readme):
+    for document in (architecture, forward, readme):
         assert "two keyboard-accessible separators" in document
         assert "per-course localStorage" in document
         assert "no resize separators" in document
@@ -250,6 +244,8 @@ def test_skill_requires_the_mechanism_then_official_bridge_learning_cycle() -> N
         assert "teaching-equivalent" in document
         assert "official bridge" in document
         assert "prior mini implementation" in document
+
+    for document in (curriculum, authoring, forward):
         assert "wrong -> symptom -> cause -> fix" in document
 
     assert "schema_version\": 2" in curriculum
@@ -268,13 +264,16 @@ def test_skill_requires_beginner_depth_and_executable_content_quality() -> None:
     for document in (skill, authoring, forward):
         assert "30-45 minutes" in document
         assert "basic Python" in document
+
+    curriculum = _read("references/curriculum-contract.md")
+    for document in (curriculum, authoring, forward):
         assert "at least two examples" in document
         assert "execution-trace" in document
         assert "diagnostic" in document
         assert "40%" in document
 
-    assert "CPU/offline runnable" in skill
-    assert "compiler-generated parity snapshot" in skill
+    assert "CPU/offline runnable" in curriculum
+    assert "compiler-generated parity snapshot" in curriculum
 
 
 def test_skill_rejects_prerequisite_leakage_and_hollow_capstones() -> None:

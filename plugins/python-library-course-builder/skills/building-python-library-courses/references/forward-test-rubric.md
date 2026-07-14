@@ -1,26 +1,26 @@
 # Forward-test rubric
 
-Forward tests establish that the Skill transfers to a new target and does not merely replay the course it was extracted from.
+This rubric separates the required generated-project acceptance matrix from optional instruction-transfer evaluation. Fresh-agent transfer evaluation is optional and is not a standard release gate.
 
 ## Contents
 
-- [Test isolation](#test-isolation)
-- [Required small-target transfer test](#required-small-target-transfer-test)
-- [Required large-target gate test](#required-large-target-gate-test)
-- [Fail-closed negative tests](#fail-closed-negative-tests)
-- [Generated-project acceptance matrix](#generated-project-acceptance-matrix)
+- [Optional fresh-agent transfer evaluation](#optional-fresh-agent-transfer-evaluation)
+- [Optional small-target transfer test](#optional-small-target-transfer-test)
+- [Optional large-target gate test](#optional-large-target-gate-test)
+- [Required fail-closed negative tests](#required-fail-closed-negative-tests)
+- [Required generated-project acceptance matrix](#required-generated-project-acceptance-matrix)
 - [Repository quality](#repository-quality)
-- [RED/GREEN comparison report](#redgreen-comparison-report)
+- [Optional RED/GREEN transfer comparison](#optional-redgreen-transfer-comparison)
 
-## Test isolation
+## Optional fresh-agent transfer evaluation
 
-Use a fresh agent or context with only the user-style request, the Skill, a target name, and an empty destination. Do not provide an existing course specification, reference implementation, expected Lab titles, or prior verification report. Record the exact prompt, target version, output path, commands, exit codes, and failures.
+Use this advisory evaluation when measuring whether the Skill transfers to a new target without replaying an existing course. When running it, use a fresh agent or context with only the user-style request, the Skill, a target name, and an empty destination. Do not provide an existing course specification, reference implementation, expected Lab titles, or prior verification report. Record the exact prompt, target version, output path, commands, exit codes, and failures.
 
 Always generate outside the source repository. The destination must not exist or must be empty. Afterward, inspect for symlinks and absolute references back to the Skill or originating project.
 
 The generated route must assume only basic Python, budget 30-45 minutes per graded Lab, and repeatedly enforce the teaching-equivalent -> official bridge cycle. A reviewer must be able to trace that no downstream source or capstone imports a prior mini implementation.
 
-## Required small-target transfer test
+## Optional small-target transfer test
 
 Use a bounded standard-library target such as `pathlib`:
 
@@ -32,7 +32,7 @@ Use a bounded standard-library target such as `pathlib`:
 
 The route must cover a coherent progression rather than mechanically copying another library's Lab names. The generated prose, symbols, examples, tests, capstone, branding, and official links must all belong to the target.
 
-## Required large-target gate test
+## Optional large-target gate test
 
 Invoke the Skill for a broad multi-product target such as Ray without naming a track. A passing response:
 
@@ -43,7 +43,7 @@ Invoke the Skill for a broad multi-product target such as Ray without naming a t
 
 After a track is selected, only that track is eligible for the 6-10 Lab route. A shallow all-products survey fails.
 
-## Fail-closed negative tests
+## Required fail-closed negative tests
 
 Verify all of these separately:
 
@@ -55,7 +55,7 @@ Verify all of these separately:
 - check/validation mode does not mutate source or output;
 - an induced replacement failure leaves the prior generated output byte-for-byte intact.
 
-## Generated-project acceptance matrix
+## Required generated-project acceptance matrix
 
 Run every check from fresh output.
 
@@ -132,9 +132,9 @@ These controls are a workflow gate, not source secrecy. Acceptance must not clai
 - README commands work in a clean environment and state required Python/Node tooling;
 - a clean Git baseline checkpoint excludes runtime state and caches; if it includes the author projection, the README clearly states that public hosting exposes reference answers and hidden tests.
 
-## RED/GREEN comparison report
+## Optional RED/GREEN transfer comparison
 
-Keep the no-Skill baseline and the Skill-assisted result as separate reports. Compare at least:
+A no-Skill baseline is optional and applies only when measuring the effect of the Skill. If you run that comparison, keep the baseline and Skill-assisted result as separate reports. Compare at least:
 
 - official evidence and version lock;
 - adaptive curriculum and cumulative capstone;
@@ -147,4 +147,4 @@ Keep the no-Skill baseline and the Skill-assisted result as separate reports. Co
 - progress and Git checkpoints;
 - privacy, residue, path safety, and deployment documentation.
 
-Do not mark the forward test GREEN if any Critical or Important issue remains. When a failure generalizes to other targets, patch the Skill, script, or template, regenerate from an empty directory, and rerun the full matrix.
+Do not mark an optional transfer evaluation GREEN if any Critical or Important issue remains. When a failure generalizes to other targets, patch the Skill, script, or template, regenerate from an empty directory, and rerun the required generated-project matrix.
