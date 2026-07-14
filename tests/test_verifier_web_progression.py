@@ -12,7 +12,10 @@ from typing import Any
 import pytest
 
 
-SKILL_ROOT = Path(__file__).resolve().parents[1]
+SKILL_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "plugins/python-library-course-builder/skills/building-python-library-courses"
+)
 SCRIPTS_ROOT = SKILL_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_ROOT))
 

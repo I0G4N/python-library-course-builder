@@ -9,7 +9,10 @@ import tempfile
 import pytest
 
 
-SKILL_ROOT = Path(__file__).resolve().parents[1]
+SKILL_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "plugins/python-library-course-builder/skills/building-python-library-courses"
+)
 SCRIPTS_ROOT = SKILL_ROOT / "scripts"
 PLATFORM_ROOT = SKILL_ROOT / "assets" / "course-template" / "platform"
 sys.path.insert(0, str(SCRIPTS_ROOT))

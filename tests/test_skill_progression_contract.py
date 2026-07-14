@@ -6,7 +6,10 @@ import sys
 import pytest
 
 
-SKILL_ROOT = Path(__file__).resolve().parents[1]
+SKILL_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "plugins/python-library-course-builder/skills/building-python-library-courses"
+)
 sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 
 import scaffold_course  # noqa: E402

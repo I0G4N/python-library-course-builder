@@ -17,7 +17,10 @@ from fastapi.testclient import TestClient
 import pytest
 
 
-SKILL_ROOT = Path(__file__).resolve().parents[1]
+SKILL_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "plugins/python-library-course-builder/skills/building-python-library-courses"
+)
 PLATFORM_ROOT = SKILL_ROOT / "assets" / "course-template" / "platform"
 sys.path.insert(0, str(PLATFORM_ROOT))
 
