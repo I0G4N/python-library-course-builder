@@ -62,6 +62,27 @@ _TRUSTED_VERIFIER_ENVIRONMENT_NAMES = frozenset(
         RAY_UV_RUNTIME_ENV_FLAG,
     }
 )
+_WINDOWS_ENVIRONMENT = os.name == "nt"
+
+
+def _allowlisted_environment(
+    inherited: Mapping[str, str], allowed: frozenset[str]
+) -> dict[str, str]:
+    if not _WINDOWS_ENVIRONMENT:
+        return {name: inherited[name] for name in allowed if name in inherited}
+    result: dict[str, str] = {}
+    for canonical in allowed:
+        if canonical in inherited:
+            result[canonical] = inherited[canonical]
+            continue
+        matches = [
+            value
+            for name, value in inherited.items()
+            if name.upper() == canonical
+        ]
+        if len(matches) == 1:
+            result[canonical] = matches[0]
+    return result
 
 
 def verification_subprocess_env(
@@ -80,11 +101,7 @@ def verification_subprocess_env(
     allowed = _SAFE_SUBPROCESS_ENVIRONMENT_NAMES
     if environment is not None:
         allowed = allowed | _TRUSTED_VERIFIER_ENVIRONMENT_NAMES
-    result = {
-        name: value
-        for name, value in inherited.items()
-        if name.upper() in allowed
-    }
+    result = _allowlisted_environment(inherited, allowed)
     result["PYTHONDONTWRITEBYTECODE"] = "1"
     result[RAY_UV_RUNTIME_ENV_FLAG] = "0"
     return result
@@ -1253,6 +1270,8 @@ def verify(project: Path, *, full: bool = False) -> dict[str, Any]:
         cwd=root / "labs",
         env=python_env(root),
     )
+    runner_environment = verification_subprocess_env()
+    runner_environment["PYTHONPATH"] = str(platform)
     runner = run(
         [
             platform_python,
@@ -1265,7 +1284,7 @@ def verify(project: Path, *, full: bool = False) -> dict[str, Any]:
             ),
         ],
         cwd=platform,
-        env={**os.environ, "PYTHONPATH": str(platform)},
+        env=runner_environment,
     )
     commits = run(["git", "rev-list", "--count", "HEAD"], cwd=root)
     cli_workflow, cli_workflow_output = cli_learning_workflow(root, learner_python)
@@ -1297,11 +1316,7 @@ def verify(project: Path, *, full: bool = False) -> dict[str, Any]:
     if full:
         node = run(["npm", "test"], cwd=root, timeout=300)
         lint = run(["npm", "run", "lint"], cwd=root, timeout=180)
-        typescript = run(
-            ["npm", "exec", "--offline", "--", "tsc", "--noEmit"],
-            cwd=platform,
-            timeout=180,
-        )
+        typescript = run(["npm", "run", "typecheck"], cwd=platform, timeout=180)
         report["full_node_runner"] = node.returncode == 0
         web_progression["generated_project_tests"] = node.returncode == 0
         report["lint"] = lint.returncode == 0

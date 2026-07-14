@@ -15,6 +15,7 @@
     "test": "npm run course:check && npm run build && node --test tests/*.test.mjs",
     "test:runner": "UV_CACHE_DIR=.uv-cache uv run pytest runner/tests -q",
     "test:reference": "COURSEKIT_INTERNAL_RUN=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 UV_CACHE_DIR=.uv-cache PYTHONPATH=course/reference:course/starter uv run pytest -q course/starter course/tests/hidden",
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .venv --ignore-pattern .uv-cache"
   },
   "dependencies": {

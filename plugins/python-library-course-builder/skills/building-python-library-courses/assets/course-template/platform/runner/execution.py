@@ -46,6 +46,7 @@ _SAFE_SUBPROCESS_ENVIRONMENT_NAMES = frozenset(
         "WINDIR",
     }
 )
+_WINDOWS_ENVIRONMENT = os.name == "nt"
 _SKIP_DIRECTORIES = {
     ".coursekit",
     ".git",
@@ -66,11 +67,25 @@ _SKIP_DIRECTORIES = {
 def safe_subprocess_environment(inherited: Mapping[str, str]) -> dict[str, str]:
     """Copy only non-secret OS, locale, and virtualenv process settings."""
 
-    return {
-        name: value
-        for name, value in inherited.items()
-        if name.upper() in _SAFE_SUBPROCESS_ENVIRONMENT_NAMES
-    }
+    if not _WINDOWS_ENVIRONMENT:
+        return {
+            name: inherited[name]
+            for name in _SAFE_SUBPROCESS_ENVIRONMENT_NAMES
+            if name in inherited
+        }
+    result: dict[str, str] = {}
+    for canonical in _SAFE_SUBPROCESS_ENVIRONMENT_NAMES:
+        if canonical in inherited:
+            result[canonical] = inherited[canonical]
+            continue
+        matches = [
+            value
+            for name, value in inherited.items()
+            if name.upper() == canonical
+        ]
+        if len(matches) == 1:
+            result[canonical] = matches[0]
+    return result
 
 
 class _CopyDeadlineExceeded(RuntimeError):

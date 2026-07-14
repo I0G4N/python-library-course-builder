@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -239,6 +240,26 @@ def test_direct_dependencies_and_official_sources_require_safe_immutable_urls(
         "wheel with wrong hash algorithm": (
             f"demo @ https://example.com/demo-1.0.0-py3-none-any.whl#sha512={sha256}"
         ),
+        "wheel with uppercase sha256 key": (
+            f"demo @ https://example.com/demo-1.0.0-py3-none-any.whl#SHA256={sha256}"
+        ),
+        "wheel with mixed-case sha256 key": (
+            f"demo @ https://example.com/demo-1.0.0-py3-none-any.whl#Sha256={sha256}"
+        ),
+        "wheel with encoded sha256 key": (
+            f"demo @ https://example.com/demo-1.0.0-py3-none-any.whl#%73ha256={sha256}"
+        ),
+        "wheel with encoded sha256 value": (
+            "demo @ https://example.com/demo-1.0.0-py3-none-any.whl"
+            f"#sha256=%61{'a' * 63}"
+        ),
+        "wheel with uppercase sha256 value": (
+            f"demo @ https://example.com/demo-1.0.0-py3-none-any.whl#sha256={'A' * 64}"
+        ),
+        "wheel with mixed-case sha256 value": (
+            "demo @ https://example.com/demo-1.0.0-py3-none-any.whl"
+            f"#sha256={'a' * 63}F"
+        ),
         "wheel with duplicate sha256": (
             "demo @ https://example.com/demo-1.0.0-py3-none-any.whl"
             f"#sha256={sha256}&SHA256={sha256}"
@@ -247,6 +268,11 @@ def test_direct_dependencies_and_official_sources_require_safe_immutable_urls(
     invalid_sources = {
         "official source userinfo": "https://reader:secret@docs.example.com/guide",
         "official source sensitive query": "https://docs.example.com/guide?api_key=secret",
+        "official source nonnumeric port": "https://docs.example.com:notaport/guide",
+        "official source unbalanced ipv6": "https://[2001:db8::1/guide",
+    }
+    valid_sources = {
+        "official source anchor": "https://docs.example.com/guide#worker-lifecycle",
     }
     valid_dependencies = {
         "full git commit": f"demo @ git+https://github.com/example/demo.git@{commit}",
@@ -274,6 +300,12 @@ def test_direct_dependencies_and_official_sources_require_safe_immutable_urls(
         spec["target"]["official_sources"][0]["url"] = url
         if _authoring_accepts(spec):
             violations.append(f"authoring accepted {label}")
+
+    for label, url in valid_sources.items():
+        spec = make_spec()
+        spec["target"]["official_sources"][0]["url"] = url
+        if not _authoring_accepts(spec):
+            violations.append(f"authoring rejected {label}")
 
     for label, dependency in valid_dependencies.items():
         spec = make_spec()
@@ -303,6 +335,15 @@ def test_direct_dependencies_and_official_sources_require_safe_immutable_urls(
         if _compiled_source_accepts(source):
             violations.append(f"compiled source accepted {label}")
 
+    for index, (label, url) in enumerate(valid_sources.items()):
+        spec = make_spec()
+        spec["target"]["official_sources"][0]["url"] = url
+        validated_source = validate_spec(spec)
+        platform = tmp_path / f"valid-source-{index}" / "platform"
+        write_canonical_source(platform, validated_source)
+        if not _compiled_source_accepts(platform / "course" / "source"):
+            violations.append(f"compiled source rejected {label}")
+
     for index, (label, dependency) in enumerate(valid_dependencies.items()):
         spec = make_spec()
         spec["course"]["dependencies"] = [dependency]
@@ -324,6 +365,8 @@ def test_runner_subprocess_environment_uses_a_safe_allowlist(
 
     inherited = {
         "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "Path": "/attacker/mixed-case-bin",
+        "path": "/attacker/lowercase-bin",
         "LANG": "en_US.UTF-8",
         "LC_ALL": "C.UTF-8",
         "OPENAI_API_KEY": "openai-secret",
@@ -331,17 +374,42 @@ def test_runner_subprocess_environment_uses_a_safe_allowlist(
         "HF_TOKEN": "hf-secret",
         "UNRELATED_CUSTOM_VALUE": "must-not-leak",
     }
+    monkeypatch.setattr(
+        runner_execution, "_WINDOWS_ENVIRONMENT", False, raising=False
+    )
     environment = builder(inherited)
 
     assert environment["PATH"] == inherited["PATH"]
     assert environment["LANG"] == inherited["LANG"]
     assert environment["LC_ALL"] == inherited["LC_ALL"]
     assert {
+        "Path",
+        "path",
         "OPENAI_API_KEY",
         "AWS_SECRET_ACCESS_KEY",
         "HF_TOKEN",
         "UNRELATED_CUSTOM_VALUE",
     }.isdisjoint(environment)
+
+    monkeypatch.setattr(
+        runner_execution, "_WINDOWS_ENVIRONMENT", True, raising=False
+    )
+    windows_environment = builder(
+        {
+            "Path": "/windows/mixed-case-bin",
+            "PATH": "/windows/canonical-bin",
+            "path": "/windows/lowercase-bin",
+            "SystemRoot": "C:\\Windows-from-mixed-case",
+            "SYSTEMROOT": "C:\\Windows",
+        }
+    )
+    assert windows_environment == {
+        "PATH": "/windows/canonical-bin",
+        "SYSTEMROOT": "C:\\Windows",
+    }
+    monkeypatch.setattr(
+        runner_execution, "_WINDOWS_ENVIRONMENT", False, raising=False
+    )
 
     monkeypatch.setenv("PATH", inherited["PATH"])
     monkeypatch.setenv("LANG", inherited["LANG"])
@@ -380,7 +448,7 @@ def test_runner_subprocess_environment_uses_a_safe_allowlist(
     assert result.passed is True, result.output
 
 
-def test_full_verifier_uses_locked_offline_typescript_execution(
+def test_full_verifier_uses_locked_local_typescript_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -433,9 +501,49 @@ def test_full_verifier_uses_locked_offline_typescript_execution(
 
     verifier.verify(tmp_path, full=True)
 
-    expected = ["npm", "exec", "--offline", "--", "tsc", "--noEmit"]
+    expected = ["npm", "run", "typecheck"]
     assert expected in commands, commands
     assert all(not command or command[0] != "npx" for command in commands)
+    assert all(command[:2] != ["npm", "exec"] for command in commands)
+
+    package = _required_json(PLATFORM_ROOT / "package.json")
+    assert package["scripts"]["typecheck"] == (
+        "node ./node_modules/typescript/bin/tsc --noEmit"
+    )
+
+    missing_local = tmp_path / "missing-local-typescript"
+    missing_local.mkdir()
+    _write_json(
+        missing_local / "package.json",
+        {
+            "name": "missing-local-typescript",
+            "private": True,
+            "scripts": {"typecheck": package["scripts"]["typecheck"]},
+        },
+    )
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    marker = tmp_path / "global-tsc-ran"
+    fake_tsc = fake_bin / "tsc"
+    fake_tsc.write_text(
+        "#!/bin/sh\n: > \"$FAKE_TSC_MARKER\"\nexit 0\n", encoding="utf-8"
+    )
+    fake_tsc.chmod(0o755)
+    environment = dict(os.environ)
+    environment["PATH"] = os.pathsep.join((str(fake_bin), environment["PATH"]))
+    environment["FAKE_TSC_MARKER"] = str(marker)
+
+    missing_result = subprocess.run(
+        ["npm", "run", "typecheck"],
+        cwd=missing_local,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert missing_result.returncode != 0
+    assert not marker.exists(), missing_result.stdout + missing_result.stderr
 
 
 def test_ci_is_read_only_pinned_and_runs_the_root_release_validator() -> None:

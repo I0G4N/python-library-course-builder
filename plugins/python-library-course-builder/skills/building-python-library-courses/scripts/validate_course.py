@@ -28,7 +28,7 @@ DIRECT_REQUIREMENT_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9._,-]+\])? @ (?:https|git\+https)://\S+$"
 )
 COMMIT_PATTERN = re.compile(r"^[0-9A-Fa-f]{40}$")
-SHA256_PATTERN = re.compile(r"^[0-9A-Fa-f]{64}$")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 VERSION_CLAUSE_PATTERN = re.compile(
     r"^(~=|==|!=|<=|>=|<|>)(\d+)(?:\.(\d+))?(?:\.(\d+|\*))?$"
 )
@@ -125,29 +125,36 @@ def _safe_path(value: str, label: str) -> PurePosixPath:
 def _url_without_credentials_or_query(value: str, *, scheme: str) -> bool:
     try:
         parsed = urlparse(value)
+        port = parsed.port
         return bool(
             parsed.scheme == scheme
             and parsed.hostname
             and parsed.username is None
             and parsed.password is None
             and not parsed.query
+            and (port is None or 1 <= port <= 65_535)
         )
     except ValueError:
         return False
 
 
 def _sha256_fragment(value: str) -> bool:
+    raw_pairs: list[tuple[str, str]] = []
+    for field in value.split("&"):
+        key, separator, item = field.partition("=")
+        if not separator or not key or not item:
+            return False
+        raw_pairs.append((key, item))
     try:
         pairs = parse_qsl(value, keep_blank_values=True, strict_parsing=True)
     except ValueError:
         return False
-    normalized = [(key.casefold(), item) for key, item in pairs]
-    keys = [key for key, _item in normalized]
-    hashes = [item for key, item in normalized if key == "sha256"]
+    normalized_keys = [key.casefold() for key, _item in pairs]
+    hashes = [item for key, item in raw_pairs if key == "sha256"]
     return bool(
-        normalized
-        and all(key and item for key, item in normalized)
-        and len(keys) == len(set(keys))
+        len(pairs) == len(raw_pairs)
+        and all(key and item for key, item in pairs)
+        and len(normalized_keys) == len(set(normalized_keys))
         and len(hashes) == 1
         and SHA256_PATTERN.fullmatch(hashes[0])
     )

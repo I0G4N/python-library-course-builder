@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -19,6 +20,34 @@ import verify_learning_project as verifier  # noqa: E402
 
 
 RAY_UV_FLAG = "RAY_ENABLE_UV_RUN_RUNTIME_ENV"
+
+
+def test_verifier_environment_canonicalizes_names_without_lookalike_leaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inherited = {
+        "PATH": "/canonical/bin",
+        "Path": "/mixed-case/bin",
+        "path": "/lowercase/bin",
+        "COURSEKIT_RUNNER_URL": "http://127.0.0.1:8123",
+        "Coursekit_Runner_Url": "https://attacker.example/runner",
+    }
+    monkeypatch.setattr(verifier, "_WINDOWS_ENVIRONMENT", False, raising=False)
+
+    posix_environment = verifier.verification_subprocess_env(inherited)
+
+    assert posix_environment["PATH"] == "/canonical/bin"
+    assert posix_environment["COURSEKIT_RUNNER_URL"] == "http://127.0.0.1:8123"
+    assert {"Path", "path", "Coursekit_Runner_Url"}.isdisjoint(posix_environment)
+
+    monkeypatch.setattr(verifier, "_WINDOWS_ENVIRONMENT", True, raising=False)
+    windows_environment = verifier.verification_subprocess_env(inherited)
+
+    assert windows_environment["PATH"] == "/canonical/bin"
+    assert windows_environment["COURSEKIT_RUNNER_URL"] == "http://127.0.0.1:8123"
+    assert {"Path", "path", "Coursekit_Runner_Url"}.isdisjoint(
+        windows_environment
+    )
 
 
 def test_verifier_child_environment_keeps_trusted_overrides_and_drops_secrets(
@@ -76,6 +105,77 @@ def test_verifier_child_environment_keeps_trusted_overrides_and_drops_secrets(
     assert child["HF_TOKEN"] is None
     assert child["UNRELATED_CUSTOM_VALUE"] is None
     assert inherited[RAY_UV_FLAG] == "1"
+
+
+def test_verify_runner_health_drops_ambient_coursekit_controls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "platform").mkdir()
+    (tmp_path / "labs").mkdir()
+    ambient_controls = {
+        "COURSEKIT_RUNNER_URL": "https://attacker.example/runner",
+        "COURSEKIT_COURSE_DIR": str(tmp_path / "attacker-course"),
+        "COURSEKIT_WORKSPACE_DIR": str(tmp_path / "attacker-workspace"),
+        "COURSEKIT_INTERNAL_RUN": "attacker-controlled",
+    }
+    for name, value in ambient_controls.items():
+        monkeypatch.setenv(name, value)
+
+    runner_environments: list[dict[str, str]] = []
+
+    def fake_run(
+        command: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        if "/api/health" in " ".join(command):
+            environment = kwargs.get("env")
+            assert isinstance(environment, dict)
+            runner_environments.append(dict(environment))
+        stdout = ""
+        if "--help" in command:
+            stdout = "unlock\n"
+        elif command[:3] == ["git", "rev-list", "--count"]:
+            stdout = "1\n"
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    healthy_progression = {
+        key: True for key in verifier.WEB_PROGRESSION_BOOLEAN_CHECKS
+    }
+    healthy_progression["output"] = "functional API workflow passed"
+    monkeypatch.setattr(verifier, "run", fake_run)
+    monkeypatch.setattr(
+        verifier, "pytest_targets", lambda _root: (["public"], ["hidden"])
+    )
+    monkeypatch.setattr(
+        verifier, "reference_public_targets", lambda _root: ["public"]
+    )
+    monkeypatch.setattr(
+        verifier, "starter_red_check", lambda _root, _python: (True, "red")
+    )
+    monkeypatch.setattr(
+        verifier,
+        "runnable_lesson_examples",
+        lambda _root, _python: (True, "examples"),
+    )
+    monkeypatch.setattr(
+        verifier, "cli_learning_workflow", lambda _root, _python: (True, "cli")
+    )
+    monkeypatch.setattr(
+        verifier,
+        "web_progression_workflow",
+        lambda _root, _python: dict(healthy_progression),
+    )
+    monkeypatch.setattr(verifier, "privacy_boundary", lambda _root: True)
+    monkeypatch.setattr(verifier, "scan_residue", lambda _root: [])
+    monkeypatch.setattr(verifier, "symlink_free", lambda _root: True)
+
+    verifier.verify(tmp_path)
+
+    expected = verifier.verification_subprocess_env()
+    expected["PYTHONPATH"] = str(tmp_path / "platform")
+    assert runner_environments == [expected]
+    assert set(ambient_controls).isdisjoint(runner_environments[0])
 
 
 @pytest.mark.parametrize("provide_environment", [False, True])
