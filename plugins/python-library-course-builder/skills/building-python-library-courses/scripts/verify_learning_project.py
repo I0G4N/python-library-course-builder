@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any
+from typing import Any, Mapping
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -25,19 +25,67 @@ RESIDUE_PATTERN = re.compile(
 )
 TOKEN_PATTERN = re.compile(r"\{\{[^{}]+\}\}|__COURSEKIT_[A-Z0-9_]+__")
 RAY_UV_RUNTIME_ENV_FLAG = "RAY_ENABLE_UV_RUN_RUNTIME_ENV"
+_SAFE_SUBPROCESS_ENVIRONMENT_NAMES = frozenset(
+    {
+        "COMSPEC",
+        "LANG",
+        "LANGUAGE",
+        "LC_ADDRESS",
+        "LC_ALL",
+        "LC_COLLATE",
+        "LC_CTYPE",
+        "LC_IDENTIFICATION",
+        "LC_MEASUREMENT",
+        "LC_MESSAGES",
+        "LC_MONETARY",
+        "LC_NAME",
+        "LC_NUMERIC",
+        "LC_PAPER",
+        "LC_TELEPHONE",
+        "LC_TIME",
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "VIRTUAL_ENV",
+        "WINDIR",
+    }
+)
+_TRUSTED_VERIFIER_ENVIRONMENT_NAMES = frozenset(
+    {
+        "COURSEKIT_COURSE_DIR",
+        "COURSEKIT_INTERNAL_RUN",
+        "COURSEKIT_RUNNER_URL",
+        "COURSEKIT_WORKSPACE_DIR",
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTHONPATH",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+        RAY_UV_RUNTIME_ENV_FLAG,
+    }
+)
 
 
 def verification_subprocess_env(
-    environment: dict[str, str] | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Return an isolated verifier child environment.
 
+    Only process-launch essentials and verifier-owned CourseKit controls cross
+    this boundary; unrelated parent variables, including credentials, do not.
     The verifier can itself be bootstrapped with ``uv run --no-project`` while
     deliberately launching project-owned virtualenv interpreters. Ray 2.56
     otherwise discovers that unrelated ancestor ``uv run`` process and tries
     to reuse its dependency-free interpreter for workers.
     """
-    result = dict(os.environ if environment is None else environment)
+    inherited = os.environ if environment is None else environment
+    allowed = _SAFE_SUBPROCESS_ENVIRONMENT_NAMES
+    if environment is not None:
+        allowed = allowed | _TRUSTED_VERIFIER_ENVIRONMENT_NAMES
+    result = {
+        name: value
+        for name, value in inherited.items()
+        if name.upper() in allowed
+    }
+    result["PYTHONDONTWRITEBYTECODE"] = "1"
     result[RAY_UV_RUNTIME_ENV_FLAG] = "0"
     return result
 
@@ -1249,7 +1297,11 @@ def verify(project: Path, *, full: bool = False) -> dict[str, Any]:
     if full:
         node = run(["npm", "test"], cwd=root, timeout=300)
         lint = run(["npm", "run", "lint"], cwd=root, timeout=180)
-        typescript = run(["npx", "tsc", "--noEmit"], cwd=platform, timeout=180)
+        typescript = run(
+            ["npm", "exec", "--offline", "--", "tsc", "--noEmit"],
+            cwd=platform,
+            timeout=180,
+        )
         report["full_node_runner"] = node.returncode == 0
         web_progression["generated_project_tests"] = node.returncode == 0
         report["lint"] = lint.returncode == 0

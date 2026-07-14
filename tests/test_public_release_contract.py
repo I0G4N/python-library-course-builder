@@ -239,6 +239,10 @@ def test_direct_dependencies_and_official_sources_require_safe_immutable_urls(
         "wheel with wrong hash algorithm": (
             f"demo @ https://example.com/demo-1.0.0-py3-none-any.whl#sha512={sha256}"
         ),
+        "wheel with duplicate sha256": (
+            "demo @ https://example.com/demo-1.0.0-py3-none-any.whl"
+            f"#sha256={sha256}&SHA256={sha256}"
+        ),
     }
     invalid_sources = {
         "official source userinfo": "https://reader:secret@docs.example.com/guide",
@@ -251,6 +255,10 @@ def test_direct_dependencies_and_official_sources_require_safe_immutable_urls(
         ),
         "sha256 archive": (
             f"demo @ https://example.com/demo-1.0.0.tar.gz#sha256={sha256}"
+        ),
+        "sha256 archive with metadata": (
+            "demo @ https://example.com/demo-1.0.0.tar.gz"
+            f"#sha256={sha256}&subdirectory=python"
         ),
     }
     violations: list[str] = []

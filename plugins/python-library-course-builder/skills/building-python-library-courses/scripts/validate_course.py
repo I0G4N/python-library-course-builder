@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 import re
 import sys
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -27,6 +27,8 @@ REQUIREMENT_PATTERN = re.compile(
 DIRECT_REQUIREMENT_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9._,-]+\])? @ (?:https|git\+https)://\S+$"
 )
+COMMIT_PATTERN = re.compile(r"^[0-9A-Fa-f]{40}$")
+SHA256_PATTERN = re.compile(r"^[0-9A-Fa-f]{64}$")
 VERSION_CLAUSE_PATTERN = re.compile(
     r"^(~=|==|!=|<=|>=|<|>)(\d+)(?:\.(\d+))?(?:\.(\d+|\*))?$"
 )
@@ -120,11 +122,61 @@ def _safe_path(value: str, label: str) -> PurePosixPath:
     return path
 
 
-def _requirement(value: str) -> bool:
+def _url_without_credentials_or_query(value: str, *, scheme: str) -> bool:
+    try:
+        parsed = urlparse(value)
+        return bool(
+            parsed.scheme == scheme
+            and parsed.hostname
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+        )
+    except ValueError:
+        return False
+
+
+def _sha256_fragment(value: str) -> bool:
+    try:
+        pairs = parse_qsl(value, keep_blank_values=True, strict_parsing=True)
+    except ValueError:
+        return False
+    normalized = [(key.casefold(), item) for key, item in pairs]
+    keys = [key for key, _item in normalized]
+    hashes = [item for key, item in normalized if key == "sha256"]
     return bool(
-        REQUIREMENT_PATTERN.fullmatch(value)
-        or DIRECT_REQUIREMENT_PATTERN.fullmatch(value)
+        normalized
+        and all(key and item for key, item in normalized)
+        and len(keys) == len(set(keys))
+        and len(hashes) == 1
+        and SHA256_PATTERN.fullmatch(hashes[0])
     )
+
+
+def _direct_requirement(value: str) -> bool:
+    if not DIRECT_REQUIREMENT_PATTERN.fullmatch(value):
+        return False
+    _name, _separator, url = value.partition(" @ ")
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if not _url_without_credentials_or_query(url, scheme=parsed.scheme):
+        return False
+    if parsed.scheme == "git+https":
+        _repository, separator, commit = parsed.path.rpartition("@")
+        return bool(separator and COMMIT_PATTERN.fullmatch(commit))
+    if parsed.scheme == "https":
+        return _sha256_fragment(parsed.fragment)
+    return False
+
+
+def _requirement(value: str) -> bool:
+    return bool(REQUIREMENT_PATTERN.fullmatch(value) or _direct_requirement(value))
+
+
+def _official_source_url(value: str) -> bool:
+    return _url_without_credentials_or_query(value, scheme="https")
 
 
 def _version_matches(specifier: str, version: tuple[int, int, int]) -> bool:
@@ -639,8 +691,7 @@ def validate_spec(payload: Any) -> dict[str, Any]:
         source_id = _text(source, "id", label)
         _text(source, "title", label)
         url = _text(source, "url", label)
-        parsed = urlparse(url)
-        if parsed.scheme != "https" or not parsed.netloc:
+        if not _official_source_url(url):
             raise SpecValidationError(f"{label}.url must be an HTTPS URL")
         if source_id in source_ids:
             raise SpecValidationError(f"duplicate official source id: {source_id}")

@@ -9,7 +9,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from .io import json_bytes, read_json, safe_relative_path, unresolved_tokens
 from .models import (
@@ -52,6 +52,8 @@ REQUIREMENT_PATTERN = re.compile(
 DIRECT_REQUIREMENT_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9._,-]+\])? @ (?:https|git\+https)://\S+$"
 )
+COMMIT_PATTERN = re.compile(r"^[0-9A-Fa-f]{40}$")
+SHA256_PATTERN = re.compile(r"^[0-9A-Fa-f]{64}$")
 PYTHON_CLAUSE_PATTERN = re.compile(
     r"^(~=|==|!=|<=|>=|<|>)(\d+)(?:\.(\d+))?(?:\.(\d+|\*))?$"
 )
@@ -107,11 +109,61 @@ def _text(payload: dict[str, Any], key: str, *, label: str) -> str:
     return value
 
 
-def _requirement(value: str) -> bool:
+def _url_without_credentials_or_query(value: str, *, scheme: str) -> bool:
+    try:
+        parsed = urlparse(value)
+        return bool(
+            parsed.scheme == scheme
+            and parsed.hostname
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+        )
+    except ValueError:
+        return False
+
+
+def _sha256_fragment(value: str) -> bool:
+    try:
+        pairs = parse_qsl(value, keep_blank_values=True, strict_parsing=True)
+    except ValueError:
+        return False
+    normalized = [(key.casefold(), item) for key, item in pairs]
+    keys = [key for key, _item in normalized]
+    hashes = [item for key, item in normalized if key == "sha256"]
     return bool(
-        REQUIREMENT_PATTERN.fullmatch(value)
-        or DIRECT_REQUIREMENT_PATTERN.fullmatch(value)
+        normalized
+        and all(key and item for key, item in normalized)
+        and len(keys) == len(set(keys))
+        and len(hashes) == 1
+        and SHA256_PATTERN.fullmatch(hashes[0])
     )
+
+
+def _direct_requirement(value: str) -> bool:
+    if not DIRECT_REQUIREMENT_PATTERN.fullmatch(value):
+        return False
+    _name, _separator, url = value.partition(" @ ")
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if not _url_without_credentials_or_query(url, scheme=parsed.scheme):
+        return False
+    if parsed.scheme == "git+https":
+        _repository, separator, commit = parsed.path.rpartition("@")
+        return bool(separator and COMMIT_PATTERN.fullmatch(commit))
+    if parsed.scheme == "https":
+        return _sha256_fragment(parsed.fragment)
+    return False
+
+
+def _requirement(value: str) -> bool:
+    return bool(REQUIREMENT_PATTERN.fullmatch(value) or _direct_requirement(value))
+
+
+def _official_source_url(value: str) -> bool:
+    return _url_without_credentials_or_query(value, scheme="https")
 
 
 def _python_version_matches(specifier: str, version: tuple[int, int, int]) -> bool:
@@ -1059,8 +1111,7 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             raise SourceValidationError(f"duplicate source id: {source_id}")
         source_ids.add(source_id)
         url = _text(payload, "url", label=source_id)
-        parsed = urlparse(url)
-        if parsed.scheme != "https" or not parsed.netloc:
+        if not _official_source_url(url):
             raise SourceValidationError(f"source URL must be an HTTPS URL: {url}")
         sources.append(
             SourceReference(source_id, _text(payload, "title", label=source_id), url)

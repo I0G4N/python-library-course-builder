@@ -14,13 +14,38 @@ import sys
 import tempfile
 import threading
 import time
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Mapping
 
 
 MAX_OUTPUT_BYTES = 200_000
 MAX_EVIDENCE_BYTES = 1_000_000
 MAX_WORKSPACE_COPY_BYTES = 64_000_000
 COPY_CHUNK_BYTES = 65_536
+_SAFE_SUBPROCESS_ENVIRONMENT_NAMES = frozenset(
+    {
+        "COMSPEC",
+        "LANG",
+        "LANGUAGE",
+        "LC_ADDRESS",
+        "LC_ALL",
+        "LC_COLLATE",
+        "LC_CTYPE",
+        "LC_IDENTIFICATION",
+        "LC_MEASUREMENT",
+        "LC_MESSAGES",
+        "LC_MONETARY",
+        "LC_NAME",
+        "LC_NUMERIC",
+        "LC_PAPER",
+        "LC_TELEPHONE",
+        "LC_TIME",
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "VIRTUAL_ENV",
+        "WINDIR",
+    }
+)
 _SKIP_DIRECTORIES = {
     ".coursekit",
     ".git",
@@ -36,6 +61,16 @@ _SKIP_DIRECTORIES = {
     "node_modules",
     "tests",
 }
+
+
+def safe_subprocess_environment(inherited: Mapping[str, str]) -> dict[str, str]:
+    """Copy only non-secret OS, locale, and virtualenv process settings."""
+
+    return {
+        name: value
+        for name, value in inherited.items()
+        if name.upper() in _SAFE_SUBPROCESS_ENVIRONMENT_NAMES
+    }
 
 
 class _CopyDeadlineExceeded(RuntimeError):
@@ -417,15 +452,7 @@ def run_isolated_pytest(
         home.mkdir()
         temporary.mkdir()
 
-        environment = dict(os.environ)
-        for inherited_name in (
-            "COURSEKIT_COURSE_DIR",
-            "COURSEKIT_WORKSPACE_DIR",
-            "OLDPWD",
-            "PYTHONPATH",
-            "RAY_ADDRESS",
-        ):
-            environment.pop(inherited_name, None)
+        environment = safe_subprocess_environment(os.environ)
         environment.update(
             {
                 "COURSEKIT_INTERNAL_RUN": "1",
