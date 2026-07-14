@@ -194,6 +194,28 @@ def generated_course(tmp_path: Path) -> Path:
     return target
 
 
+def test_course_fixture_is_red_for_starters_and_green_for_references(
+    generated_course: Path,
+) -> None:
+    starter_red, starter_output = verifier.starter_red_check(
+        generated_course,
+        sys.executable,
+    )
+    assert starter_red is True, starter_output
+
+    reference_public = verifier.reference_public_targets(generated_course)
+    _, hidden = verifier.pytest_targets(generated_course)
+    assert reference_public
+    assert hidden
+
+    reference = verifier.run(
+        [sys.executable, "-m", "pytest", "-q", *reference_public, *hidden],
+        cwd=generated_course / "platform",
+        env=verifier.python_env(generated_course, reference=True),
+    )
+    assert reference.returncode == 0, reference.stdout + reference.stderr
+
+
 def _source_digest(root: Path) -> dict[str, str]:
     return {
         path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()

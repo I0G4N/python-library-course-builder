@@ -131,13 +131,24 @@ def _quiz(lab_id: str, *, first_position: int) -> list[dict[str, Any]]:
     return result
 
 
-def _test(symbol: str, *, hidden: bool = False) -> dict[str, str]:
+def _test(
+    path: str,
+    symbol: str,
+    expected: int,
+    *,
+    hidden: bool = False,
+) -> dict[str, str]:
+    module = path.removesuffix(".py").replace("/", ".")
     suffix = "_hidden" if hidden else ""
     selector = f"test_{symbol}{suffix}"
     return {
         "path": f"{selector}.py",
         "selector": selector,
-        "code": f"def {selector}():\n    assert True\n",
+        "code": (
+            f"from {module} import {symbol}\n\n"
+            f"def {selector}():\n"
+            f"    assert {symbol}() == {expected}\n"
+        ),
     }
 
 
@@ -167,8 +178,8 @@ def _question(
             "output": str(number),
             "explanation": "The function returns the Lab value.",
         },
-        "public_test": _test(symbol),
-        "hidden_test": _test(symbol, hidden=True),
+        "public_test": _test(path, symbol, number),
+        "hidden_test": _test(path, symbol, number, hidden=True),
     }
     if timeout_seconds is not MISSING:
         question["timeout_seconds"] = timeout_seconds
