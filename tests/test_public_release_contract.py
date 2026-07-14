@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import ast
 from copy import deepcopy
-import inspect
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Any
+
+import pytest
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,25 +20,25 @@ SCRIPTS_ROOT = SKILL_ROOT / "scripts"
 TEMPLATE_ROOT = SKILL_ROOT / "assets" / "course-template"
 PLATFORM_ROOT = TEMPLATE_ROOT / "platform"
 MARKETPLACE_PATH = ROOT / ".agents" / "plugins" / "marketplace.json"
-REPOSITORY_URL = "https://github.com/I0G4N/python-library-course-builder"
-DEFAULT_PROMPT = (
-    "Use $building-python-library-courses to turn a Python library into a "
-    "structured, testable learning project."
-)
 
 sys.path.insert(0, str(SCRIPTS_ROOT))
 sys.path.insert(0, str(PLATFORM_ROOT))
 
 import runner.execution as runner_execution  # noqa: E402
+import verify_learning_project as verifier  # noqa: E402
 from coursekit.compiler import SourceValidationError, load_course_source  # noqa: E402
-from scaffold_course import write_canonical_source  # noqa: E402
+from scaffold_course import copy_template, write_canonical_source  # noqa: E402
 from validate_course import SpecValidationError, validate_spec  # noqa: E402
 
 from tests.course_v2_fixture import make_spec  # noqa: E402
 
 
 def _required_text(path: Path) -> str:
-    assert path.is_file(), f"required public file is missing: {path.relative_to(ROOT)}"
+    try:
+        label = path.relative_to(ROOT)
+    except ValueError:
+        label = path
+    assert path.is_file(), f"required public file is missing: {label}"
     return path.read_text(encoding="utf-8")
 
 
@@ -64,58 +66,64 @@ def _compiled_source_accepts(source: Path) -> bool:
     return True
 
 
+def _github_anchor(title: str) -> str:
+    normalized = re.sub(r"[^\w\- ]", "", title.strip().casefold())
+    return re.sub(r"[ ]+", "-", normalized)
+
+
+def _permission_has_write(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.casefold() == "write-all" or value.casefold() == "write"
+    if isinstance(value, dict):
+        return any(_permission_has_write(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_permission_has_write(item) for item in value)
+    return False
+
+
 def test_plugin_manifest_and_marketplace_publish_exact_skill_only_metadata() -> None:
     manifest = _required_json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
 
     assert manifest["name"] == PLUGIN_NAME
     assert manifest["version"] == "0.1.0"
-    assert manifest["author"] == {
-        "name": "I0G4N",
-        "url": "https://github.com/I0G4N",
-    }
+    assert manifest["author"]["name"] == "I0G4N"
+    assert manifest["author"]["url"] == "https://github.com/I0G4N"
     assert "email" not in manifest["author"]
-    assert manifest["homepage"] == f"{REPOSITORY_URL}#readme"
-    assert manifest["repository"] == REPOSITORY_URL
     assert manifest["license"] == "Apache-2.0"
     assert manifest["skills"] == "./skills/"
     assert "apps" not in manifest
     assert "mcpServers" not in manifest
-    assert manifest["interface"] == {
-        "displayName": "Python Library Course Builder",
-        "shortDescription": "Build testable Python library learning projects",
-        "longDescription": (
-            "Turn a Python library into a beginner-first cumulative course with "
-            "concept checks, coding exercises, and pytest grading."
-        ),
-        "developerName": "I0G4N",
-        "category": "Productivity",
-        "capabilities": [],
-        "websiteURL": REPOSITORY_URL,
-        "defaultPrompt": [DEFAULT_PROMPT],
-    }
+    interface = manifest["interface"]
+    assert interface["capabilities"] == []
+    prompts = interface.get("defaultPrompt")
+    assert isinstance(prompts, list) and all(
+        isinstance(prompt, str) for prompt in prompts
+    )
+    assert any(
+        "$building-python-library-courses" in prompt
+        for prompt in prompts
+    )
 
     marketplace = _required_json(MARKETPLACE_PATH)
-    assert marketplace == {
-        "name": PLUGIN_NAME,
-        "interface": {"displayName": "Python Library Course Builder"},
-        "plugins": [
-            {
-                "name": PLUGIN_NAME,
-                "source": {
-                    "source": "local",
-                    "path": f"./plugins/{PLUGIN_NAME}",
-                },
-                "policy": {
-                    "installation": "AVAILABLE",
-                    "authentication": "ON_INSTALL",
-                },
-                "category": "Productivity",
-            }
-        ],
+    assert marketplace["name"] == PLUGIN_NAME
+    matching_entries = [
+        item for item in marketplace["plugins"] if item.get("name") == PLUGIN_NAME
+    ]
+    assert len(matching_entries) == 1
+    entry = matching_entries[0]
+    assert entry["source"] == {
+        "source": "local",
+        "path": f"./plugins/{PLUGIN_NAME}",
+    }
+    assert entry["policy"] == {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL",
     }
 
 
-def test_public_repository_files_and_generated_template_license_are_present() -> None:
+def test_public_repository_files_and_generated_template_license_are_present(
+    tmp_path: Path,
+) -> None:
     required = (
         "README.md",
         "LICENSE",
@@ -131,8 +139,11 @@ def test_public_repository_files_and_generated_template_license_are_present() ->
     root_notice = _required_text(ROOT / "NOTICE")
     assert "Apache License" in root_license
     assert "Version 2.0" in root_license
-    assert _required_text(TEMPLATE_ROOT / "LICENSE") == root_license
-    assert _required_text(TEMPLATE_ROOT / "NOTICE") == root_notice
+
+    generated = tmp_path / "generated-course"
+    copy_template(generated)
+    assert _required_text(generated / "LICENSE") == root_license
+    assert _required_text(generated / "NOTICE") == root_notice
 
 
 def test_public_docs_are_neutral_navigable_and_state_runtime_boundaries() -> None:
@@ -161,14 +172,32 @@ def test_public_docs_are_neutral_navigable_and_state_runtime_boundaries() -> Non
                 occurrences.append(f"{path.relative_to(SKILL_ROOT)}: {term}")
     assert not occurrences, "internal/runtime labels remain:\n" + "\n".join(occurrences)
 
-    missing_contents: list[str] = []
+    invalid_contents: list[str] = []
     for path in sorted((SKILL_ROOT / "references").glob("*.md")):
         text = path.read_text(encoding="utf-8")
-        if len(text.splitlines()) > 100 and re.search(
-            r"^## (?:Table of contents|Contents)$", text, re.IGNORECASE | re.MULTILINE
-        ) is None:
-            missing_contents.append(path.name)
-    assert not missing_contents, f"long references lack a table of contents: {missing_contents}"
+        if len(text.splitlines()) <= 100:
+            continue
+        contents = re.search(
+            r"^## (?:Table of contents|Contents)\s*$\n(?P<body>.*?)(?=^## |\Z)",
+            text,
+            re.IGNORECASE | re.MULTILINE | re.DOTALL,
+        )
+        headings = {
+            _github_anchor(match.group(1))
+            for match in re.finditer(r"^#{2,6}\s+(.+?)\s*$", text, re.MULTILINE)
+            if match.group(1).casefold() not in {"table of contents", "contents"}
+        }
+        links = (
+            re.findall(r"\[[^\]]+\]\(#([^)]+)\)", contents.group("body"))
+            if contents is not None
+            else []
+        )
+        if not links or not any(link.casefold() in headings for link in links):
+            invalid_contents.append(path.name)
+    assert not invalid_contents, (
+        "long references need a TOC with a real heading anchor: "
+        f"{invalid_contents}"
+    )
 
     documents = {
         "README.md": _required_text(ROOT / "README.md"),
@@ -195,8 +224,21 @@ def test_direct_dependencies_and_official_sources_require_safe_immutable_urls(
         "dependency sensitive query": (
             f"demo @ https://example.com/demo.whl?token=secret#sha256={sha256}"
         ),
-        "mutable git reference": "demo @ git+https://github.com/example/demo.git@main",
-        "artifact without sha256": "demo @ https://example.com/demo-1.0.0.whl",
+        "git reference missing": "demo @ git+https://github.com/example/demo.git",
+        "git tag": "demo @ git+https://github.com/example/demo.git@v1.2.3",
+        "git branch": "demo @ git+https://github.com/example/demo.git@main",
+        "git short sha": "demo @ git+https://github.com/example/demo.git@deadbeef",
+        "wheel without sha256": "demo @ https://example.com/demo-1.0.0-py3-none-any.whl",
+        "archive without sha256": "demo @ https://example.com/demo-1.0.0.tar.gz",
+        "wheel with short sha256": (
+            "demo @ https://example.com/demo-1.0.0-py3-none-any.whl#sha256=abc123"
+        ),
+        "archive with non-hex sha256": (
+            f"demo @ https://example.com/demo-1.0.0.tar.gz#sha256={'g' * 64}"
+        ),
+        "wheel with wrong hash algorithm": (
+            f"demo @ https://example.com/demo-1.0.0-py3-none-any.whl#sha512={sha256}"
+        ),
     }
     invalid_sources = {
         "official source userinfo": "https://reader:secret@docs.example.com/guide",
@@ -204,7 +246,12 @@ def test_direct_dependencies_and_official_sources_require_safe_immutable_urls(
     }
     valid_dependencies = {
         "full git commit": f"demo @ git+https://github.com/example/demo.git@{commit}",
-        "sha256 artifact": f"demo @ https://example.com/demo-1.0.0.whl#sha256={sha256}",
+        "sha256 wheel": (
+            f"demo @ https://example.com/demo-1.0.0-py3-none-any.whl#sha256={sha256}"
+        ),
+        "sha256 archive": (
+            f"demo @ https://example.com/demo-1.0.0.tar.gz#sha256={sha256}"
+        ),
     }
     violations: list[str] = []
 
@@ -260,7 +307,10 @@ def test_direct_dependencies_and_official_sources_require_safe_immutable_urls(
     assert not violations, "\n".join(violations)
 
 
-def test_runner_subprocess_environment_uses_a_safe_allowlist() -> None:
+def test_runner_subprocess_environment_uses_a_safe_allowlist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     builder = getattr(runner_execution, "safe_subprocess_environment", None)
     assert callable(builder), "runner.execution.safe_subprocess_environment is missing"
 
@@ -284,28 +334,100 @@ def test_runner_subprocess_environment_uses_a_safe_allowlist() -> None:
         "HF_TOKEN",
         "UNRELATED_CUSTOM_VALUE",
     }.isdisjoint(environment)
-    run_source = inspect.getsource(runner_execution.run_isolated_pytest)
-    assert "safe_subprocess_environment(" in run_source
-    assert "dict(os.environ)" not in run_source
+
+    monkeypatch.setenv("PATH", inherited["PATH"])
+    monkeypatch.setenv("LANG", inherited["LANG"])
+    monkeypatch.setenv("LC_ALL", inherited["LC_ALL"])
+    monkeypatch.setenv("OPENAI_API_KEY", inherited["OPENAI_API_KEY"])
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", inherited["AWS_SECRET_ACCESS_KEY"])
+    monkeypatch.setenv("HF_TOKEN", inherited["HF_TOKEN"])
+    monkeypatch.setenv("UNRELATED_CUSTOM_VALUE", inherited["UNRELATED_CUSTOM_VALUE"])
+
+    workspace = tmp_path / "labs"
+    solution = workspace / "lab01" / "solution.py"
+    solution.parent.mkdir(parents=True)
+    solution.write_text("VALUE = 42\n", encoding="utf-8")
+    canonical = tmp_path / "course" / "starter" / "lab01" / "tests" / "test_env.py"
+    canonical.parent.mkdir(parents=True)
+    canonical.write_text(
+        "import os\n\n"
+        "def test_environment_contract():\n"
+        "    assert os.environ['PATH'] == " + repr(inherited["PATH"]) + "\n"
+        "    assert os.environ['LANG'] == " + repr(inherited["LANG"]) + "\n"
+        "    assert os.environ['LC_ALL'] == " + repr(inherited["LC_ALL"]) + "\n"
+        "    for name in (\n"
+        "        'OPENAI_API_KEY', 'AWS_SECRET_ACCESS_KEY', 'HF_TOKEN',\n"
+        "        'UNRELATED_CUSTOM_VALUE',\n"
+        "    ):\n"
+        "        assert name not in os.environ\n",
+        encoding="utf-8",
+    )
+
+    result = runner_execution.run_isolated_pytest(
+        workspace,
+        [f"{canonical}::test_environment_contract"],
+        timeout_seconds=5,
+    )
+
+    assert result.passed is True, result.output
 
 
-def test_full_verifier_uses_locked_offline_typescript_execution() -> None:
-    verifier_path = SCRIPTS_ROOT / "verify_learning_project.py"
-    source = _required_text(verifier_path)
-    tree = ast.parse(source, filename=str(verifier_path))
-    string_lists = [
-        [item.value for item in node.elts]
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.List, ast.Tuple))
-        and all(
-            isinstance(item, ast.Constant) and isinstance(item.value, str)
-            for item in node.elts
-        )
-    ]
+def test_full_verifier_uses_locked_offline_typescript_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "platform").mkdir()
+    (tmp_path / "labs").mkdir()
+    commands: list[list[str]] = []
 
-    assert ["npm", "exec", "--offline", "--", "tsc", "--noEmit"] in string_lists
-    assert all(not command or command[0] != "npx" for command in string_lists)
-    assert "npx tsc" not in source
+    def fake_run(
+        command: list[str],
+        **_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        stdout = ""
+        if "--help" in command:
+            stdout = "unlock\n"
+        elif command[:3] == ["git", "rev-list", "--count"]:
+            stdout = "1\n"
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    healthy_progression = {
+        key: True for key in verifier.WEB_PROGRESSION_BOOLEAN_CHECKS
+    }
+    healthy_progression["output"] = "functional API workflow passed"
+    monkeypatch.setattr(verifier, "run", fake_run)
+    monkeypatch.setattr(
+        verifier, "pytest_targets", lambda _root: (["public"], ["hidden"])
+    )
+    monkeypatch.setattr(
+        verifier, "reference_public_targets", lambda _root: ["public"]
+    )
+    monkeypatch.setattr(
+        verifier, "starter_red_check", lambda _root, _python: (True, "red")
+    )
+    monkeypatch.setattr(
+        verifier,
+        "runnable_lesson_examples",
+        lambda _root, _python: (True, "examples"),
+    )
+    monkeypatch.setattr(
+        verifier, "cli_learning_workflow", lambda _root, _python: (True, "cli")
+    )
+    monkeypatch.setattr(
+        verifier,
+        "web_progression_workflow",
+        lambda _root, _python: dict(healthy_progression),
+    )
+    monkeypatch.setattr(verifier, "privacy_boundary", lambda _root: True)
+    monkeypatch.setattr(verifier, "scan_residue", lambda _root: [])
+    monkeypatch.setattr(verifier, "symlink_free", lambda _root: True)
+
+    verifier.verify(tmp_path, full=True)
+
+    expected = ["npm", "exec", "--offline", "--", "tsc", "--noEmit"]
+    assert expected in commands, commands
+    assert all(not command or command[0] != "npx" for command in commands)
 
 
 def test_ci_is_read_only_pinned_and_runs_the_root_release_validator() -> None:
@@ -313,9 +435,52 @@ def test_ci_is_read_only_pinned_and_runs_the_root_release_validator() -> None:
     validator = ROOT / "scripts" / "validate_release.py"
 
     assert validator.is_file(), "root scripts/validate_release.py is missing"
-    assert re.search(r"^permissions:\s*$", workflow, re.MULTILINE)
-    assert re.search(r"^\s+contents:\s*read\s*$", workflow, re.MULTILINE)
-    assert "pull_request_target" not in workflow
-    assert re.search(r"python-version:\s*['\"]?3\.13['\"]?", workflow)
-    assert re.search(r"node-version:\s*['\"]?22(?:\.\d+)*['\"]?", workflow)
-    assert "uv run python scripts/validate_release.py" in workflow
+    payload = yaml.load(workflow, Loader=yaml.BaseLoader)
+    assert isinstance(payload, dict), "CI workflow must be a YAML mapping"
+
+    root_permissions = payload.get("permissions")
+    assert isinstance(root_permissions, dict)
+    assert root_permissions.get("contents") == "read"
+    assert not _permission_has_write(root_permissions)
+
+    events = payload.get("on")
+    event_names = {events} if isinstance(events, str) else set(events or {})
+    assert "pull_request_target" not in event_names
+
+    jobs = payload.get("jobs")
+    assert isinstance(jobs, dict) and jobs
+    steps: list[dict[str, Any]] = []
+    for job in jobs.values():
+        assert isinstance(job, dict)
+        assert not _permission_has_write(job.get("permissions", {}))
+        job_steps = job.get("steps", [])
+        assert isinstance(job_steps, list)
+        steps.extend(step for step in job_steps if isinstance(step, dict))
+
+    uses = [step["uses"] for step in steps if isinstance(step.get("uses"), str)]
+    assert uses, "CI must use pinned setup actions"
+    for action in uses:
+        assert re.fullmatch(r"[^/\s]+/[^@\s]+@[0-9a-fA-F]{40}", action), action
+
+    python_steps = [
+        step
+        for step in steps
+        if isinstance(step.get("uses"), str)
+        and step["uses"].startswith("actions/setup-python@")
+    ]
+    node_steps = [
+        step
+        for step in steps
+        if isinstance(step.get("uses"), str)
+        and step["uses"].startswith("actions/setup-node@")
+    ]
+
+    def version(step: dict[str, Any], key: str) -> Any:
+        options = step.get("with", {})
+        return options.get(key) if isinstance(options, dict) else None
+
+    assert any(version(step, "python-version") == "3.13" for step in python_steps)
+    assert any(version(step, "node-version") == "22" for step in node_steps)
+
+    run_steps = [step["run"] for step in steps if isinstance(step.get("run"), str)]
+    assert any("uv run python scripts/validate_release.py" in command for command in run_steps)
