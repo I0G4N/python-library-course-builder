@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tomllib
 from typing import Any
 
 import pytest
@@ -49,6 +50,20 @@ def _required_json(path: Path) -> dict[str, Any]:
 
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def _fenced_shell_commands(document: str) -> set[str]:
+    blocks = re.findall(
+        r"^```(?:bash|sh)\s*$\n(?P<body>.*?)^```\s*$",
+        document,
+        re.MULTILINE | re.DOTALL,
+    )
+    return {
+        line.strip()
+        for block in blocks
+        for line in block.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
 
 
 def _authoring_accepts(spec: dict[str, Any]) -> bool:
@@ -120,6 +135,63 @@ def test_plugin_manifest_and_marketplace_publish_exact_skill_only_metadata() -> 
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL",
     }
+
+
+def test_changelog_publishes_the_release_version_from_project_metadata() -> None:
+    changelog = _required_text(ROOT / "CHANGELOG.md")
+    release = re.search(
+        r"^## \[(?P<version>[^]]+)] - (?P<date>\d{4}-\d{2}-\d{2})$",
+        changelog,
+        re.MULTILINE,
+    )
+    assert release is not None, "CHANGELOG.md needs a versioned release heading"
+
+    project = tomllib.loads(_required_text(ROOT / "pyproject.toml"))
+    manifest = _required_json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
+    changelog_version = release.group("version")
+
+    assert changelog_version == "0.1.0"
+    assert release.group("date") == "2026-07-14"
+    assert project["project"]["version"] == changelog_version
+    assert manifest["version"] == changelog_version
+
+
+def test_release_docs_link_the_changelog_and_publish_exact_validation_commands() -> None:
+    readme = _required_text(ROOT / "README.md")
+    contributing = _required_text(ROOT / "CONTRIBUTING.md")
+    checklist = _required_text(ROOT / "RELEASE_CHECKLIST.md")
+    changelog_link = re.compile(
+        r"\[[^]\n]*changelog[^]\n]*]\(CHANGELOG\.md\)",
+        re.IGNORECASE,
+    )
+
+    assert changelog_link.search(readme), "README.md must link CHANGELOG.md"
+    assert changelog_link.search(checklist), (
+        "RELEASE_CHECKLIST.md must link CHANGELOG.md"
+    )
+
+    commands = _fenced_shell_commands(contributing)
+    required_commands = {
+        "uv sync --locked",
+        "uv run python scripts/validate_release.py",
+        "uv run python scripts/validate_release.py --forward",
+    }
+    assert required_commands <= commands, (
+        "CONTRIBUTING.md must publish copyable locked deterministic and "
+        f"forward validation commands; missing {sorted(required_commands - commands)}"
+    )
+    assert re.search(r"^- \[ \] ", checklist, re.MULTILINE)
+    assert not re.search(r"^- \[[xX]\] ", checklist, re.MULTILINE)
+
+
+def test_readme_publishes_a_generic_local_marketplace_install_flow() -> None:
+    commands = _fenced_shell_commands(_required_text(ROOT / "README.md"))
+
+    assert "codex plugin marketplace add ./python-library-course-builder" in commands
+    assert (
+        "codex plugin add "
+        "python-library-course-builder@python-library-course-builder"
+    ) in commands
 
 
 def test_public_repository_files_and_generated_template_license_are_present(

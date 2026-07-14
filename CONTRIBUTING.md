@@ -22,6 +22,23 @@ Development and generated-project verification are supported on macOS, Linux, an
 
 Do not weaken a valid test simply to make a reference projection pass. Fix reusable defects in the Skill, compiler, or template rather than hand-editing one generated example.
 
+## Validation
+
+Install the exact locked development environment, then run the deterministic release validator:
+
+```bash
+uv sync --locked
+uv run python scripts/validate_release.py
+```
+
+For a release candidate, also generate and fully verify a temporary standard-library course:
+
+```bash
+uv run python scripts/validate_release.py --forward
+```
+
+Run these commands from the repository root with the prerequisite Python, uv, Node.js, and Git versions listed above. The deterministic validator checks the Python and Node suites, Skill validation, lock files, metadata, repository hygiene, and worktree stability. Forward validation additionally proves the generated starter/reference RED-GREEN contract and the full local course workflow.
+
 ## Documentation and evidence
 
 Teach public behavior from primary official documentation and upstream source. Distinguish documented guarantees from implementation details, pin the taught version, and keep examples deterministic and CPU/offline runnable.

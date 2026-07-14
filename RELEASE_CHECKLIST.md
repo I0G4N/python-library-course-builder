@@ -33,4 +33,4 @@ Complete this checklist from a clean checkout before publishing a version.
 - [ ] Git status is clean and the release commit has independent review approval.
 - [ ] The local marketplace install succeeds without replacing the active standalone Skill prematurely.
 - [ ] The release tag points at the verified commit.
-- [ ] The GitHub release links to the changelog, license, security policy, and installation instructions.
+- [ ] The GitHub release links to the [changelog](CHANGELOG.md), license, security policy, and installation instructions.

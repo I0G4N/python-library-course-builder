@@ -39,6 +39,16 @@ codex plugin marketplace add I0G4N/python-library-course-builder
 codex plugin add python-library-course-builder@python-library-course-builder
 ```
 
+## Install from a local checkout
+
+From the directory that will contain the checkout, clone the repository, register its relative marketplace path, and install the plugin:
+
+```bash
+git clone https://github.com/I0G4N/python-library-course-builder.git
+codex plugin marketplace add ./python-library-course-builder
+codex plugin add python-library-course-builder@python-library-course-builder
+```
+
 Start a new Codex thread after installation so the new Skill is discovered.
 
 ## Use the Skill
@@ -87,7 +97,7 @@ This project is independently authored. CS61A and CS336 influenced the broad ide
 
 ## Contributing and releases
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing the Skill, template, or validators. Maintainers should complete [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) before tagging a release.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing the Skill, template, or validators. Review the [changelog](CHANGELOG.md) for published changes. Maintainers should complete [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) before tagging a release.
 
 ## License
 
