@@ -30,6 +30,16 @@ Complete this checklist from a clean checkout before publishing a version.
 - [ ] Learner-visible output excludes reference code and verified-test bodies.
 - [ ] A broad target stops at the track-selection gate before writing files.
 
+## Hosted GitHub settings and public verification
+
+- [ ] The public repository exists at `https://github.com/I0G4N/python-library-course-builder`, and the repository, website, and `https://github.com/I0G4N/python-library-course-builder#readme` URLs resolve to it.
+- [ ] GitHub Actions and Issues are enabled for the public repository.
+- [ ] Private Vulnerability Reporting is enabled, and `https://github.com/I0G4N/python-library-course-builder/security/advisories/new` opens the private security report flow.
+- [ ] The dependency graph, Dependabot alerts, and Dependabot security updates are enabled.
+- [ ] A main branch ruleset and a v* tag ruleset protect the release branch and tags.
+- [ ] The pinned public install command, `codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.1.0`, succeeds from a clean Codex environment.
+- [ ] Hosted main CI and the hosted v0.1.0 tag forward job pass for the release commit.
+
 ## Publication
 
 - [ ] Git status is clean and the release commit has independent review approval.

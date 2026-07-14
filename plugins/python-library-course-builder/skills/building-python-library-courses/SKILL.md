@@ -1,6 +1,6 @@
 ---
 name: building-python-library-courses
-description: Use when a user asks to build, create, author, or learn through a structured hands-on course project for a Python standard-library module, PyPI package, framework, or repository instead of receiving a one-off explanation.
+description: Use when a user asks to build, create, author, or learn through a structured, Chinese-first hands-on course project for a Python standard-library module, PyPI package, framework, or repository instead of receiving a one-off explanation.
 ---
 
 # Build a Python Library Course
@@ -17,11 +17,15 @@ export SKILL_DIR="/absolute/path/to/building-python-library-courses"
 
 Run every bundled script with uv-managed Python 3.13. Require Python 3.13, `uv`, Node.js 22.13 or newer with npm, and Git. Support macOS, Linux, and WSL2; treat native Windows as unverified. Require no GPU, API key, cloud account, paid service, or external database for mandatory generation and grading.
 
-Treat the generated project as an **authoring repository** containing learner and teacher projections. Explain that hidden tests are not secret from anyone who can inspect the complete repository; they only prevent accidental hints. Recommend a learner-only export or private teacher repository when actual secrecy matters.
+Treat the generated project as an **authoring repository** containing learner and teacher projections. Explain that hidden tests are not secret from anyone who can inspect the complete repository; they only prevent accidental hints. Version 0.1.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
 Run only trusted local code. Treat Runner and pytest isolation as protection from ordinary grading side effects, not as an operating-system sandbox for hostile submissions. Stop rather than execute an untrusted submission without an explicitly authorized operating-system sandbox. Keep the generated repository standalone: never link to or import from the Skill directory or another learning project.
 
 Keep course requirements compatible with Python 3.13 and incompatible with Python 3.14. Stop and upgrade the template and lockfiles before teaching a target that requires Python 3.14 or newer.
+
+## Language contract
+
+Write learner-facing lessons, quiz prompts, feedback, generated documentation, and course prose in Simplified Chinese. Keep code, shell commands, identifiers, target API names, and official source titles and URLs in their original form. Version 0.1.0 has no language switch.
 
 ## Follow the seven-stage workflow
 

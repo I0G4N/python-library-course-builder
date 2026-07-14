@@ -149,6 +149,41 @@ def test_scaffold_copies_standalone_execution_engine(generated_course: Path) -> 
         assert (support / name).read_bytes() == (template_runner / name).read_bytes()
 
 
+def test_scaffolded_readmes_use_simplified_chinese_for_fixed_guidance(
+    generated_course: Path,
+) -> None:
+    root_readme = (generated_course / "README.md").read_text(encoding="utf-8")
+    labs_readme = (generated_course / "labs" / "README.md").read_text(
+        encoding="utf-8"
+    )
+
+    for heading in (
+        "## 环境要求",
+        "## 开始学习",
+        "## 学习进度",
+        "## CLI 学习循环",
+        "## 作者与完整性",
+    ):
+        assert heading in root_readme
+    for stale_heading in (
+        "## Requirements",
+        "## Start learning",
+        "## Learning progression",
+        "## CLI loop",
+        "## Authoring and integrity",
+    ):
+        assert stale_heading not in root_readme
+
+    assert "学员工作区" in labs_readme
+    assert "从 `lab00/README.md` 开始" in labs_readme
+    assert "公开测试位于起始代码旁边" in labs_readme
+    for stale_prose in ("learner workspace", "Start with", "Public tests"):
+        assert stale_prose not in labs_readme
+
+    assert "npm run setup\nnpm run learn" in root_readme
+    assert "uv run course status" in labs_readme
+
+
 def test_cli_runs_only_canonical_public_test_in_disposable_workspace(
     generated_course: Path,
 ) -> None:

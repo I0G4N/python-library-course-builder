@@ -1,4 +1,4 @@
 interface:
   display_name: "Python Library Course Builder"
-  short_description: "Build complete Python library learning projects"
-  default_prompt: "Use $building-python-library-courses to create a source-backed, hands-on course for a Python library, framework, or repository."
+  short_description: "Build Chinese-first Python learning projects"
+  default_prompt: "Use $building-python-library-courses to create a source-backed Chinese-first course for a Python library or repository."

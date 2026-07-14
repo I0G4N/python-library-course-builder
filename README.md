@@ -1,6 +1,10 @@
 # Python Library Course Builder
 
-Python Library Course Builder is a skill-only Codex plugin that turns a Python standard-library module, package, framework, or repository into a structured learning project. It produces one cumulative course with beginner-oriented lessons, knowledge checks, coding Labs, pytest grading, a CLI, and a local Web workspace.
+[![CI](https://github.com/I0G4N/python-library-course-builder/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/I0G4N/python-library-course-builder/actions/workflows/ci.yml)
+
+Python Library Course Builder is a skill-only Codex plugin that turns a Python standard-library module, package, framework, or repository into a Chinese-first structured learning project. It produces one cumulative course with beginner-oriented lessons, knowledge checks, coding Labs, pytest grading, a CLI, and a local Web workspace.
+
+Version 0.1.0 uses Simplified Chinese for learner-facing lessons, quiz prompts, feedback, generated documentation, and course prose. Code, shell commands, identifiers, target API names, and official source titles and URLs remain in their original form; this release has no language switch.
 
 The bundled Skill is named `$building-python-library-courses`.
 
@@ -28,23 +32,25 @@ The route alternates between a small teaching-equivalent of a mechanism and a gr
 
 The supported local environments are macOS, Linux, and WSL2 with the project stored in the Linux filesystem. Native Windows is not a verified execution path.
 
-No GPU, API key, paid service, cloud account, or external database is required. Generated examples and mandatory grading paths are designed to run deterministically on a CPU and without network access.
+Course creation requires Codex plus network access to verify official sources and install dependencies. After setup, mandatory examples and grading are CPU/offline. No GPU, API key, paid service, cloud account, or external database is required.
 
 ## Install from GitHub
 
 Add the repository as a Codex marketplace, then install the plugin:
 
 ```bash
-codex plugin marketplace add I0G4N/python-library-course-builder
+codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.1.0
 codex plugin add python-library-course-builder@python-library-course-builder
 ```
+
+See the [official Codex plugin authoring and installation documentation](https://learn.chatgpt.com/docs/build-plugins#add-a-marketplace-from-the-cli) for the current marketplace workflow.
 
 ## Install from a local checkout
 
 From the directory that will contain the checkout, clone the repository, register its relative marketplace path, and install the plugin:
 
 ```bash
-git clone https://github.com/I0G4N/python-library-course-builder.git
+git clone --branch v0.1.0 --depth 1 https://github.com/I0G4N/python-library-course-builder.git
 codex plugin marketplace add ./python-library-course-builder
 codex plugin add python-library-course-builder@python-library-course-builder
 ```
@@ -62,6 +68,14 @@ Use $building-python-library-courses to create a beginner course for pathlib in 
 The Skill first inspects the local target and verifies claims against primary official sources. Small and medium targets receive a bounded cumulative route. A broad target receives a choice of coherent tracks before any course files are created.
 
 Generation is empty-destination-only. The Skill validates the course specification, copies the standalone CourseKit template, compiles the canonical source, proves the starter/reference RED-GREEN contract, and checks CLI, Web, Runner, progression, and privacy boundaries before handoff.
+
+After generation, enter the generated repository, install its locked dependencies, and start the learning loop:
+
+```bash
+cd /path/to/generated-course
+npm run setup
+npm run learn
+```
 
 ## Repository layout
 
@@ -85,7 +99,7 @@ The plugin bundle contains only the Skill and its local assets. It does not decl
 
 A generated project is an **authoring repository**: it contains the canonical course source, learner projection, reference implementations, and verified grader material needed to build and audit the course.
 
-Hidden tests are not secret when the complete repository is available. They are hidden from the normal learner workspace to avoid accidental hints, but a user with filesystem access can inspect teacher artifacts. Publish a learner-only projection or keep the teacher repository private when actual answer secrecy matters.
+Hidden tests are not secret when the complete repository is available. They are hidden from the normal learner workspace to avoid accidental hints, but a user with filesystem access can inspect teacher artifacts. Version 0.1.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
 The local Runner is a study tool, not an operating-system security sandbox. It reduces ordinary grading side effects and binds to loopback, but submitted Python executes with the current user's privileges. Run only trusted local course code, never expose the Runner as a public judge, and use a separate hardened sandbox for hostile submissions.
 

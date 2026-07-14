@@ -19,14 +19,14 @@ PLUGIN_NAME = "python-library-course-builder"
 SKILL_NAME = "building-python-library-courses"
 SKILL_DESCRIPTION = (
     "Use when a user asks to build, create, author, or learn through a "
-    "structured hands-on course project for a Python standard-library module, "
-    "PyPI package, framework, or repository instead of receiving a one-off "
-    "explanation."
+    "structured, Chinese-first hands-on course project for a Python "
+    "standard-library module, PyPI package, framework, or repository instead "
+    "of receiving a one-off explanation."
 )
-SKILL_SHORT_DESCRIPTION = "Build complete Python library learning projects"
+SKILL_SHORT_DESCRIPTION = "Build Chinese-first Python learning projects"
 SKILL_DEFAULT_PROMPT = (
-    "Use $building-python-library-courses to create a source-backed, hands-on "
-    "course for a Python library, framework, or repository."
+    "Use $building-python-library-courses to create a source-backed "
+    "Chinese-first course for a Python library or repository."
 )
 PLUGIN_ROOT = ROOT / "plugins" / PLUGIN_NAME
 SKILL_ROOT = PLUGIN_ROOT / "skills" / SKILL_NAME

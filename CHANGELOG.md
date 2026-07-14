@@ -6,6 +6,7 @@ All notable changes to Python Library Course Builder are documented in this file
 
 ### Added
 
+- A Chinese-first v0.1.0 authoring contract: learner-facing lessons, quiz prompts, feedback, generated documentation, and course prose use Simplified Chinese, while code and official-source identifiers stay in their original form; this release has no language switch.
 - Initial release of the course builder for turning Python standard-library modules, packages, frameworks, and repositories into cumulative hands-on courses.
 - A standalone CourseKit template with lessons, knowledge checks, coding Labs, pytest grading, CLI and Web workflows, and shared learner progression.
 - Deterministic release validation for metadata, licenses, locks, Python and Node contracts, repository hygiene, and generated-template boundaries.

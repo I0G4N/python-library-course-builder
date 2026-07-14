@@ -455,9 +455,9 @@ pythonpath = [".", "_course"]
     text_write(labs / "pyproject.toml", labs_pyproject)
     text_write(
         labs / "README.md",
-        f'''# {course['title']} learner workspace
+        f'''# {course['title']} 学员工作区
 
-Start with `lab00/README.md`, then work through the numbered Labs in order. Edit only files under `labNN/`; `_course/` contains the shared CLI and progress support.
+从 `lab00/README.md` 开始，然后按编号顺序完成各个 Lab。只编辑 `labNN/` 下的文件；`_course/` 包含共享的 CLI 和进度支持。
 
 ```bash
 uv run course status
@@ -466,7 +466,7 @@ uv run course unlock lab01
 uv run course test {first_question_id}
 ```
 
-Public tests are beside the starter code. The complete implementations and verified tests stay in `../platform/course/` so they do not appear in the normal learner workflow.
+公开测试位于起始代码旁边。完整实现和验证测试保留在 `../platform/course/` 中，不会出现在正常的学员工作流程里。
 ''',
     )
 

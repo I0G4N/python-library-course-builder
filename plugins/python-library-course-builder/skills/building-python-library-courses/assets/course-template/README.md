@@ -2,71 +2,72 @@
 
 __COURSEKIT_DESCRIPTION__
 
-Target: `__COURSEKIT_TARGET__` (__COURSEKIT_TARGET_VERSION__). The curriculum is built from pinned official sources listed in [`platform/course/source/sources.json`](platform/course/source/sources.json).
+目标：`__COURSEKIT_TARGET__`（__COURSEKIT_TARGET_VERSION__）。课程依据固定版本的官方来源构建。生成完成后，已固定版本的官方来源注册表会写入 `platform/course/source/sources.json`.
 
-## Requirements
+0.1.0 版本中，面向学员的课程、测验提示、反馈、生成文档和课程正文均使用简体中文。代码、shell 命令、标识符、目标 API 名称以及官方来源标题和 URL 保持原文；本版本不提供语言切换。
+
+## 环境要求
 
 - Python __COURSEKIT_PYTHON_REQUIRES__
 - [uv](https://docs.astral.sh/uv/)
-- Node.js 22.13 or newer
+- Node.js 22.13 或更高版本
 - Git
 
-Supported local platforms are macOS and Linux. On Windows, use WSL2 with the
-project stored inside the Linux filesystem; native Windows is not a verified
-CourseKit execution path.
+支持的本地平台为 macOS 和 Linux。在 Windows 上，请使用 WSL2，并将项目存放在
+Linux 文件系统内；原生 Windows 不属于 CourseKit 已验证的执行路径。
 
-No API key, cloud account, database, or GPU is required. Graded tests are deterministic and run locally.
+无需 API key、云账户、数据库或 GPU。计分测试具有确定性，并在本地运行。
 
-The route assumes basic Python only. A graded Lab is designed for roughly 30-45 minutes and begins with prerequisites, the concrete problem, traceable outcomes, and complete runnable examples. Deeper mechanism/design tradeoffs and wrong-code diagnostics are available as expandable sections instead of crowding the first reading pass.
+课程路线只假设学员掌握 Python 基础。每个计分 Lab 预计用时 30-45 分钟，并从先修知识、具体问题、可追踪目标和完整可运行示例开始。更深入的机制、设计权衡和错误代码诊断放在可展开区域中，避免干扰首次阅读。
 
 ## 课程路线
 
 __COURSEKIT_ROUTE__
 
-## Start learning
+## 开始学习
 
 ```bash
 npm run setup
 npm run learn
 ```
 
-Open the printed Web URL. The local Runner listens only on `127.0.0.1:8765`. Stop both processes with `Ctrl+C` in the terminal that started them.
+打开终端输出的 Web URL。本地 Runner 只监听 `127.0.0.1:8765`。在启动进程的终端中按 `Ctrl+C` 即可停止两个进程。
 
-The browser is useful for reading, examples, editing, and quick feedback. Use your local IDE for serious implementation and debugging; both surfaces edit the same files under `labs/`.
+浏览器适合阅读、运行示例、编辑和获取快速反馈。进行正式实现和调试时请使用本地 IDE；两个界面编辑的都是 `labs/` 下的同一组文件。
 
-The Runner is a local study tool, not a hostile-code sandbox. It isolates ordinary grading side effects and reclaims the pytest process group, but code running under your OS account has that account's privileges. Keep the service on loopback and never expose it as a public judge for untrusted submissions.
+Runner 是本地学习工具，不是用于恶意代码的安全沙箱。它会隔离常规评分副作用并回收 pytest 进程组，但在当前 OS 账户下运行的代码仍拥有该账户的权限。服务必须保持在 loopback 上，绝不能将其作为面向不可信提交的公开评测器。
 
-## Learning progression
+## 学习进度
 
-The CLI and Web use the same progress state and enforce the same three gates:
+CLI 和 Web 使用同一份进度状态，并执行相同的三个关卡：
 
-1. Read Lab 00 and the first graded Lab through the chapter list. Later Labs stay disabled until the preceding Lab is completed.
-2. Complete each Web knowledge check (or `course unlock LAB` in the CLI) before running that Lab's code.
-3. Pass verified submission for every coding question in the Lab before the next Lab unlocks.
+1. 通过章节列表阅读 Lab 00 和第一个计分 Lab。在前一个 Lab 完成之前，后续 Lab 保持禁用。
+2. 运行某个 Lab 的代码前，先完成对应的 Web 知识检查（或在 CLI 中运行 `course unlock LAB`）。
+3. 每个编程问题都通过验证提交后，才会解锁下一个 Lab。
 
-Opening a lesson does not bypass its knowledge or coding gate. A disabled Lab is not clickable, and restarting either interface reloads the same progress from `labs/.coursekit/state.json`.
+打开课程不会绕过知识关卡或编程关卡。禁用的 Lab 无法点击；重新启动任一界面时，都会从 `labs/.coursekit/state.json` 载入同一份进度。
 
-To restart this curriculum from Lab 00, stop `npm run learn` and archive the progress file before starting again:
+如需从 Lab 00 重新开始，请先停止 `npm run learn`，归档进度文件后再启动：
 
 ```bash
 mv labs/.coursekit/state.json labs/.coursekit/state.json.bak
 ```
 
-This resets learning progress only. Your implementations under `labs/labNN/` remain untouched.
+此操作只会重置学习进度，不会修改 `labs/labNN/` 下的实现。
 
-The coding route alternates between mechanism and official API. In one Lab you handwrite a deliberately small teaching-equivalent from lower-level primitives. The next Lab starts by replacing that mechanism through the pinned official API and comparing observable behavior, then you handwrite the next layer. Later Labs and the capstone call the official library rather than importing an earlier mini implementation.
+编程路线在机制实现和官方 API 之间交替推进。你会在一个 Lab 中基于更底层的原语手写一个刻意缩小的教学等价实现；下一个 Lab 首先使用固定版本的官方 API 替换该机制并比较可观察行为，然后再手写下一层。后续 Lab 和结课项目调用官方库，不会导入先前的小型实现。
 
-Lab 00 is for foundations and has no code workspace. In a graded Lab, the browser does not mount the code/result area or call the question-scoped file API until foundation and current-Lab knowledge are complete. This is a workflow gate, not source secrecy: you can still inspect your own starter files under `labs/` from an IDE or terminal.
+Lab 00 用于基础知识，没有代码工作区。在基础章节和当前 Lab 的知识检查完成之前，浏览器不会挂载代码/结果区域，也不会调用问题级文件 API。这是流程关卡，而不是源码保密边界：你仍可通过 IDE 或终端查看 `labs/` 下自己的起始文件。
 
-On desktop, the sidebar, lesson, and code/result columns use two keyboard-accessible separators. Drag them to adjust the layout; focus a separator and use the Arrow keys, Home, or End. The sidebar can collapse, minimum widths keep every pane usable, and validated preferences are stored in per-course localStorage. Medium and small screens stack or switch navigation and have no resize separators.
+桌面端的侧边栏、课程区和代码/结果区之间有两个可通过键盘操作的分隔条。拖动分隔条可以调整布局；聚焦后可使用 Arrow 键、Home 或 End。侧边栏可以折叠，最小宽度会确保各区域可用，验证后的偏好设置保存在每门课程的 localStorage 中。中小屏幕会堆叠区域或切换导航，并且不显示调整大小的分隔条。
 
-The Web fails closed during the initial `/api/state` load: chapter navigation, the quiz, the editor, and test/submit actions remain disabled until authoritative progress arrives. A temporary request failure never turns locked Labs into clickable Labs.
+Web 在初次 `/api/state` 加载期间默认拒绝交互：在权威进度返回前，章节导航、测验、编辑器以及测试/提交操作都保持禁用。临时请求失败绝不会让已锁定的 Lab 变为可点击状态。
 
-Each Web knowledge check is generic course data. It reads redacted question and choice payloads from `GET /api/knowledge/{lab_id}` and sends the selected choice to `POST /api/knowledge/answer`; neither response includes an answer key or unselected-choice feedback. The answer response explains only the selected misconception and the underlying trace. If that POST fails, the selected choice and exact answer POST remain on screen so **Retry answer** resends the same request. A background refresh cannot erase that submission error.
+每个 Web 知识检查都来自通用课程数据。界面从 `GET /api/knowledge/{lab_id}` 读取脱敏后的问题和选项载荷，并将所选答案发送到 `POST /api/knowledge/answer`；两个响应都不会包含答案键或未选选项的反馈。回答响应只解释所选误区和对应推理过程。如果该 POST 失败，界面会保留所选答案并原样保留这次回答 POST，使 **重试提交** 能重新发送同一请求。后台刷新不会清除这次提交错误。
 
-Progress responses are ordered by curriculum identity and `updated_at`. The Web rejects a stale state snapshot, and it ignores a late save or run response after you switch Labs or questions, so older work cannot relock navigation or overwrite the newly selected editor.
+进度响应按课程标识和 `updated_at` 排序。Web 会拒绝过期的状态快照，也会忽略切换 Lab 或问题后延迟返回的保存或运行响应，因此旧操作无法重新锁定导航或覆盖新选择的编辑器。
 
-## CLI loop
+## CLI 学习循环
 
 ```bash
 cd labs
@@ -81,13 +82,13 @@ uv run course checkpoint lab01
 uv run course score
 ```
 
-Direct `pytest` uses the same knowledge gate. Public tests live beside your code. Verified tests and reference implementations remain under `platform/course/` and are never copied into the learner workspace.
+直接运行 `pytest` 时会使用同一个知识关卡。公开测试位于你的代码旁边。验证测试和参考实现保留在 `platform/course/` 下，绝不会复制到学员工作区。
 
-This separation prevents accidental hints during local study; it is not a secrecy boundary after publication. If you push the complete repository to a public Git host, anyone can inspect `platform/course/reference/` and `platform/course/tests/hidden/`. Keep the teacher projection private or publish a learner-only distribution when answers and verified tests must remain secret.
+这种隔离可以避免本地学习时意外看到提示，但发布后不构成保密边界。如果将完整仓库推送到公开 Git 主机，任何人都可以查看 `platform/course/reference/` 和 `platform/course/tests/hidden/`。Version 0.1.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
-## Authoring and integrity
+## 作者与完整性
 
-`platform/course/source/` is canonical: structured `lesson.json`, runnable example files, Lab metadata, code, and tests. Markdown lessons and `platform/course/authoring-spec.json` are compiler-generated views, not parallel editable sources. Regenerate or check artifacts with:
+`platform/course/source/` 是唯一规范来源，其中包含结构化的 `lesson.json`、可运行示例文件、Lab 元数据、代码和测试。Markdown 课程和 `platform/course/authoring-spec.json` 是编译器生成的视图，不是可并行编辑的来源。使用以下命令重新生成或检查产物：
 
 ```bash
 npm --prefix platform run course:compile
@@ -96,4 +97,4 @@ npm test
 npm run test:reference
 ```
 
-The capstone grows in every Lab: __COURSEKIT_CAPSTONE__
+每个 Lab 都会扩展结课项目：__COURSEKIT_CAPSTONE__

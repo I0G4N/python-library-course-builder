@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/I0G4N/python-library-course-builder/security/advisories/new
+    about: Do not disclose security-sensitive findings in a public Issue.

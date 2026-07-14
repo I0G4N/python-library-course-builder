@@ -167,19 +167,21 @@ def test_skill_and_rubrics_require_the_complete_three_gate_web_loop() -> None:
 def test_generated_readme_explains_the_shared_cli_and_web_progression() -> None:
     readme = _read("assets/course-template/README.md")
 
-    assert "three gates" in readme
-    assert "Web knowledge check" in readme
-    assert "same progress state" in readme
-    assert "Later Labs stay disabled" in readme
-    assert "fails closed" in readme.lower()
-    assert "initial `/api/state`" in readme
+    assert "三个关卡" in readme
+    assert "Web 知识检查" in readme
+    assert "同一份进度状态" in readme
+    assert "后续 Lab 保持禁用" in readme
+    assert "默认拒绝" in readme
+    assert "初次 `/api/state` 加载" in readme
     assert "GET /api/knowledge/{lab_id}" in readme
     assert "POST /api/knowledge/answer" in readme
-    assert "redacted" in readme
-    assert "stale state snapshot" in readme
-    assert "late save or run response" in readme
-    assert "exact answer POST" in readme
-    assert "background refresh" in readme
+    assert "脱敏" in readme
+    assert "过期的状态快照" in readme
+    assert "延迟返回的保存或运行响应" in readme
+    assert "原样保留这次回答 POST" in readme
+    assert "后台刷新" in readme
+    assert "**重试提交**" in readme
+    assert "**重试回答**" not in readme
 
 
 def test_author_contract_requires_quiz_first_code_and_question_scoped_files() -> None:
@@ -187,15 +189,19 @@ def test_author_contract_requires_quiz_first_code_and_question_scoped_files() ->
     forward = _read("references/forward-test-rubric.md")
     readme = _read("assets/course-template/README.md")
 
-    for document in (architecture, forward, readme):
+    for document in (architecture, forward):
         assert "Lab 00" in document
         assert "no code workspace" in document
         assert "workflow gate, not source secrecy" in document
 
+    assert "Lab 00" in readme
+    assert "没有代码工作区" in readme
+    assert "流程关卡，而不是源码保密边界" in readme
+
     assert "GET /api/file?lab_id={lab_id}&question_id={question_id}" in architecture
     assert '"lab_id", "question_id", and "content"' in architecture
     assert "question-scoped file API" in forward
-    assert "foundation and current-Lab knowledge" in readme
+    assert "基础章节和当前 Lab 的知识检查" in readme
 
 
 def test_generated_readme_names_the_supported_local_operating_systems() -> None:
@@ -204,6 +210,8 @@ def test_generated_readme_names_the_supported_local_operating_systems() -> None:
     assert "macOS" in readme
     assert "Linux" in readme
     assert "WSL2" in readme
+    assert "Node.js 22.13 或更高版本" in readme
+    assert "Node.js 22.13 or newer" not in readme
 
 
 def test_author_contract_documents_compiler_owned_source_preflight() -> None:
@@ -224,10 +232,14 @@ def test_author_contract_requires_accessible_resizable_desktop_layout() -> None:
     forward = _read("references/forward-test-rubric.md")
     readme = _read("assets/course-template/README.md")
 
-    for document in (architecture, forward, readme):
+    for document in (architecture, forward):
         assert "two keyboard-accessible separators" in document
         assert "per-course localStorage" in document
         assert "no resize separators" in document
+
+    assert "两个可通过键盘操作的分隔条" in readme
+    assert "每门课程的 localStorage" in readme
+    assert "不显示调整大小的分隔条" in readme
 
     assert "sidebar can collapse" in architecture
     assert "minimum widths" in architecture

@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible problem in the Skill, template, or validators
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Security vulnerabilities must not be filed publicly. Report them through
+        https://github.com/I0G4N/python-library-course-builder/security/advisories/new.
+  - type: dropdown
+    id: target_area
+    attributes:
+      label: Target area
+      description: Select the part of the project where the problem appears.
+      options:
+        - Skill workflow or metadata
+        - Course specification or scaffolder
+        - Generated CLI or Web workspace
+        - Grading or verification
+        - Release tooling or documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version_or_commit
+    attributes:
+      label: Version or commit
+      description: Provide the plugin version, release tag, or full commit SHA.
+      placeholder: v0.1.0 or a full commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, Python, uv, Node.js, npm, and Codex versions that matter.
+    validations:
+      required: true
+  - type: textarea
+    id: reproducible_evidence
+    attributes:
+      label: Reproducible evidence
+      description: Provide the smallest commands, inputs, logs, or generated fixture that reproduces the problem.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: State the contract or result you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual behavior
+      description: State what happened, including complete error output when available.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Relevant context
+      description: Add target-library details, generated-course paths, links, or other non-sensitive context.
+    validations:
+      required: false
