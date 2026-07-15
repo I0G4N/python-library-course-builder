@@ -126,7 +126,7 @@ def test_plugin_manifest_and_marketplace_publish_exact_skill_only_metadata() -> 
     manifest = _required_json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
 
     assert manifest["name"] == PLUGIN_NAME
-    assert manifest["version"] == "0.1.0"
+    assert manifest["version"] == "0.1.1"
     assert manifest["author"]["name"] == "I0G4N"
     assert manifest["author"]["url"] == "https://github.com/I0G4N"
     assert "email" not in manifest["author"]
@@ -256,7 +256,7 @@ def test_changelog_publishes_the_release_version_from_project_metadata() -> None
     manifest = _required_json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
     changelog_version = release.group("version")
 
-    assert changelog_version == "0.1.0"
+    assert changelog_version == "0.1.1"
     assert release.group("date") == "2026-07-15"
     assert project["project"]["version"] == changelog_version
     assert manifest["version"] == changelog_version

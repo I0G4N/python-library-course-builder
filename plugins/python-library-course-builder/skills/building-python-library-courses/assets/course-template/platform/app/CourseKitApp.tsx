@@ -43,6 +43,7 @@ import {
   readinessPreparationTitles,
   serializeLayoutPreferences,
   shouldShowCodingWorkspace,
+  unitBadgeLabel,
   type CourseUnitType,
   type LayoutPreferences,
 } from "./courseLayout.mjs";
@@ -823,9 +824,7 @@ export function CourseKitApp() {
                 <span className="lab-index">
                   {isComplete
                     ? "✓"
-                    : /^lab\d+$/.test(lab.id)
-                      ? lab.id.slice(3)
-                      : String(index + 1).padStart(2, "0")}
+                    : unitBadgeLabel(lab.id, index)}
                 </span>
                 <span>
                   <strong>{lab.title}</strong>
@@ -875,15 +874,17 @@ export function CourseKitApp() {
             <p className="eyebrow">{selectedLab?.id ?? "LAB"}</p>
             <h2>{selectedLab?.title ?? "选择一个 Lab"}</h2>
           </div>
-          <p className="course-summary">
-            {selectedLab?.description ?? manifest.description ?? manifest.project ?? capstoneSummary(manifest.capstone)}
-          </p>
-          {selectedLab?.study_minutes ? (
-            <p className="selected-study-time">
-              <strong>预计学习时间：{studyTimeLabel(selectedLab.study_minutes)}</strong>
-              {selectedLab.study_minutes.reason ? ` · ${selectedLab.study_minutes.reason}` : null}
+          <div className="course-toolbar-meta">
+            <p className="course-summary">
+              {selectedLab?.description ?? manifest.description ?? manifest.project ?? capstoneSummary(manifest.capstone)}
             </p>
-          ) : null}
+            {selectedLab?.study_minutes ? (
+              <p className="selected-study-time">
+                <strong>预计学习时间：{studyTimeLabel(selectedLab.study_minutes)}</strong>
+                {selectedLab.study_minutes.reason ? ` · ${selectedLab.study_minutes.reason}` : null}
+              </p>
+            ) : null}
+          </div>
         </header>
 
         <div

@@ -17,7 +17,7 @@ export SKILL_DIR="/absolute/path/to/building-python-library-courses"
 
 Run bundled scripts with uv-managed Python 3.13. Require `uv`, Node.js 22.13+ with npm, and Git. Support macOS, Linux, and WSL2; native Windows is unverified. Mandatory generation and grading need no GPU or external service.
 
-The generated **authoring repository** contains learner and teacher projections. Hidden tests are not secret from anyone who can inspect it. Version 0.1.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
+The generated **authoring repository** contains learner and teacher projections. Hidden tests are not secret from anyone who can inspect it. Version 0.1.1 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
 Run only trusted local code: Runner/pytest isolation is not a hostile-code sandbox. Keep output standalone; never link to or import from the Skill or another course.
 
@@ -25,7 +25,7 @@ Require Python 3.13 and exclude Python 3.14. Upgrade the template and lockfiles 
 
 ## Language contract
 
-Write learner-facing lessons, quiz prompts, feedback, generated documentation, and course prose in Simplified Chinese. Keep code, shell commands, identifiers, target API names, and official source titles and URLs in their original form. Version 0.1.0 has no language switch.
+Write learner-facing lessons, quiz prompts, feedback, generated documentation, and course prose in Simplified Chinese. Keep code, shell commands, identifiers, target API names, and official source titles and URLs in their original form. Version 0.1.1 has no language switch.
 
 ## Follow the seven-stage workflow
 

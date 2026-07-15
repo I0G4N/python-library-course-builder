@@ -15,6 +15,14 @@ async function readSource(url) {
   }
 }
 
+function mediaSection(css, start, end) {
+  const startIndex = css.indexOf(start);
+  assert.notEqual(startIndex, -1, `missing media query: ${start}`);
+  const endIndex = end ? css.indexOf(end, startIndex + start.length) : css.length;
+  assert.notEqual(endIndex, -1, `missing following media query: ${end}`);
+  return css.slice(startIndex, endIndex);
+}
+
 test("orientation, prep, and quiz-locked units do not mount or preload coding", async () => {
   const app = await readFile(appUrl, "utf8");
 
@@ -31,6 +39,10 @@ test("orientation, prep, and quiz-locked units do not mount or preload coding", 
   assert.match(app, /selectedLab\?\.unit_type === "preparatory"/);
   assert.match(app, /const codingReady = shouldShowCodingWorkspace\(/);
   assert.match(app, /codingUnitSelected,/);
+  assert.match(
+    app,
+    /const codingReady = shouldShowCodingWorkspace\(\{[\s\S]*?codingUnitSelected,[\s\S]*?selectedLabNavigable,[\s\S]*?foundationKnowledgeComplete,[\s\S]*?currentKnowledgeComplete,[\s\S]*?\}\);/,
+  );
   assert.match(app, /\{codingReady \? \([\s\S]*className="work-column"[\s\S]*\) : null\}/);
   assert.match(
     app,
@@ -65,10 +77,85 @@ test("desktop columns use two native accessible vertical separators", async () =
   assert.match(separator, /onPointerDown/);
   assert.match(separator, /setPointerCapture/);
   assert.match(separator, /onKeyDown/);
-  assert.match(css, /@media \(min-width: 1100px\)/);
-  assert.match(css, /@media \(min-width: 760px\) and \(max-width: 1099px\)/);
+  assert.match(css, /@media \(min-width: 1024px\)/);
+  assert.match(css, /@media \(min-width: 760px\) and \(max-width: 1023px\)/);
   assert.match(css, /@media \(max-width: 759px\)/);
   assert.match(app, /disabled=\{layoutPreferences\.sidebarCollapsed\}/);
+});
+
+test("short desktop windows keep lesson and work columns independently scrollable", async () => {
+  const css = await readFile(cssUrl, "utf8");
+
+  assert.match(
+    css,
+    /\.course-shell\s*\{[\s\S]*?height:\s*100vh;[\s\S]*?height:\s*100dvh;[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;[\s\S]*?\}/,
+  );
+  assert.match(css, /\.course-sidebar\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?\}/);
+  assert.match(css, /\.course-main\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?\}/);
+  assert.match(
+    css,
+    /\.lesson-scroll\s*\{[\s\S]*?overflow-y:\s*auto;[\s\S]*?overscroll-behavior:\s*contain;[\s\S]*?\}/,
+  );
+  assert.match(
+    css,
+    /\.work-column\s*\{[\s\S]*?overflow-y:\s*auto;[\s\S]*?overscroll-behavior:\s*contain;[\s\S]*?\}/,
+  );
+});
+
+test("tablet stacks the learning surfaces and mobile uses natural document scrolling", async () => {
+  const css = await readFile(cssUrl, "utf8");
+  const tablet = mediaSection(
+    css,
+    "@media (min-width: 760px) and (max-width: 1023px)",
+    "@media (max-width: 759px)",
+  );
+  const mobile = mediaSection(
+    css,
+    "@media (max-width: 759px)",
+    "@media (max-width: 480px)",
+  );
+
+  assert.match(tablet, /\.learning-grid\s*\{[\s\S]*?overflow-y:\s*auto;[\s\S]*?\}/);
+  assert.match(
+    tablet,
+    /\.lesson-scroll\s*\{[\s\S]*?overscroll-behavior:\s*auto;[\s\S]*?\}/,
+  );
+  assert.match(
+    tablet,
+    /\.learning-grid\.coding-visible\s*\{[\s\S]*?grid-template-rows:[\s\S]*?\}/,
+  );
+  assert.doesNotMatch(tablet, /\.learning-grid\.coding-visible\s*\{[^}]*grid-template-columns:/s);
+
+  assert.match(
+    mobile,
+    /\.course-shell\s*\{[\s\S]*?height:\s*auto;[\s\S]*?min-height:\s*100dvh;[\s\S]*?overflow:\s*visible;[\s\S]*?\}/,
+  );
+  assert.match(
+    mobile,
+    /\.course-sidebar\s*\{[\s\S]*?position:\s*static;[\s\S]*?grid-template-areas:\s*"brand nav"\s*"readiness readiness";[\s\S]*?\}/,
+  );
+  assert.match(mobile, /\.brand-block\s*\{[\s\S]*?grid-area:\s*brand;[\s\S]*?\}/);
+  assert.match(
+    mobile,
+    /\.readiness-summary\s*\{[\s\S]*?grid-area:\s*readiness;[\s\S]*?overflow:\s*visible;[\s\S]*?\}/,
+  );
+  assert.match(mobile, /\.lab-nav\s*\{[\s\S]*?grid-area:\s*nav;[\s\S]*?\}/);
+  assert.match(mobile, /\.course-main\s*\{[\s\S]*?display:\s*block;[\s\S]*?\}/);
+  assert.match(mobile, /\.learning-grid\s*\{[\s\S]*?overflow:\s*visible;[\s\S]*?\}/);
+  assert.match(
+    mobile,
+    /\.lesson-scroll\s*\{[\s\S]*?max-height:\s*none;[\s\S]*?overflow:\s*visible;[\s\S]*?\}/,
+  );
+  assert.match(mobile, /\.work-column\s*\{[\s\S]*?overflow:\s*visible;[\s\S]*?\}/);
+});
+
+test("toolbar metadata shares one grid cell instead of creating an implicit row", async () => {
+  const app = await readFile(appUrl, "utf8");
+
+  assert.match(
+    app,
+    /<header className="course-toolbar">[\s\S]*?<div className="course-toolbar-meta">[\s\S]*?className="course-summary"[\s\S]*?className="selected-study-time"[\s\S]*?<\/div>[\s\S]*?<\/header>/,
+  );
 });
 
 test("the coding workspace stays inert until its selected file is loaded", async () => {
@@ -105,4 +192,15 @@ test("zero-gap v3 readiness reports no extra prep instead of an empty prep list"
   assert.match(app, /preparationTitles\.length > 0/);
   assert.match(app, /无需额外先修/);
   assert.match(app, /完成 Lab 00 导览后即可进入正式 Lab/);
+});
+
+test("chapter navigation uses the shared Lab and Prep badge formatter", async () => {
+  const app = await readFile(appUrl, "utf8");
+
+  assert.match(app, /unitBadgeLabel,/);
+  assert.match(
+    app,
+    /className="lab-index">\s*\{isComplete\s*\?\s*"✓"\s*:\s*unitBadgeLabel\(lab\.id, index\)\}/,
+  );
+  assert.doesNotMatch(app, /\^lab\\d\+\$/);
 });

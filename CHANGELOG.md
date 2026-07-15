@@ -2,6 +2,14 @@
 
 All notable changes to Python Library Course Builder are documented in this file.
 
+## [0.1.1] - 2026-07-15
+
+### Fixed
+
+- Made the generated Web workspace fit short and resized browser windows with independently scrollable desktop panes, a stacked tablet layout from 760 through 1023 pixels, and natural document scrolling on mobile.
+- Changed preparation-unit navigation badges from route-position numbers to stable `P01`, `P02`, ... labels while preserving `00`, `01`, ... for Labs.
+- Kept `lab00` and every `prepNN` knowledge-only, and made each formal Lab reveal its Code and Result workspace only after that Lab's knowledge checks are complete.
+
 ## [0.1.0] - 2026-07-15
 
 ### Added

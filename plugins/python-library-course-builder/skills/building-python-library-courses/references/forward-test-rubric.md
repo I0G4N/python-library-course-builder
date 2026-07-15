@@ -84,8 +84,9 @@ Run every check from fresh output.
 - manifest and README readiness projections show assumed capabilities plus ordered prep without raw evidence or internal author data; Web/Markdown use learner-safe labels;
 - Python lesson fences and the editor have syntax highlighting and monospace alignment;
 - no orientation/prep unit has a code workspace; in short, prep has no code workspace. Each graded Lab hides code/results and makes no file request until the prep chain and current knowledge are complete;
-- the desktop shell exposes two keyboard-accessible separators, respects declared minimum widths, lets the sidebar collapse, supports pointer drag plus Arrow keys/Home/End, and restores validated per-course localStorage preferences;
-- widths from 760px through 1099px stack lesson and work, widths below 760px retain compact chapter navigation, and both ranges have no resize separators;
+- at widths of 1024px and above, the desktop shell exposes two keyboard-accessible separators, respects declared minimum widths, lets the sidebar collapse, supports pointer drag plus Arrow keys/Home/End, and restores validated per-course localStorage preferences;
+- a short or resized desktop viewport keeps the complete interface reachable through independent lesson and code/result vertical scrolling, with no fixed shell minimum height or implicit toolbar row clipping the learning surface;
+- widths from 760px through 1023px stack lesson and work without blocking scroll chaining to a newly unlocked workspace; widths below 760px keep chapter navigation and readiness in explicit grid areas plus natural document scrolling without a capped or sticky lesson surface; both ranges have no resize separators;
 - schema v3 initially enables only Lab 00, unlocks one prep at a time by knowledge mastery, then Lab 01; schema v2 preserves its original initial pair;
 - the knowledge gate renders a generic quiz from redacted `GET /api/knowledge/{lab_id}` data and persists correct answers through `POST /api/knowledge/answer` without disclosing answer keys;
 - the Runner rejects prep file/write/run APIs explicitly; formal `POST /api/run` stays locked until prep and current knowledge are mastered;

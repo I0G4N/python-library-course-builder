@@ -44,6 +44,7 @@ export function normalizeLayoutPreferences(value: unknown): LayoutPreferences;
 export function parseLayoutPreferences(serialized: unknown): LayoutPreferences;
 export function serializeLayoutPreferences(preferences: unknown): string;
 export function layoutStorageKey(courseId: string): string;
+export function unitBadgeLabel(unitId: string, index: number): string;
 export function collapseSidebar(preferences: LayoutPreferences): LayoutPreferences;
 export function expandSidebar(preferences: LayoutPreferences): LayoutPreferences;
 export function resolveSidebarMaximum(viewportWidth: number): number;

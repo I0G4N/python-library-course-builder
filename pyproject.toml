@@ -1,6 +1,6 @@
 [project]
 name = "python-library-course-builder"
-version = "0.1.0"
+version = "0.1.1"
 description = "Release tooling for the Python Library Course Builder Codex plugin"
 requires-python = ">=3.13,<3.14"
 dependencies = []

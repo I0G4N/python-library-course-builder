@@ -99,6 +99,21 @@ test("v3 readiness and prep completion projections remain compatible with v2", (
   );
 });
 
+test("unit navigation badges distinguish preparatory units from formal Labs", () => {
+  const unitBadgeLabel = requiredExport("unitBadgeLabel");
+
+  assert.equal(unitBadgeLabel("lab00", 0), "00");
+  assert.equal(unitBadgeLabel("lab01", 3), "01");
+  assert.equal(unitBadgeLabel("prep01", 1), "P01");
+  assert.equal(unitBadgeLabel("prep02", 2), "P02");
+  assert.equal(
+    unitBadgeLabel("legacy-foundation", 0),
+    "01",
+    "unknown legacy IDs fall back to their one-based array position",
+  );
+  assert.equal(unitBadgeLabel("custom-unit", 8), "09");
+});
+
 test("coding workspace is visible only for a navigable coding unit with both quizzes complete", () => {
   const shouldShowCodingWorkspace = requiredExport(
     "shouldShowCodingWorkspace",

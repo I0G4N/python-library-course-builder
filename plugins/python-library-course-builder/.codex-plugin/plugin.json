@@ -1,6 +1,6 @@
 {
   "name": "python-library-course-builder",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Build source-backed, Chinese-first hands-on learning repositories for Python libraries.",
   "author": {
     "name": "I0G4N",

@@ -11,7 +11,7 @@ In one sentence: choose a coherent route, use reviewable evidence to assess what
 
 No CS61A code, assignments, tests, or instructional text are included, and this independently authored project is not affiliated with or endorsed by UC Berkeley, the CS61A course staff, or OpenAI.
 
-Version 0.1.0 uses Simplified Chinese for learner-facing lessons, quiz prompts, feedback, generated documentation, and course prose. Code, shell commands, identifiers, target API names, and official source titles and URLs remain in their original form; this release has no language switch.
+Version 0.1.1 uses Simplified Chinese for learner-facing lessons, quiz prompts, feedback, generated documentation, and course prose. Code, shell commands, identifiers, target API names, and official source titles and URLs remain in their original form; this release has no language switch.
 
 The bundled Skill is named `$building-python-library-courses`.
 
@@ -79,7 +79,7 @@ Course creation requires Codex plus network access to verify official sources an
 Add the repository as a Codex marketplace, then install the plugin:
 
 ```bash
-codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.1.0
+codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.1.1
 codex plugin add python-library-course-builder@python-library-course-builder
 ```
 
@@ -90,7 +90,7 @@ See the [official Codex plugin authoring and installation documentation](https:/
 From the directory that will contain the checkout, clone the repository, register its relative marketplace path, and install the plugin:
 
 ```bash
-git clone --branch v0.1.0 --depth 1 https://github.com/I0G4N/python-library-course-builder.git
+git clone --branch v0.1.1 --depth 1 https://github.com/I0G4N/python-library-course-builder.git
 codex plugin marketplace add ./python-library-course-builder
 codex plugin add python-library-course-builder@python-library-course-builder
 ```
@@ -141,7 +141,7 @@ The plugin bundle contains only the Skill and its local assets. It does not decl
 
 A generated project is an **authoring repository**: it contains the canonical course source, learner projection, reference implementations, and verified grader material needed to build and audit the course.
 
-Hidden tests are not secret when the complete repository is available. They are hidden from the normal learner workspace to avoid accidental hints, but a user with filesystem access can inspect teacher artifacts. Version 0.1.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
+Hidden tests are not secret when the complete repository is available. They are hidden from the normal learner workspace to avoid accidental hints, but a user with filesystem access can inspect teacher artifacts. Version 0.1.1 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
 The local Runner is a study tool, not an operating-system security sandbox. It reduces ordinary grading side effects and binds to loopback, but submitted Python executes with the current user's privileges. Run only trusted local course code, never expose the Runner as a public judge, and use a separate hardened sandbox for hostile submissions.
 

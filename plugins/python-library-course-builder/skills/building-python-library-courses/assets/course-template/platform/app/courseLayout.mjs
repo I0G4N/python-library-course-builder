@@ -62,6 +62,18 @@ export function layoutStorageKey(courseId) {
   return `coursekit.layout.v1.${normalizedId}`;
 }
 
+export function unitBadgeLabel(unitId, index) {
+  const normalizedId = typeof unitId === "string" ? unitId.trim() : "";
+  const labMatch = /^lab(\d+)$/.exec(normalizedId);
+  if (labMatch) return labMatch[1].padStart(2, "0");
+
+  const prepMatch = /^prep(\d+)$/.exec(normalizedId);
+  if (prepMatch) return `P${prepMatch[1].padStart(2, "0")}`;
+
+  const arrayIndex = Number.isInteger(index) && index >= 0 ? index : 0;
+  return String(arrayIndex + 1).padStart(2, "0");
+}
+
 export function collapseSidebar(preferences) {
   return {
     ...normalizeLayoutPreferences(preferences),

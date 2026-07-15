@@ -231,7 +231,7 @@ wheels = [
 
 [[package]]
 name = "python-library-course-builder"
-version = "0.1.0"
+version = "0.1.1"
 source = { virtual = "." }
 
 [package.dev-dependencies]

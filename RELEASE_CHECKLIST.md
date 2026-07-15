@@ -37,8 +37,8 @@ Complete this checklist from a clean checkout before publishing a version.
 - [ ] Private Vulnerability Reporting is enabled, and `https://github.com/I0G4N/python-library-course-builder/security/advisories/new` opens the private security report flow.
 - [ ] The dependency graph, Dependabot alerts, and Dependabot security updates are enabled.
 - [ ] A main branch ruleset and a v* tag ruleset protect the release branch and tags.
-- [ ] The pinned public install command, `codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.1.0`, succeeds from a clean Codex environment.
-- [ ] Hosted main CI and the hosted v0.1.0 tag forward job pass for the release commit.
+- [ ] The pinned public install command, `codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.1.1`, succeeds from a clean Codex environment.
+- [ ] Hosted main CI and the hosted v0.1.1 tag forward job pass for the release commit.
 
 ## Publication
 

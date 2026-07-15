@@ -77,14 +77,16 @@ summary:focus-visible,
 .course-shell {
   display: grid;
   grid-template-columns: 208px minmax(0, 1fr);
+  height: 100vh;
   height: 100dvh;
-  min-height: 620px;
+  min-height: 0;
   overflow: hidden;
 }
 
 .course-sidebar {
   display: flex;
   min-width: 0;
+  min-height: 0;
   flex-direction: column;
   border-right: 1px solid var(--line);
   background: var(--sidebar);
@@ -299,6 +301,7 @@ summary:focus-visible,
   min-width: 0;
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .resize-separator {
@@ -354,6 +357,12 @@ summary:focus-visible,
   margin: 0.08rem 0 0;
   font-size: 1.15rem;
   line-height: 1.25;
+}
+
+.course-toolbar-meta {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
 }
 
 .course-summary {
@@ -426,6 +435,8 @@ summary:focus-visible,
 
 .lesson-scroll {
   padding: 0.9rem 1rem 2rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .knowledge-check {
@@ -597,6 +608,8 @@ summary:focus-visible,
   min-height: 0;
   grid-template-rows: minmax(390px, 1fr) minmax(126px, 0.32fr);
   gap: 0.75rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .code-panel {
@@ -1390,7 +1403,7 @@ summary:focus-visible,
   50% { opacity: 0.35; }
 }
 
-@media (min-width: 1100px) {
+@media (min-width: 1024px) {
   .course-shell {
     grid-template-columns: var(--sidebar-width, 208px) 12px minmax(0, 1fr);
   }
@@ -1438,7 +1451,7 @@ summary:focus-visible,
   }
 }
 
-@media (min-width: 760px) and (max-width: 1099px) {
+@media (min-width: 760px) and (max-width: 1023px) {
   .course-shell {
     grid-template-columns: 190px minmax(0, 1fr);
   }
@@ -1457,6 +1470,10 @@ summary:focus-visible,
     grid-template-rows: minmax(480px, 62vh) minmax(680px, 1fr);
   }
 
+  .lesson-scroll {
+    overscroll-behavior: auto;
+  }
+
   .work-column {
     min-height: 680px;
   }
@@ -1471,16 +1488,19 @@ summary:focus-visible,
   }
 
   .course-sidebar {
-    position: sticky;
+    position: static;
     z-index: 10;
-    top: 0;
     display: grid;
     grid-template-columns: minmax(160px, 0.7fr) minmax(0, 1.3fr);
+    grid-template-areas:
+      "brand nav"
+      "readiness readiness";
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
 
   .brand-block {
+    grid-area: brand;
     min-width: 0;
     padding: 0.65rem 0.75rem;
     border: 0;
@@ -1491,7 +1511,15 @@ summary:focus-visible,
     -webkit-line-clamp: 1;
   }
 
+  .readiness-summary {
+    grid-area: readiness;
+    max-height: none;
+    margin: 0.45rem 0.55rem 0.55rem;
+    overflow: visible;
+  }
+
   .lab-nav {
+    grid-area: nav;
     flex-direction: row;
     padding: 0.42rem;
     overflow-x: auto;
@@ -1532,6 +1560,11 @@ summary:focus-visible,
     padding: 0.65rem 0.75rem;
   }
 
+  .course-main {
+    display: block;
+    overflow: visible;
+  }
+
   .learning-grid {
     display: block;
     padding: 0.55rem;
@@ -1539,16 +1572,21 @@ summary:focus-visible,
   }
 
   .lesson-panel {
-    min-height: 440px;
+    display: block;
+    min-height: 0;
     margin-bottom: 0.55rem;
   }
 
   .lesson-scroll {
-    max-height: 58vh;
+    max-height: none;
+    overflow: visible;
+    overscroll-behavior: auto;
   }
 
   .work-column {
     display: block;
+    overflow: visible;
+    overscroll-behavior: auto;
   }
 
   .code-panel {

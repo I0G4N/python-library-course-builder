@@ -4,7 +4,7 @@ __COURSEKIT_DESCRIPTION__
 
 目标：`__COURSEKIT_TARGET__`（__COURSEKIT_TARGET_VERSION__）。课程依据固定版本的官方来源构建。生成完成后，已固定版本的官方来源注册表会写入 `platform/course/source/sources.json`.
 
-0.1.0 版本中，面向学员的课程、测验提示、反馈、生成文档和课程正文均使用简体中文。代码、shell 命令、标识符、目标 API 名称以及官方来源标题和 URL 保持原文；本版本不提供语言切换。
+0.1.1 版本中，面向学员的课程、测验提示、反馈、生成文档和课程正文均使用简体中文。代码、shell 命令、标识符、目标 API 名称以及官方来源标题和 URL 保持原文；本版本不提供语言切换。
 
 ## 环境要求
 
@@ -94,7 +94,7 @@ uv run course score
 
 直接运行 `pytest` 时会使用同一个知识关卡。公开测试位于你的代码旁边。验证测试和参考实现保留在 `platform/course/` 下，绝不会复制到学员工作区。
 
-这种隔离可以避免本地学习时意外看到提示，但发布后不构成保密边界。如果将完整仓库推送到公开 Git 主机，任何人都可以查看 `platform/course/reference/` 和 `platform/course/tests/hidden/`。Version 0.1.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
+这种隔离可以避免本地学习时意外看到提示，但发布后不构成保密边界。如果将完整仓库推送到公开 Git 主机，任何人都可以查看 `platform/course/reference/` 和 `platform/course/tests/hidden/`。Version 0.1.1 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
 ## 作者与完整性
 

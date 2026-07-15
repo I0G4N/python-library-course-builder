@@ -36,20 +36,20 @@ PLUGIN_LONG_DESCRIPTION = (
 )
 MARKETPLACE_COMMAND = (
     "codex plugin marketplace add I0G4N/python-library-course-builder "
-    "--ref v0.1.0"
+    "--ref v0.1.1"
 )
 PLUGIN_COMMAND = (
     "codex plugin add python-library-course-builder@python-library-course-builder"
 )
 CLONE_COMMAND = (
-    "git clone --branch v0.1.0 --depth 1 "
+    "git clone --branch v0.1.1 --depth 1 "
     "https://github.com/I0G4N/python-library-course-builder.git"
 )
 OFFICIAL_CODEX_DOCS = (
     "https://learn.chatgpt.com/docs/build-plugins#add-a-marketplace-from-the-cli"
 )
 NO_EXPORT_SENTENCE = (
-    "Version 0.1.0 does not provide an automated learner-only export."
+    "Version 0.1.1 does not provide an automated learner-only export."
 )
 PRIVATE_REPOSITORY_SENTENCE = (
     "The supported secrecy path is to keep the complete teacher/authoring "
@@ -137,7 +137,7 @@ def test_chinese_first_metadata_and_skill_language_contract_are_exact() -> None:
         "documentation, and course prose in Simplified Chinese.",
         "Keep code, shell commands, identifiers, target API names, and official "
         "source titles and URLs in their original form.",
-        "Version 0.1.0 has no language switch.",
+        "Version 0.1.1 has no language switch.",
     )
     for clause in language_contract:
         assert clause in skill_body
@@ -179,7 +179,12 @@ def test_public_install_commands_pin_the_synchronized_release_version() -> None:
         re.search(r"--ref v([^ ]+)$", MARKETPLACE_COMMAND).group(1),
         re.search(r"--branch v([^ ]+)", CLONE_COMMAND).group(1),
     }
-    assert versions == {"0.1.0"}
+    assert versions == {"0.1.1"}
+
+    for template in ("bug.yml", "feature.yml"):
+        issue_template = _text(ROOT / ".github" / "ISSUE_TEMPLATE" / template)
+        assert "placeholder: v0.1.1 or a full commit SHA" in issue_template
+        assert "placeholder: v0.1.0 or a full commit SHA" not in issue_template
 
 
 def test_all_secrecy_docs_publish_only_the_supported_private_repository_path() -> None:
@@ -375,7 +380,7 @@ def test_release_checklist_keeps_all_hosted_publication_gates_unchecked() -> Non
         "v* tag ruleset",
         MARKETPLACE_COMMAND,
         "hosted main ci",
-        "hosted v0.1.0 tag forward job",
+        "hosted v0.1.1 tag forward job",
     )
     for fragment in required_fragments:
         assert fragment.casefold() in folded
