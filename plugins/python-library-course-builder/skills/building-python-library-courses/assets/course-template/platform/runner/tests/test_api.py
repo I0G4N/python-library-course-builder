@@ -242,7 +242,7 @@ def test_file_api_rejects_non_regular_targets(client: TestClient) -> None:
         "/api/file", json={**request, "content": "pass\n"}
     )
     assert written.status_code == 400
-    assert written.json()["detail"] == _copy()["workspace_regular"]
+    assert written.json()["detail"] == _copy()["workspace_regular_file"]
 
 
 def test_file_api_limits_utf8_bytes_not_python_characters(
