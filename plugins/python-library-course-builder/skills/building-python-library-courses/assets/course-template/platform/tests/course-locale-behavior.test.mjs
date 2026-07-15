@@ -12,7 +12,9 @@ import {
 
 test("runtime locale resolution preserves legacy courses and closes v3", () => {
   assert.deepEqual(SUPPORTED_COURSE_LANGUAGES, ["zh-CN", "en"]);
-  assert.equal(STATIC_COURSE_LANGUAGE, "zh-CN");
+  const expectedStaticLanguage =
+    "__COURSEKIT_LANGUAGE__" === "en" ? "en" : "zh-CN";
+  assert.equal(STATIC_COURSE_LANGUAGE, expectedStaticLanguage);
   assert.equal(resolveCourseLanguage(2, undefined), "zh-CN");
   assert.equal(resolveCourseLanguage(undefined, undefined), "zh-CN");
   assert.equal(resolveCourseLanguage(2, "legacy-custom-language"), "zh-CN");
