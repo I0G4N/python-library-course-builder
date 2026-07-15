@@ -915,6 +915,7 @@ def forward_verification_plan(
     scaffold_script: Path,
     verifier_script: Path,
     spec_path: Path,
+    readiness_plan_path: Path,
     project_path: Path,
 ) -> tuple[CommandStep, ...]:
     return (
@@ -924,6 +925,8 @@ def forward_verification_plan(
                 str(scaffold_script),
                 str(spec_path),
                 str(project_path),
+                "--readiness-plan",
+                str(readiness_plan_path),
             ),
             repository,
         ),
@@ -1171,14 +1174,22 @@ def run_forward_verification(root: Path) -> None:
     paths = _plugin_paths(root)
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
-    from tests.course_v2_fixture import make_assessed_spec
+    from tests.course_v3_fixture import make_v3_spec_and_plan
 
     with tempfile.TemporaryDirectory(prefix="course-builder-forward-") as raw:
         temporary = Path(raw)
         spec_path = temporary / "course.json"
+        readiness_plan_path = temporary / "readiness-plan.json"
         project_path = temporary / "generated-course"
+        spec, readiness_plan = make_v3_spec_and_plan(
+            missing_ids={"json-data-model", "domain-boundary"}
+        )
         spec_path.write_text(
-            json.dumps(make_assessed_spec(), ensure_ascii=False, indent=2) + "\n",
+            json.dumps(spec, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        readiness_plan_path.write_text(
+            json.dumps(readiness_plan, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         plan = forward_verification_plan(
@@ -1187,6 +1198,7 @@ def run_forward_verification(root: Path) -> None:
             scaffold_script=paths["scripts"] / "scaffold_course.py",
             verifier_script=paths["scripts"] / "verify_learning_project.py",
             spec_path=spec_path,
+            readiness_plan_path=readiness_plan_path,
             project_path=project_path,
         )
         environment = _forward_environment(os.environ, temporary)

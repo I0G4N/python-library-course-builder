@@ -5,7 +5,7 @@ description: Use when a user asks to build, create, author, or learn through a s
 
 # Build a Python Library Course
 
-Create one standalone, source-backed authoring repository that teaches a Python target through a cumulative Lab sequence, incomplete learner code, public and hidden pytest suites, a CLI, and a browser. Follow the seven stages in order.
+Create a standalone, source-backed course repository with cumulative Labs, learner code, pytest suites, a CLI, and a browser. Follow the seven stages in order.
 
 ## requirements
 
@@ -15,13 +15,13 @@ Set `SKILL_DIR` to the absolute directory containing this `SKILL.md`:
 export SKILL_DIR="/absolute/path/to/building-python-library-courses"
 ```
 
-Run every bundled script with uv-managed Python 3.13. Require Python 3.13, `uv`, Node.js 22.13 or newer with npm, and Git. Support macOS, Linux, and WSL2; treat native Windows as unverified. Require no GPU, API key, cloud account, paid service, or external database for mandatory generation and grading.
+Run bundled scripts with uv-managed Python 3.13. Require `uv`, Node.js 22.13+ with npm, and Git. Support macOS, Linux, and WSL2; native Windows is unverified. Mandatory generation and grading need no GPU or external service.
 
-Treat the generated project as an **authoring repository** containing learner and teacher projections. Explain that hidden tests are not secret from anyone who can inspect the complete repository; they only prevent accidental hints. Version 0.1.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
+The generated **authoring repository** contains learner and teacher projections. Hidden tests are not secret from anyone who can inspect it. Version 0.1.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
-Run only trusted local code. Treat Runner and pytest isolation as protection from ordinary grading side effects, not as an operating-system sandbox for hostile submissions. Stop rather than execute an untrusted submission without an explicitly authorized operating-system sandbox. Keep the generated repository standalone: never link to or import from the Skill directory or another learning project.
+Run only trusted local code: Runner/pytest isolation is not a hostile-code sandbox. Keep output standalone; never link to or import from the Skill or another course.
 
-Keep course requirements compatible with Python 3.13 and incompatible with Python 3.14. Stop and upgrade the template and lockfiles before teaching a target that requires Python 3.14 or newer.
+Require Python 3.13 and exclude Python 3.14. Upgrade the template and lockfiles before teaching a newer-only target.
 
 ## Language contract
 
@@ -31,7 +31,7 @@ Write learner-facing lessons, quiz prompts, feedback, generated documentation, a
 
 ### 1. Inspect locally, then research officially
 
-If the target is absent, ask for it and stop until known. Assess general Python readiness with short behavior/evidence questions rather than beginner/intermediate labels, and reuse evidence already supplied by the user instead of re-asking.
+If the target is absent, ask for it and stop until known. Use short behavior/evidence questions rather than beginner/intermediate labels, and reuse evidence from code and conversation already supplied by the learner. A claim such as “我会” is not mastery evidence; “不会” may directly establish a missing capability.
 
 Run the inspector before planning:
 
@@ -39,7 +39,7 @@ Run the inspector before planning:
 uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/inspect_python_target.py" TARGET --output /tmp/course-research.json
 ```
 
-Treat the report as a local inventory, not as factual research. Research the target's public and product surface from primary official sources so Stage 2 can classify it: use Python documentation and CPython source for standard-library modules; use official documentation, package metadata, release notes, and upstream source for third-party targets. Pin the taught version or range, record source URLs, and distinguish documented guarantees from implementation details. Stop and report an evidence gap when official sources are missing or contradictory.
+Treat the report as inventory, not research. Use primary official sources for the target's public and product surface, pin the taught version/range, record URLs, and distinguish documented guarantees from implementation details. Report missing or contradictory evidence.
 
 ### 2. Apply the scope gate
 
@@ -47,25 +47,32 @@ Classify the target from its public API and product surface:
 
 - Select **small** for 3-5 graded Labs.
 - Select **medium** for 6-8 graded Labs.
-- Select **large** by proposing 2-4 coherent product tracks, then stop before writing any specification or destination file. After the user selects one track, create 6-10 graded Labs for that track only.
+- For **large**, propose 2-4 coherent tracks and wait until the user selects one track; then create 6-10 graded Labs for it.
 
-Require one executable environment, one dependency chain, and one cumulative capstone. Read [curriculum-contract.md](references/curriculum-contract.md) before writing the specification.
+Require one environment, dependency chain, and cumulative capstone. Read [curriculum-contract.md](references/curriculum-contract.md) before writing the specification.
 
 ### 3. Design one cumulative route
 
-Read [teaching-depth-contract.md](references/teaching-depth-contract.md) before route or specification design. After scope is fixed (and, for a large target, after the user selects one track), complete this selected-route readiness sequence before authoring:
+Read [teaching-depth-contract.md](references/teaching-depth-contract.md) before route or specification design. After scope is fixed (and, for a large target, after the user selects one track), complete this readiness preflight before creating a specification or destination:
 
 1. Research the selected route from primary official sources as needed beyond the target-surface evidence from Stage 1.
 2. Build a learning-prerequisite DAG of learner capabilities, not package dependency metadata.
-3. Ask only about route-relevant Python, library, and domain capabilities not already evidenced.
-4. Summarize capability titles as **safe to assume**, **teach in Lab 00**, or **too large for this route**.
-5. If multiple prerequisite layers cannot fit a focused 45-60 minute Lab 00, stop before writing the schema or destination file and offer a prerequisite course or a narrower track. Never serialize a large-gap state as a completed target specification.
+3. Create a UTF-8 route JSON containing the selected route, fixed official sources, the capability DAG, and one prediction, code-reading, or micro-code diagnostic per capability.
+4. Create a temporary evidence JSON containing reusable code evidence and prior diagnostic responses. Conversation evidence establishes mastery only when its item carries the matching route diagnostic `question_id` and correct `answer_id`; free-form claims never do. Keep raw learner answers and code evidence in this temporary report only.
+5. Run the deterministic assessor. If it returns `needs_evidence`, ask exactly its single `next_question`, append the response to the temporary evidence JSON, and rerun. Never ask a resolved capability again.
+6. Continue only when it returns `ready`. Present the ordered preparatory units and total preparatory time before authoring.
 
-Author new specifications with `course.audience.level: assessed`, a `learner-self-report` prerequisite profile, exact per-unit `study_minutes`, a concept `operational_contract`, a runnable `trace`, and complete concept/outcome activity mappings. Treat legacy `basic-python` as validator compatibility input, not the authoring default.
+```bash
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/assess_readiness.py" /path/to/route.json /path/to/evidence.json --output /tmp/readiness-plan.json
+```
 
-Use Lab 00 only for evidenced foundations. Give each graded Lab one new knowledge mainline and one usable increment to the same capstone. Lab 02+ may also begin with the prior mechanism's graded official bridge; that bridge does not justify a second unrelated mainline. Apply the exact adaptive time tiers and positive chapter recipe from the teaching-depth contract.
+Author new specifications only as schema v3 with `course.audience.level: assessed`, `assessment: evidence-dialogue`, matching route/readiness data, per-unit `study_minutes`, `operational_contract`, runnable `trace`, and complete activity mappings. Schema v2 `basic-python` and `assessed/learner-self-report` remain compatibility inputs; never author new v2.
 
-Before authoring learner-facing prose, read [complete-teaching-example.md](references/complete-teaching-example.md) as the positive depth model. For every evidenced Lab 00 gap, connect the learner's existing cognitive anchor to a definition, current-route need, complete concrete value flow, misconception or boundary, and a recovery check. For every graded chapter, move from its project problem and plain-language prediction through the exact contract and one complete value flow into valid/boundary cases, diagnosis, quiz, coding, and the capstone increment. Keep the two Lab 00 layers explicit and keep one new knowledge mainline per graded chapter.
+Make `preparatory_units[0]` the 15-30 minute `lab00` orientation. Add only necessary `prep01`, `prep02`, ... units in DAG-level and `python -> library -> domain` order. Prep takes 30-45 minutes, or 45-60 with a derivation/lifecycle reason. Invent none when all capabilities are mastered; do not impose a prep-count ceiling.
+
+Before authoring learner-facing prose, read [complete-teaching-example.md](references/complete-teaching-example.md). Each `prepNN` connects a cognitive anchor, definition, route need, concrete value flow, boundary, recovery, trace, diagnosis, and quiz, but has no code, points, submission, solution, or hidden test. Graded chapters connect problem, prediction, contract, value flow, boundaries, diagnosis, quiz, code, and capstone.
+
+Give each graded Lab one new knowledge mainline and one usable increment to the same capstone. Lab 02+ may begin with the prior mechanism's graded official bridge, but that bridge does not justify a second unrelated mainline.
 
 Enforce the teaching-equivalent -> official bridge cycle:
 
@@ -74,24 +81,26 @@ Enforce the teaching-equivalent -> official bridge cycle:
 3. Make that Lab handwrite the next conceptual layer without delegating to the official implementation.
 4. Prevent every downstream learner file, reference, public or hidden test, and capstone from importing a prior mini implementation. Teach and use the official target API whenever later work needs an earlier capability.
 
-Apply one shared progression model across CLI and Web: the **chapter navigation gate**, **knowledge gate**, and **coding verification gate**. Drive the knowledge gate with a generic Web quiz and mark a Lab complete only after every declared coding question passes verified submission. Apply [authoring-rubric.md](references/authoring-rubric.md) while designing lessons, exercises, and tests.
+CLI, Web, and Runner share the **chapter navigation gate**, **knowledge gate**, and **coding verification gate**, backed by a generic Web quiz and manifest CLI. V3 exposes only `lab00`, then each mastered prep, then `lab01`; no-gap courses go from `lab00` to `lab01`. Prep has no workspace, API access, or points. Formal Labs complete only after verified submissions. Apply [authoring-rubric.md](references/authoring-rubric.md) while designing lessons, exercises, and tests.
 
 ### 4. Author the canonical specification
 
-Author one UTF-8 schema-v2 JSON specification exactly as [curriculum-contract.md](references/curriculum-contract.md) defines it. Include pinned target metadata, an official-source registry, source-backed lessons, deterministic CPU/offline examples, questions, incomplete starter code, private reference code, public tests, and hidden tests. Keep Lab and outcome identifiers stable and derive points from declared exercises. Treat this JSON as authoring input. Let the scaffolder create the split canonical source inside the generated repository.
+Author one UTF-8 schema-v3 JSON specification per [curriculum-contract.md](references/curriculum-contract.md). `preparatory_units` and the profile must match `/tmp/readiness-plan.json`; exclude raw evidence. Include pinned metadata, official sources, lessons, deterministic examples, Lab questions, starter/reference code, and public/hidden tests. The scaffolder creates the split canonical source.
 
-Use [architecture.md](references/architecture.md) for compiler ownership, source preflight, progression state, CLI, Web, Runner, layout, and privacy boundaries. Do not invent parallel schemas, editable parity snapshots, or alternate unlock state. Keep network, clock, process, GPU, and operating-system boundaries deterministic through temporary directories and fakes.
+Use `<course-id>-v3-<readiness_summary>` so learner profiles never share progress. Other runtime schema versions remain independent.
+
+Use [architecture.md](references/architecture.md) for ownership, runtime, layout, and privacy. Do not invent parallel schemas, editable parity snapshots, or unlock state; fake nondeterministic boundaries.
 
 ### 5. Scaffold only into an empty destination
 
 Run validation before scaffolding:
 
 ```bash
-uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/validate_course.py" /path/to/spec.json
-uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/scaffold_course.py" /path/to/spec.json /path/to/empty-output
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/validate_course.py" /path/to/spec.json --readiness-plan /tmp/readiness-plan.json
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/scaffold_course.py" /path/to/spec.json /path/to/empty-output --readiness-plan /tmp/readiness-plan.json
 ```
 
-Write only to a missing or empty real directory. Require the scaffolder to reject a file, symlink, or non-empty directory before its first write. Never bypass the empty destination guard or add an overwrite flag.
+V2 retains no-plan commands. V3 rejects a missing, incomplete, tampered, or mismatched plan before writes. Use only a missing/empty real destination; never add overwrite.
 
 ### 6. Prove RED, then GREEN
 
@@ -105,17 +114,17 @@ npm run setup
 uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/verify_learning_project.py" . --full --json /tmp/course-verification.json
 ```
 
-Require fresh completion evidence that:
+Require fresh evidence that:
 
 - the untouched learner starter is RED only at declared incomplete interfaces, never because of collection, syntax, dependency, or timeout failures;
 - the private reference projection is GREEN for every public and hidden test; and
-- CLI, Web, Runner, the three progression gates, learner-artifact privacy, path safety, and residue checks are GREEN.
+- CLI, Web, Runner, progression, privacy, path safety, and residue checks are GREEN.
 
-Use [forward-test-rubric.md](references/forward-test-rubric.md) for the required local generated-project acceptance matrix. Fix systematic failures in the Skill, generator, or template; regenerate into an empty destination and rerun the full verifier instead of hand-editing one generated course.
+Use [forward-test-rubric.md](references/forward-test-rubric.md) for the required local generated-project acceptance matrix. Fix generator-level failures, regenerate, and rerun instead of patching output.
 
 ### 7. Hand off the learning loop
 
-Copy the exact setup, launch, first-Lab, test, score, and shutdown commands from the generated README. Report the pinned target version, graded Lab count, capstone, verification report path, and platform limitations. Repeat the authoring-repository and hidden-test warning before any public hosting handoff.
+Copy setup, launch, first-Lab, test, score, and shutdown commands from the generated README. Report target version, Lab count, capstone, verification path, and limitations; repeat the privacy warning before hosting.
 
 ## Load detailed references only when needed
 

@@ -15,10 +15,32 @@ def load_manifest(path: Path | None = None) -> dict[str, Any]:
     return json.loads((path or MANIFEST_PATH).read_text(encoding="utf-8"))
 
 
+def schema_version(manifest: dict[str, Any] | None = None) -> int:
+    value = manifest or load_manifest()
+    configured = value.get("schema_version", 2)
+    return configured if type(configured) is int else 2
+
+
+def preparatory_units(
+    manifest: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Return ordered, knowledge-only units for either curriculum schema."""
+
+    value = manifest or load_manifest()
+    if schema_version(value) >= 3:
+        configured = value.get("preparatory_units", [])
+        if not isinstance(configured, list):
+            raise ValueError("manifest preparatory_units must be a list")
+        return [item for item in configured if isinstance(item, dict)]
+    item = value.get("foundations")
+    return [item] if isinstance(item, dict) else []
+
+
 def foundation(manifest: dict[str, Any] | None = None) -> dict[str, Any]:
     value = manifest or load_manifest()
-    item = value.get("foundations")
-    if not isinstance(item, dict):
+    units = preparatory_units(value)
+    item = units[0] if units else None
+    if not isinstance(item, dict) or str(item.get("id")) != "lab00":
         raise ValueError("manifest has no foundation")
     return item
 
@@ -28,12 +50,40 @@ def formal_labs(manifest: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     return [item for item in value.get("labs", []) if isinstance(item, dict)]
 
 
-def find_lab(lab_id: str, manifest: dict[str, Any] | None = None) -> dict[str, Any] | None:
+def ordered_units(manifest: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     value = manifest or load_manifest()
-    base = foundation(value)
-    if str(base.get("id")) == lab_id:
-        return base
-    return next((lab for lab in formal_labs(value) if str(lab.get("id")) == lab_id), None)
+    return [*preparatory_units(value), *formal_labs(value)]
+
+
+def is_preparatory_unit(
+    item_or_id: dict[str, Any] | str,
+    manifest: dict[str, Any] | None = None,
+) -> bool:
+    value = manifest or load_manifest()
+    item_id = (
+        str(item_or_id.get("id"))
+        if isinstance(item_or_id, dict)
+        else str(item_or_id)
+    )
+    return item_id in {
+        str(item.get("id")) for item in preparatory_units(value)
+    }
+
+
+def find_unit(
+    unit_id: str, manifest: dict[str, Any] | None = None
+) -> dict[str, Any] | None:
+    value = manifest or load_manifest()
+    return next(
+        (item for item in ordered_units(value) if str(item.get("id")) == unit_id),
+        None,
+    )
+
+
+def find_lab(lab_id: str, manifest: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Backward-compatible name for finding any navigable curriculum unit."""
+
+    return find_unit(lab_id, manifest)
 
 
 def select_item(

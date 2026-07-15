@@ -228,7 +228,7 @@ def reference_public_targets(project: Path) -> list[str]:
 def runnable_lesson_examples(
     project: Path, python: str
 ) -> tuple[bool, str]:
-    """Execute every schema-v2 runnable example from canonical split source."""
+    """Execute every runnable example from canonical split source."""
     snapshot_path = project / "platform" / "course" / "authoring-spec.json"
     try:
         snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
@@ -245,6 +245,21 @@ def runnable_lesson_examples(
                 foundation,
             )
         )
+    for unit in snapshot.get("preparatory_units", []):
+        if isinstance(unit, dict):
+            unit_id = str(unit.get("id", ""))
+            sections.append(
+                (
+                    unit_id,
+                    project
+                    / "platform"
+                    / "course"
+                    / "source"
+                    / "preparatory_units"
+                    / unit_id,
+                    unit,
+                )
+            )
     for lab in snapshot.get("labs", []):
         if isinstance(lab, dict):
             lab_id = str(lab.get("id", ""))
@@ -573,13 +588,28 @@ course_root = Path(os.environ["COURSEKIT_COURSE_DIR"])
 workspace = Path(os.environ["COURSEKIT_WORKSPACE_DIR"])
 manifest = json.loads((course_root / "manifest.json").read_text(encoding="utf-8"))
 knowledge = json.loads((course_root / "knowledge.json").read_text(encoding="utf-8"))
-foundation = manifest["foundations"]
+schema_version = manifest.get("schema_version", 2)
+if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+    raise ValueError("manifest schema_version must be an integer")
+if schema_version >= 3:
+    preparatory_units = [
+        unit for unit in manifest.get("preparatory_units", []) if isinstance(unit, dict)
+    ]
+else:
+    foundation = manifest["foundations"]
+    preparatory_units = [foundation]
+if not preparatory_units:
+    raise ValueError("functional Web progression requires lab00 preparation")
+foundation = preparatory_units[0]
 labs = [lab for lab in manifest["labs"] if isinstance(lab, dict)]
 if len(labs) < 2:
     raise ValueError(
         "functional Web progression requires one foundation and at least two graded Labs"
     )
 foundation_id = str(foundation["id"])
+preparatory_ids = [str(unit["id"]) for unit in preparatory_units]
+if foundation_id != "lab00" or len(preparatory_ids) != len(set(preparatory_ids)):
+    raise ValueError("preparatory units must start with unique lab00")
 first = labs[0]
 later = labs[1]
 first_id = str(first["id"])
@@ -610,7 +640,23 @@ for index, question in enumerate(first_questions):
     )
 
 
-def expected_unlocked(completed):
+def expected_unlocked(completed, mastered_preparatory=frozenset()):
+    if schema_version >= 3:
+        unlocked = []
+        completed_units = set(completed) | set(mastered_preparatory)
+        for unit in [*preparatory_units, *labs]:
+            unit_id = str(unit["id"])
+            dependency = unit.get("depends_on")
+            if (
+                unit_id == foundation_id
+                or unit_id in completed_units
+                or (
+                    dependency is not None
+                    and str(dependency) in completed_units
+                )
+            ):
+                unlocked.append(unit_id)
+        return list(dict.fromkeys(unlocked))
     unlocked = [foundation_id]
     for lab in labs:
         lab_id = str(lab["id"])
@@ -625,12 +671,72 @@ def expected_unlocked(completed):
 
 
 initial_expected = expected_unlocked(set())
-initial_route_valid = initial_expected == [foundation_id, first_id]
+expected_initial_route = (
+    [foundation_id] if schema_version >= 3 else [foundation_id, first_id]
+)
+declared_preparatory_route_valid = schema_version < 3 or (
+    all(
+        unit.get("depends_on")
+        == (None if index == 0 else preparatory_ids[index - 1])
+        for index, unit in enumerate(preparatory_units)
+    )
+    and all(
+        lab.get("depends_on")
+        == (preparatory_ids[-1] if index == 0 else str(labs[index - 1]["id"]))
+        for index, lab in enumerate(labs)
+    )
+)
+initial_route_valid = (
+    initial_expected == expected_initial_route
+    and declared_preparatory_route_valid
+)
 
 with TestClient(runner_app.app) as client:
     initial_response = client.get("/api/state")
     foundation_response = client.get(f"/api/knowledge/{foundation_id}")
     first_response = client.get(f"/api/knowledge/{first_id}")
+    preparatory_responses = {
+        unit_id: client.get(f"/api/knowledge/{unit_id}")
+        for unit_id in preparatory_ids
+    }
+    workspace_before_prep_apis = {
+        path.relative_to(workspace).as_posix(): path.read_bytes()
+        for path in workspace.rglob("*")
+        if path.is_file() and ".coursekit" not in path.relative_to(workspace).parts
+    }
+    preparatory_api_results = []
+    if schema_version >= 3:
+        for unit_id in preparatory_ids:
+            request = {
+                "lab_id": unit_id,
+                "question_id": f"{unit_id}.no-code-interface",
+            }
+            prep_file = client.get("/api/file", params=request)
+            prep_save = client.put(
+                "/api/file",
+                json={**request, "content": "PREP_WRITE_MUST_NOT_APPLY\n"},
+            )
+            prep_run = client.post(
+                "/api/run",
+                json={**request, "mode": "public"},
+            )
+            preparatory_api_results.append(
+                prep_file.status_code == 409
+                and prep_save.status_code == 409
+                and prep_run.status_code == 409
+            )
+            evidence.extend(
+                (
+                    f"prep-file-{unit_id}={prep_file.status_code}",
+                    f"prep-save-{unit_id}={prep_save.status_code}",
+                    f"prep-run-{unit_id}={prep_run.status_code}",
+                )
+            )
+    workspace_after_prep_apis = {
+        path.relative_to(workspace).as_posix(): path.read_bytes()
+        for path in workspace.rglob("*")
+        if path.is_file() and ".coursekit" not in path.relative_to(workspace).parts
+    }
     locked_run = client.post(
         "/api/run",
         json={
@@ -679,10 +785,19 @@ with TestClient(runner_app.app) as client:
         and is_public_knowledge_view(foundation_view)
         and first_response.status_code == 200
         and is_public_knowledge_view(first_view)
+        and all(
+            response.status_code == 200
+            and is_public_knowledge_view(response.json())
+            for response in preparatory_responses.values()
+        )
     )
     initial_knowledge_gate = (
         foundation_view.get("available") is True
         and first_view.get("available") is False
+        and all(
+            response.json().get("available") is (unit_id == foundation_id)
+            for unit_id, response in preparatory_responses.items()
+        )
         and locked_run.status_code == 409
         and blocked_later.status_code == 409
         and not contains_answer_key(blocked_later_payload)
@@ -699,20 +814,64 @@ with TestClient(runner_app.app) as client:
 
     correct_answers = True
     answer_payloads_redacted = True
-    for question in knowledge["labs"][foundation_id]["questions"]:
-        response = post_answer(client, foundation_id, question)
-        payload = response.json()
-        evidence.append(
-            f"answer-{question['id']}={response.status_code}:{payload.get('correct')}"
+    mastered_preparatory = set()
+    preparatory_progression = True
+    preparatory_score_isolated = True
+    for unit_index, unit_id in enumerate(preparatory_ids):
+        before_unit_response = client.get(f"/api/knowledge/{unit_id}")
+        before_unit = before_unit_response.json()
+        preparatory_progression = (
+            preparatory_progression
+            and before_unit_response.status_code == 200
+            and before_unit.get("available") is True
+            and is_public_knowledge_view(before_unit)
         )
-        correct_answers = (
-            correct_answers
-            and response.status_code == 200
-            and payload.get("correct") is True
+        for question in knowledge["labs"][unit_id]["questions"]:
+            response = post_answer(client, unit_id, question)
+            payload = response.json()
+            evidence.append(
+                f"answer-{question['id']}={response.status_code}:{payload.get('correct')}"
+            )
+            correct_answers = (
+                correct_answers
+                and response.status_code == 200
+                and payload.get("correct") is True
+            )
+            answer_payloads_redacted = (
+                answer_payloads_redacted and not contains_answer_key(payload)
+            )
+        mastered_preparatory.add(unit_id)
+        after_unit_response = client.get("/api/state")
+        after_unit = after_unit_response.json()
+        expected_after_unit = expected_unlocked(set(), mastered_preparatory)
+        expected_completed_preparatory = preparatory_ids[: unit_index + 1]
+        preparatory_progression = (
+            preparatory_progression
+            and after_unit_response.status_code == 200
+            and after_unit.get("unlocked_labs", []) == expected_after_unit
+            and (
+                schema_version < 3
+                or after_unit.get("completed_preparatory_units")
+                == expected_completed_preparatory
+            )
         )
-        answer_payloads_redacted = (
-            answer_payloads_redacted and not contains_answer_key(payload)
+        preparatory_score_isolated = (
+            preparatory_score_isolated
+            and after_unit.get("score") == 0
+            and after_unit.get("grades") == {}
+            and after_unit.get("completed_labs") == []
         )
+        evidence.extend(
+            (
+                f"prep-score-{unit_id}={after_unit.get('score')}",
+                f"prep-unlocked-{unit_id}="
+                + ",".join(after_unit.get("unlocked_labs", [])),
+            )
+        )
+
+    current_expected_after_preparation = expected_unlocked(
+        set(), mastered_preparatory
+    )
 
     foundation_mastered_response = client.get(
         f"/api/knowledge/{foundation_id}"
@@ -728,6 +887,11 @@ with TestClient(runner_app.app) as client:
         and current_unmastered.get("completed") is False
         and is_public_knowledge_view(foundation_mastered)
         and is_public_knowledge_view(current_unmastered)
+        and all(
+            client.get(f"/api/knowledge/{unit_id}").json().get("completed")
+            is True
+            for unit_id in preparatory_ids
+        )
     )
     evidence.append(
         "foundation-mastered="
@@ -792,6 +956,8 @@ with TestClient(runner_app.app) as client:
         redacted
         and initial_knowledge_gate
         and independent_knowledge_gates
+        and preparatory_progression
+        and preparatory_score_isolated
         and foundation_only_run.status_code == 409
         and correct_answers
         and answer_payloads_redacted
@@ -859,6 +1025,14 @@ with TestClient(runner_app.app) as client:
         and all(foundation_only_results)
         and len(current_ready_results) == len(file_probes)
         and all(current_ready_results)
+        and (
+            schema_version < 3
+            or (
+                len(preparatory_api_results) == len(preparatory_ids)
+                and all(preparatory_api_results)
+                and workspace_after_prep_apis == workspace_before_prep_apis
+            )
+        )
     )
 
     shutil.copytree(
@@ -901,12 +1075,14 @@ with TestClient(runner_app.app) as client:
             still_locked = (
                 step_state_response.status_code == 200
                 and first_id not in step_state.get("completed_labs", [])
-                and step_state.get("unlocked_labs", []) == initial_expected
+                and step_state.get("unlocked_labs", [])
+                == current_expected_after_preparation
             )
             intermediate_locked = intermediate_locked and still_locked
             intermediate_navigation = (
                 intermediate_navigation
-                and step_state.get("unlocked_labs", []) == initial_expected
+                and step_state.get("unlocked_labs", [])
+                == current_expected_after_preparation
             )
             evidence.append(
                 f"intermediate-{question['id']}="
@@ -919,7 +1095,9 @@ with TestClient(runner_app.app) as client:
     later_view = later_response.json()
     final_unlocked = final_state.get("unlocked_labs", [])
     completed = final_state.get("completed_labs", [])
-    expected_after_first = expected_unlocked({first_id})
+    expected_after_first = expected_unlocked(
+        {first_id}, mastered_preparatory
+    )
     persisted = json.loads(
         (workspace / ".coursekit" / "state.json").read_text(encoding="utf-8")
     )
@@ -935,7 +1113,7 @@ with TestClient(runner_app.app) as client:
     checks["chapter_navigation_gate"] = (
         initial_navigation
         and before_code_response.status_code == 200
-        and before_code_unlocked == initial_expected
+        and before_code_unlocked == current_expected_after_preparation
         and intermediate_navigation
         and final_navigation
     )
@@ -982,6 +1160,25 @@ with TestClient(runner_app.app) as client:
         and persisted.get("grades") == final_state.get("grades")
         and verified_questions
         and final_state.get("score") == first_points
+        and (
+            schema_version < 3
+            or (
+                final_state.get("completed_preparatory_units")
+                == preparatory_ids
+                and all(
+                    unit_id not in final_state.get("grades", {})
+                    for unit_id in preparatory_ids
+                )
+                and all(
+                    persisted.get("knowledge", {})
+                    .get(unit_id, {})
+                    .get(str(question["id"]))
+                    is True
+                    for unit_id in preparatory_ids
+                    for question in knowledge["labs"][unit_id]["questions"]
+                )
+            )
+        )
     )
     checks["api_workflow"] = all(
         checks[key] is True
@@ -1088,6 +1285,19 @@ def cli_learning_workflow(project: Path, learner_python: str) -> tuple[bool, str
     labs = [item for item in manifest.get("labs", []) if isinstance(item, dict)]
     if not labs:
         return False, "learner manifest has no graded Labs"
+    schema_version = manifest.get("schema_version", 2)
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        return False, "learner manifest has an invalid schema_version"
+    if schema_version >= 3:
+        preparatory_ids = [
+            str(item["id"])
+            for item in manifest.get("preparatory_units", [])
+            if isinstance(item, dict)
+        ]
+        if not preparatory_ids or preparatory_ids[0] != "lab00":
+            return False, "learner manifest has no ordered v3 preparation"
+    else:
+        preparatory_ids = ["lab00"]
     first = labs[0]
     lab_id = str(first["id"])
     question_id = str(first["questions"][0]["id"])
@@ -1167,7 +1377,37 @@ def cli_learning_workflow(project: Path, learner_python: str) -> tuple[bool, str
             knowledge = json.loads(
                 (root / "labs" / "_course" / "knowledge.json").read_text(encoding="utf-8")
             )
-            for unlock_id in ("lab00", lab_id):
+            if schema_version >= 3:
+                if len(preparatory_ids) > 1:
+                    skipped = run(
+                        [*command, "unlock", preparatory_ids[1]],
+                        cwd=root / "labs",
+                        env=environment,
+                        input_text=_quiz_answers(knowledge, preparatory_ids[1]),
+                    )
+                    evidence.append(f"prep-skip={skipped.returncode}")
+                    if skipped.returncode != 3:
+                        return (
+                            False,
+                            "CLI allowed a preparatory dependency skip; "
+                            + ", ".join(evidence),
+                        )
+                prep_target = preparatory_ids[-1]
+                for operation in ("test", "grade", "submit", "checkpoint"):
+                    refused = run(
+                        [*command, operation, prep_target],
+                        cwd=root / "labs",
+                        env=environment,
+                    )
+                    evidence.append(f"prep-{operation}={refused.returncode}")
+                    if refused.returncode != 2 or "knowledge-only" not in refused.stderr:
+                        return (
+                            False,
+                            f"{operation} accepted knowledge-only {prep_target}; "
+                            + ", ".join(evidence),
+                        )
+
+            for unlock_id in preparatory_ids:
                 unlocked = run(
                     [*command, "unlock", unlock_id],
                     cwd=root / "labs",
@@ -1177,6 +1417,43 @@ def cli_learning_workflow(project: Path, learner_python: str) -> tuple[bool, str
                 evidence.append(f"unlock-{unlock_id}={unlocked.returncode}")
                 if unlocked.returncode:
                     return False, unlocked.stdout + unlocked.stderr + "\n" + ", ".join(evidence)
+
+            preparatory_state = json.loads(
+                (root / "labs" / ".coursekit" / "state.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            preparatory_score = run(
+                [*command, "score"], cwd=root / "labs", env=environment
+            )
+            try:
+                preparatory_score_payload = json.loads(preparatory_score.stdout)
+            except json.JSONDecodeError:
+                preparatory_score_payload = {}
+            evidence.append(
+                "prep-score="
+                + str(
+                    preparatory_score_payload.get("score", {}).get("verified")
+                )
+            )
+            if (
+                preparatory_score.returncode
+                or preparatory_state.get("grades") != {}
+                or preparatory_state.get("completed_labs") != []
+                or preparatory_score_payload.get("score", {}).get("public") != 0
+                or preparatory_score_payload.get("score", {}).get("verified") != 0
+            ):
+                return False, "preparation changed coding score; " + ", ".join(evidence)
+
+            unlocked = run(
+                [*command, "unlock", lab_id],
+                cwd=root / "labs",
+                env=environment,
+                input_text=_quiz_answers(knowledge, lab_id),
+            )
+            evidence.append(f"unlock-{lab_id}={unlocked.returncode}")
+            if unlocked.returncode:
+                return False, unlocked.stdout + unlocked.stderr + "\n" + ", ".join(evidence)
 
             wrong_test_target = run(
                 [*command, "test", lab_id], cwd=root / "labs", env=environment

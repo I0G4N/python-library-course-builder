@@ -25,11 +25,12 @@ Reject the route if a core learning outcome depends on unverifiable behavior.
 
 ## 2. Route coherence
 
-- Lab 00 gets a new learner from setup to one passing smoke command.
+- Lab 00 gets a new learner from setup to one passing smoke command and explains the learning loop in 15-30 minutes.
 - The `assessed` profile records **evidence-based readiness** rather than a beginner/intermediate label. Reuse user-supplied evidence and ask only about selected-route capabilities that remain unknown.
-- A **two-layer Lab 00** fills only evidenced **general-Python gaps**, then teaches the **route-specific library and domain foundations** needed before Lab 01. Treat unseen **new material** as teaching, not **review**.
-- In each layer, every evidenced gap follows one complete path: **existing cognitive anchor** -> **define the term** -> **why the current route needs it now** -> **complete concrete example and value flow** -> **common misconception or applicability boundary** -> **recovery and check**. Do not replace this with a generic prerequisite summary.
-- Lab 00 uses 45-60 minutes with a gap-specific reason. An ordinary graded Lab uses 30-45 minutes. Only a genuinely combined, derivation-heavy, or lifecycle-heavy Lab uses 45-60 minutes with a specific reason.
+- Missing capabilities become ordered `prepNN` units by DAG layer and `python -> library -> domain`; known capabilities do not produce fictional prep.
+- Treat missing or unseen **new material** as teaching, not **review**; readiness evidence, not the author's intuition, decides which label applies.
+- In each prep, every evidenced gap follows one complete path: **existing cognitive anchor** -> **define the term** -> **why the current route needs it now** -> **complete concrete example and value flow** -> **common misconception or applicability boundary** -> **recovery and check**.
+- An ordinary prep or graded Lab uses 30-45 minutes. Only derivation- or lifecycle-heavy work uses 45-60 minutes with a specific reason.
 - Each graded Lab has only the prerequisites it needs and depends on the previous Lab.
 - Reject prerequisite leakage: do not label syntax, framework behavior, or mathematics as a refresh unless an earlier lesson actually taught it.
 - Concepts are introduced before use and revisited through composition rather than repeated prose.
@@ -110,8 +111,8 @@ Never accept a timeout, collection error, missing package, or syntax error as st
 ## 6. Learning interfaces
 
 - CLI and Web read the same manifest and report the same prerequisites, points, and status.
-- The chapter navigation gate initially exposes Lab 00 and the first graded Lab, keeps later Lab controls disabled, and unlocks each only after its declared dependency is completed.
-- The knowledge gate uses a generic, data-driven Web quiz, reveals no answer key, and blocks coding until foundation and current-Lab mastery are recorded.
+- In v3 the chapter navigation gate initially exposes only Lab 00, unlocks prep units in order through knowledge mastery, then exposes Lab 01; schema v2 keeps its original behavior.
+- The knowledge gate uses a generic, data-driven Web quiz and reveals no answer key. Prep has no coding surface; formal coding waits for the complete prep chain and current-Lab mastery.
 - The coding verification gate completes a Lab only after every declared coding question passes verified submission; public success alone does not unlock the next Lab.
 - `unlock`, `test`, `grade`, `submit`, `checkpoint`, and `score` each have a documented learner purpose.
 - The Web lesson explains the current Lab beside a syntax-highlighted coding surface.
@@ -125,7 +126,7 @@ Never accept a timeout, collection error, missing package, or syntax error as st
 - The root README gives prerequisites, setup, launch URLs, first action, local IDE workflow, browser workflow, tests, and Ctrl+C shutdown.
 - `labs/README.md` points to `lab00` and explains which files learners should edit.
 - Maintainer instructions explain canonical source compilation and drift checks.
-- Structured split source reconstructs a byte-stable lesson outline and a compiler-generated parity snapshot equal to the validated schema-v2 input.
+- Structured split source reconstructs a byte-stable lesson outline and a compiler-generated parity snapshot equal to the validated schema-v3 input; schema-v2 parity remains compatible.
 - The output contains no absolute generator path, source-project symlink, unresolved template token, foreign brand, or fixed Lab/score assumption.
 - The repository states that hidden tests are not secret if private artifacts are published.
 

@@ -30,7 +30,9 @@ import {
   SIDEBAR_MIN_WIDTH,
   WORK_MIN_WIDTH,
   collapseSidebar,
+  completedUnitIds,
   expandSidebar,
+  isCodingUnit,
   layoutStorageKey,
   lessonRatioFromWidth,
   normalizeLayoutPreferences,
@@ -38,8 +40,10 @@ import {
   resolveLessonWidth,
   resolveSidebarMaximum,
   resolveSidebarWidth,
+  readinessPreparationTitles,
   serializeLayoutPreferences,
   shouldShowCodingWorkspace,
+  type CourseUnitType,
   type LayoutPreferences,
 } from "./courseLayout.mjs";
 import {
@@ -71,6 +75,8 @@ type CourseQuestion = {
 type CourseLab = {
   id: string;
   title: string;
+  graded?: boolean;
+  unit_type?: CourseUnitType;
   description?: string;
   concepts?: string[];
   questions?: CourseQuestion[];
@@ -86,7 +92,10 @@ type CourseManifest = {
   capstone?: string | { title?: string; description?: string };
   readiness?: {
     assumed: string[];
-    foundation: string[];
+    foundation?: string[];
+    preparatory?: string[];
+    route_id?: string;
+    summary?: string;
   };
   labs: CourseLab[];
 };
@@ -235,8 +244,8 @@ export function CourseKitApp() {
     [questions, selectedQuestionId],
   );
   const completed = useMemo(
-    () => new Set(courseState.completed_labs ?? []),
-    [courseState.completed_labs],
+    () => new Set(completedUnitIds(courseState)),
+    [courseState],
   );
   const unlocked = useMemo(
     () => new Set(courseState.unlocked_labs ?? []),
@@ -251,18 +260,25 @@ export function CourseKitApp() {
   const currentKnowledgeComplete = selectedLab
     ? knowledgeProgress[selectedLab.id]?.completed === true
     : false;
-  const formalLabSelected = Boolean(
-    selectedLab && selectedLab.id !== foundationLabId,
+  const codingUnitSelected = Boolean(
+    selectedLab &&
+      isCodingUnit({
+        unitType: selectedLab.unit_type,
+        graded: selectedLab.graded,
+        legacyFoundationSelected: selectedLab.id === foundationLabId,
+      }),
   );
   const codingReady = shouldShowCodingWorkspace({
-    formalLabSelected,
+    codingUnitSelected,
     selectedLabNavigable,
     foundationKnowledgeComplete,
     currentKnowledgeComplete,
   });
   const codingLockReasonId = "coding-lock-reason";
-  const codingLockReason = !formalLabSelected
-    ? "基础章节不包含编码练习；完成知识检查后进入正式 Lab。"
+  const codingLockReason = !codingUnitSelected
+    ? selectedLab?.unit_type === "preparatory"
+      ? "先修单元不包含编码练习；完成知识检查后继续下一单元。"
+      : "基础章节不包含编码练习；完成知识检查后进入正式 Lab。"
     : !selectedLabNavigable
       ? "此 Lab 尚未解锁，完成前置 Lab 后才能编码。"
       : !foundationKnowledgeComplete
@@ -717,6 +733,8 @@ export function CourseKitApp() {
   }
 
   const readiness = manifest.readiness;
+  const preparationTitles = readinessPreparationTitles(readiness);
+  const hasAdditionalPreparation = preparationTitles.length > 0;
 
   return (
     <main
@@ -756,8 +774,18 @@ export function CourseKitApp() {
             <h2 id="readiness-title">学习准备</h2>
             <h3>课程直接使用</h3>
             <ul>{readiness.assumed.map((title, index) => <li key={`assumed-${index}-${title}`}>{title}</li>)}</ul>
-            <h3>Lab 00 会先讲</h3>
-            <ul>{readiness.foundation.map((title, index) => <li key={`foundation-${index}-${title}`}>{title}</li>)}</ul>
+            <h3>
+              {hasAdditionalPreparation
+                ? readiness.preparatory
+                  ? "正式 Lab 前会先讲"
+                  : "Lab 00 会先讲"
+                : "无需额外先修"}
+            </h3>
+            {hasAdditionalPreparation ? (
+              <ul>{preparationTitles.map((title, index) => <li key={`preparation-${index}-${title}`}>{title}</li>)}</ul>
+            ) : (
+              <p>完成 Lab 00 导览后即可进入正式 Lab。</p>
+            )}
           </section>
         ) : null}
 

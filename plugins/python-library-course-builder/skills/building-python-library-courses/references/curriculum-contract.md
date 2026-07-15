@@ -1,8 +1,8 @@
-# Curriculum contract v2
+# Curriculum contract v3
 
-Use one UTF-8 JSON specification to describe the evidence, teaching route, structured lessons, exercises, and tests. The authoring specification is an input to the Skill. Inside a generated project, the canonical source is the split tree under `platform/course/source/`; its compiler emits the private compiler-generated parity snapshot.
+Use one UTF-8 JSON specification to describe a completed readiness decision, ordered preparatory teaching, the formal Lab route, exercises, and tests. Raw learner answers and code evidence remain only in the temporary readiness report. Inside a generated project, the canonical source is the split tree under `platform/course/source/`; its compiler emits the private compiler-generated parity snapshot.
 
-Run the inspector, validator, scaffolder, and verifier through the uv-managed Python 3.13 commands in `SKILL.md`. Schema v2 accepts a course requirement that includes Python 3.13 and excludes Python 3.14. Do not weaken that gate to accommodate the host interpreter.
+Run the assessor, validator, scaffolder, and verifier through the uv-managed Python 3.13 commands in `SKILL.md`. New authoring uses schema v3 and requires a matching `ready` plan. Schema v2 remains compatibility input. Both schemas require Python 3.13 and exclude Python 3.14.
 
 ## Contents
 
@@ -22,7 +22,7 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "course": {
     "id": "pathlib-practice",
     "title": "用 pathlib 构建本地文件整理器",
@@ -35,7 +35,9 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
     "audience": {
       "level": "assessed",
       "prerequisite_profile": {
-        "assessment": "learner-self-report",
+        "assessment": "evidence-dialogue",
+        "route_id": "pathlib-core-route",
+        "readiness_summary": "4ac6e2c00d91",
         "capabilities": [
           {
             "id": "python-functions",
@@ -44,22 +46,24 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
             "title": "定义并调用 Python 函数",
             "status": "known",
             "decision": "assume",
-            "basis": "explicit-prerequisite",
+            "basis": "code-evidence",
             "source_ids": ["python-language"],
             "first_used_in": "lab01",
-            "foundation_concept_ids": []
+            "preparatory_unit_id": null,
+            "preparatory_concept_ids": []
           },
           {
             "id": "path-value-boundary",
             "kind": "library",
             "subject": "路径值与文件系统效果",
             "title": "区分路径表示与文件系统操作",
-            "status": "partial",
-            "decision": "foundation",
-            "basis": "selected-route-usage",
+            "status": "missing",
+            "decision": "preparatory",
+            "basis": "diagnostic-answer",
             "source_ids": ["python-pathlib"],
             "first_used_in": "lab01",
-            "foundation_concept_ids": ["lab00.c-path-boundary"]
+            "preparatory_unit_id": "prep01",
+            "preparatory_concept_ids": ["prep01.c-path-boundary"]
           }
         ]
       }
@@ -94,25 +98,37 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
     "version_basis": "Pinned to Python 3.13 documentation.",
     "notes": ["Filesystem effects are graded only under pytest tmp_path."]
   },
-  "foundation": {
-    "id": "lab00",
-    "title": "Lab 00：路径值、文件系统效果与测试循环",
-    "study_minutes": {
-      "tier": "foundation",
-      "min": 45,
-      "max": 60,
-      "reason": "学习者证据显示需要先区分路径表示与文件系统效果。"
+  "preparatory_units": [
+    {
+      "id": "lab00",
+      "title": "Lab 00：环境与学习流程导览",
+      "category": "orientation",
+      "dag_level": 0,
+      "depends_on": null,
+      "capability_ids": [],
+      "study_minutes": {"tier": "orientation", "min": 15, "max": 30},
+      "lesson": {"prerequisites": [], "problem": {}, "outcomes": [], "concepts": [], "examples": [], "capstone_bridge": {}, "summary": []},
+      "quiz": []
     },
-    "lesson": {"prerequisites": [], "problem": {}, "outcomes": [], "concepts": [], "examples": [], "capstone_bridge": {}, "summary": []},
-    "quiz": []
-  },
+    {
+      "id": "prep01",
+      "title": "Prep 01：路径值与文件系统效果",
+      "category": "library",
+      "dag_level": 1,
+      "depends_on": "lab00",
+      "capability_ids": ["path-value-boundary"],
+      "study_minutes": {"tier": "standard", "min": 30, "max": 45},
+      "lesson": {"prerequisites": [], "problem": {}, "outcomes": [], "concepts": [], "examples": [], "capstone_bridge": {}, "summary": []},
+      "quiz": []
+    }
+  ],
   "labs": []
 }
 ```
 
 ## Stable identity and evidence
 
-Course, source, Lab, prerequisite, outcome, concept, example, quiz, choice, and coding-question IDs are stable. Lab IDs are contiguous `lab01` through `labNN`; `depends_on` forms one linear chain starting at `lab00`.
+Course, source, preparatory-unit, Lab, prerequisite, outcome, concept, example, quiz, choice, and coding-question IDs are stable. Preparatory IDs are `lab00`, then contiguous `prep01` through `prepNN`. Formal Lab IDs remain contiguous `lab01` through `labNN`. Dependencies form one chain across prep units and then formal Labs.
 
 Every official source is a primary HTTPS source with a title and applicable version or revision. Concepts cite registry IDs through `source_claims`, never an unregistered free-form URL. Each claim is marked `documented` for a public contract or `implementation` for a version-pinned implementation observation. Do not turn an implementation detail into a promised API.
 
@@ -120,34 +136,36 @@ Every official source is a primary HTTPS source with a title and applicable vers
 
 ## Assessed readiness and duration
 
-New Skill-authored specifications use `course.audience.level: assessed`. In this mode, `course.audience` contains exactly `level` and `prerequisite_profile`; the profile contains exactly `assessment` and a nonempty `capabilities` array, with `assessment: learner-self-report`.
+New Skill-authored specifications use `course.audience.level: assessed`. The profile contains `assessment: evidence-dialogue`, the selected `route_id`, the plan's 12-character `readiness_summary`, and a nonempty `capabilities` array. Validation also receives the complete readiness plan and rejects any mismatch before scaffolding can write.
 
-Each capability contains exactly `"id"`, `"kind"`, `"subject"`, `"title"`, `"status"`, `"decision"`, `"basis"`, `"source_ids"`, `"first_used_in"`, and `"foundation_concept_ids"`:
+Each capability contains exactly `"id"`, `"kind"`, `"subject"`, `"title"`, `"status"`, `"decision"`, `"basis"`, `"source_ids"`, `"first_used_in"`, `"preparatory_unit_id"`, and `"preparatory_concept_ids"`:
 
 - `kind` is `python`, `library`, or `domain`;
-- `status` is `known`, `partial`, `missing`, or `unsure`;
-- `decision` is `assume` or `foundation`;
-- `basis` is `explicit-prerequisite` or `selected-route-usage`.
+- `status` is the completed decision `known` or `missing`;
+- `decision` is `assume` or `preparatory`;
+- `basis` records the privacy-safe evidence class, never the raw answer or code.
 
-Capability IDs are stable and unique; `subject` and `title` are nonempty; `source_ids` is nonempty and unique; and `foundation_concept_ids` contains unique stable IDs. A `known` capability uses `assume` and an empty `foundation_concept_ids`. Every other status uses `foundation` and at least one mapped Lab 00 concept. Source IDs resolve to the official-source registry, `first_used_in` resolves to a graded Lab, foundation concept IDs resolve inside Lab 00, and each mapped foundation capability shares at least one cited source with its teaching concept.
+Capability IDs are stable and unique. A `known` capability uses `assume`, a null prep ID, and no prep concepts. A `missing` capability uses `preparatory`, names exactly the prep unit allocated by the plan, and maps to at least one concept inside it. Source IDs resolve to the official registry, `first_used_in` resolves to a formal Lab, and each mapped concept cites at least one capability source.
 
-Lab 00 keeps a **general-Python layer** separate from a **route-specific library/domain layer**. In those layers, each `foundation` capability is taught through its **existing cognitive anchor**, **define the term**, **why the current route needs it now**, **complete concrete example and value flow**, **common misconception or applicability boundary**, and **recovery and check**. Express that sequence through the existing lesson concepts, examples, trace, quiz, and summary; **do not add parallel teaching-sequence fields** to the schema.
+`lab00` is always the 15-30 minute environment and learning-loop orientation. Missing capabilities are grouped into the smallest necessary `prepNN` units by DAG level and then `python -> library -> domain`. Each prep follows **existing cognitive anchor -> define the term -> why the current route needs it now -> complete concrete example and value flow -> common misconception or applicability boundary -> recovery and check**. It contains lessons, runnable teaching examples, traces, diagnostics, and quizzes, but no coding questions, points, submissions, reference projection, or hidden tests.
 
-A **large gap** is a pre-specification route decision, not a third capability decision. If the required capabilities need multiple prerequisite layers that cannot fit one focused Lab 00, stop **before** writing the target specification or destination and offer a prerequisite course or narrower route. A completed assessed specification therefore contains only `assume` and `foundation` decisions.
+There is no hard prep-count ceiling. Cover only capabilities actually used by the selected route. Multiple dependency layers become multiple ordered prep units in the same course rather than forcing an artificial stop or separate prerequisite course.
 
 Every assessed unit owns an exact `study_minutes` object:
 
-- Lab 00: `{"tier": "foundation", "min": 45, "max": 60, "reason": "..."}` — exact **45-60** minute range and a gap-specific reason;
-- ordinary graded Lab: `{"tier": "standard", "min": 30, "max": 45}` — exact **30-45** minute range and no reason field;
-- genuinely combined, derivation-heavy, or lifecycle-heavy Lab: `{"tier": "extended", "min": 45, "max": 60, "reason": "..."}` — exact **45-60** minute range and a specific reason.
+- `lab00`: `{"tier": "orientation", "min": 15, "max": 30}`;
+- ordinary prep or formal Lab: `{"tier": "standard", "min": 30, "max": 45}`;
+- derivation- or lifecycle-heavy prep or Lab: `{"tier": "extended", "min": 45, "max": 60, "reason": "..."}`.
+
+In learner-facing estimates these are 15-30, 30-45, and 45-60 minutes respectively.
 
 `min` and `max` are JSON integers, not booleans or numeric strings. `reason` is nonempty where required, and the closed shapes above allow no extra fields.
 
-Legacy `course.audience.level: basic-python` remains readable **compatibility** input with `assumes`, `does_not_assume`, and `lab_minutes: {"min": 30, "max": 45}`. It bypasses assessed-only profile, `study_minutes`, `operational_contract`, `trace`, and coverage requirements; it is not the new authoring default.
+Schema-v2 `basic-python` and `assessed/learner-self-report` specifications remain readable compatibility inputs with their original single-`foundation` behavior. They are not new authoring defaults.
 
 ## Structured `lesson`
 
-Lab 00 and every graded Lab use the same `lesson` object:
+Every `lab00`, `prepNN`, and formal Lab uses the same `lesson` object:
 
 ```json
 {
@@ -288,14 +306,14 @@ Every lesson has at least two examples. One is a complete runnable file with an 
 
 For a runnable example whose lesson-relative file is `{path}`, the command is exactly `python {path}`. Shell wrappers, `python -m`, chained commands, alternate interpreters, and extra flags are outside this deterministic example contract.
 
-The rule against prerequisite leakage is strict: a prerequisite may refresh only material actually introduced in an earlier Lab. New syntax, framework concepts, and mathematics belong in the current lesson's open definitions and runnable trace. Every exact formula graded by public or hidden tests needs a worked numeric derivation visible before the exercise.
+The rule against prerequisite leakage is strict: a prerequisite may refresh only material introduced in an earlier course unit. New syntax, framework concepts, and mathematics belong in the current prep or Lab's open definitions and runnable trace. Every exact formula graded by public or hidden tests needs a worked numeric derivation visible before the exercise.
 
 Assessed coverage is exact across authored surfaces:
 
-- every Lab 00 concept maps to a runnable trace, quiz, and diagnosis;
+- every orientation/prep concept maps to a runnable trace, quiz, and diagnosis;
 - every graded-Lab concept maps to a runnable trace, quiz, coding question, and diagnosis;
 - diagnosis coverage may come from a diagnostic example or diagnostic quiz;
-- every outcome maps to an example and to an assessment: a quiz in Lab 00, or a quiz/coding question in a graded Lab.
+- every outcome maps to an example and to an assessment: a quiz in a prep unit, or a quiz/coding question in a graded Lab.
 
 Examples, quiz items, and coding questions carry forward `concept_ids` and `outcome_ids`. Authors order those activities intentionally. The compiler derives each concept's first-practice link from that authored order; do not serialize reverse `practice_links` into the specification.
 
@@ -303,7 +321,7 @@ The cumulative capstone must carry meaningful values through the promised route.
 
 ## Knowledge checks
 
-Each Lab, including Lab 00, has both an execution-trace and a diagnostic question. A question has:
+Each preparatory unit and formal Lab has both an execution-trace and a diagnostic question. A question has:
 
 - a stable ID and `kind` (`execution_trace` or `diagnostic`);
 - a prompt and explanation;
@@ -355,7 +373,7 @@ Lab 01 has no official bridge. Every later Lab starts with a graded `official_br
 
 The bridge question is first, has `kind: "official_bridge"`, imports the pinned target API, and makes its declared observables testable. The same Lab then contains at least one `reimplementation` question for the next mechanism. The `mini_module` is comparison metadata only: no downstream starter, reference, public/hidden test, or capstone may import a prior mini implementation. When a previous capability is needed, the current lesson teaches the official API call directly.
 
-The next bridge's `official_symbols` is responsibility-complete: as a v2 baseline, its set exactly equals the immediately previous reimplementation's `target_symbols`. Every declared `required_imports` root appears directly in both starter and reference bridge files. Every `reimplementation` question points to the declared `learner_file`; that file and its reachable declared helpers reject target roots, prior-Lab helpers, prior mini modules, aliased imports, and literal `importlib.import_module(...)` or `__import__(...)` delegation.
+The next bridge's `official_symbols` is responsibility-complete: its set exactly equals the immediately previous reimplementation's `target_symbols`. Every declared `required_imports` root appears directly in both starter and reference bridge files. Every `reimplementation` question points to the declared `learner_file`; that file and its reachable declared helpers reject target roots, prior-Lab helpers, prior mini modules, aliased imports, and literal `importlib.import_module(...)` or `__import__(...)` delegation.
 
 The bridge belongs in the immediately next Lab and covers every conceptual responsibility named by the previous Lab's reimplementation questions and target symbols. Metadata, lesson comparison, official calls, observables, comparison cases, and tests must all describe that same mechanism.
 
@@ -377,10 +395,11 @@ The scaffolder writes a human-reviewable source tree:
 platform/course/source/
 ├── course.json
 ├── sources.json
-├── foundations/
-│   ├── lesson.json
-│   ├── quiz.json
-│   └── examples/*.py
+├── preparatory_units/
+│   └── {lab00,prepNN}/
+│       ├── lesson.json
+│       ├── quiz.json
+│       └── examples/*.py
 └── labs/labNN/
     ├── lab.json
     ├── lesson.json
@@ -392,7 +411,7 @@ platform/course/source/
 
 There is no editable `source/authoring-spec.json`. The compiler independently validates direct split-source edits, renders a complete Markdown fallback, preserves the reconstructable `lesson_outline`, and emits `compiled/authoring-spec.json` as a private compiler-generated parity snapshot. Scaffolding then checks that snapshot is structurally equal to the validated input specification.
 
-A schema-v2 semantic rewrite uses a new incompatible `curriculum_id` ending in `-v2` and does not list v1 as compatible. This resets learner progress intentionally. Do not automatically bump progress-state `version`, artifact-index `schema_version`, `engine_version`, or `layout_version`; those are separate runtime contracts.
+A schema-v3 curriculum ID is exactly `<course-id>-v3-<readiness_summary>`. A different readiness summary is intentionally incompatible and resets learner progress. Schema-v2 IDs keep their original `-v2` form. Do not automatically bump progress-state `version`, artifact-index `schema_version`, `engine_version`, or `layout_version`; those are separate runtime contracts.
 
 ## Adaptive size
 

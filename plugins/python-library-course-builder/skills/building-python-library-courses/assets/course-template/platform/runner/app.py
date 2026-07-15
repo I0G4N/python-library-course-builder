@@ -20,6 +20,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from runner.execution import run_isolated_pytest
+from support.coursekit.course import (
+    find_unit as find_manifest_unit,
+    formal_labs as manifest_formal_labs,
+    foundation as manifest_foundation,
+    is_preparatory_unit as manifest_is_preparatory_unit,
+    ordered_units as manifest_ordered_units,
+    preparatory_units as manifest_preparatory_units,
+    schema_version as manifest_schema_version,
+)
 from support.coursekit.source_policy import preflight_question_source
 
 
@@ -120,14 +129,26 @@ def read_state() -> dict[str, Any]:
         return fresh
     if value.get("course_id") != fresh["course_id"]:
         return fresh
-    compatible = {
-        fresh["curriculum_id"],
-        *manifest(internal=True).get("compatible_curriculum_ids", []),
-    }
+    internal = manifest(internal=True)
+    compatible = {fresh["curriculum_id"]}
+    if manifest_schema_version(internal) < 3:
+        compatible.update(internal.get("compatible_curriculum_ids", []))
     if value.get("curriculum_id") not in compatible:
         return fresh
     merged = dict(fresh)
-    merged.update(value)
+    if manifest_schema_version(internal) < 3:
+        merged.update(value)
+    else:
+        for key in (
+            "knowledge",
+            "grades",
+            "completed_labs",
+            "checkpoints",
+            "git_baseline_commit",
+            "updated_at",
+        ):
+            if key in value:
+                merged[key] = value[key]
     merged["curriculum_id"] = fresh["curriculum_id"]
     return merged
 
@@ -197,20 +218,23 @@ def learner_manifest() -> dict[str, Any]:
     value = manifest(internal=False)
     value.pop("reference_root", None)
     value.pop("reference_components", None)
-    base = value.get("foundations")
-    if isinstance(base, dict):
-        value["labs"] = [base, *value.get("labs", [])]
+    if manifest_schema_version(value) >= 3:
+        value["labs"] = [
+            *manifest_preparatory_units(value),
+            *manifest_formal_labs(value),
+        ]
+    else:
+        base = value.get("foundations")
+        if isinstance(base, dict):
+            value["labs"] = [base, *value.get("labs", [])]
     return value
 
 
 def curriculum_lab(lab_id: str) -> dict[str, Any]:
     current = manifest(internal=True)
-    base = current.get("foundations")
-    if isinstance(base, dict) and str(base.get("id")) == lab_id:
-        return base
-    for lab in current.get("labs", []):
-        if isinstance(lab, dict) and str(lab.get("id")) == lab_id:
-            return lab
+    unit = find_manifest_unit(lab_id, current)
+    if isinstance(unit, dict):
+        return unit
     raise LookupError(f"unknown Lab: {lab_id}")
 
 
@@ -245,13 +269,66 @@ def knowledge_complete(lab_id: str, value: dict[str, Any]) -> bool:
     )
 
 
+def is_preparatory_unit(lab_id: str) -> bool:
+    current = manifest(internal=True)
+    return (
+        manifest_schema_version(current) >= 3
+        and manifest_is_preparatory_unit(lab_id, current)
+    )
+
+
+def prerequisite(lab_id: str, current: dict[str, Any]) -> str | None:
+    unit = find_manifest_unit(lab_id, current)
+    if not isinstance(unit, dict):
+        return None
+    dependency = unit.get("depends_on")
+    return str(dependency) if dependency is not None else None
+
+
+def unit_complete(
+    lab_id: str,
+    value: dict[str, Any],
+    current: dict[str, Any] | None = None,
+) -> bool:
+    course = current or manifest(internal=True)
+    if find_manifest_unit(lab_id, course) is None:
+        return False
+    if manifest_is_preparatory_unit(lab_id, course):
+        return knowledge_complete(lab_id, value)
+    return lab_id in {str(item) for item in value.get("completed_labs", [])}
+
+
+def navigable(
+    lab_id: str,
+    value: dict[str, Any],
+    current: dict[str, Any] | None = None,
+) -> bool:
+    course = current or manifest(internal=True)
+    if find_manifest_unit(lab_id, course) is None:
+        return False
+    base_id = str(manifest_foundation(course).get("id", "lab00"))
+    if lab_id == base_id:
+        return True
+    if manifest_schema_version(course) >= 3:
+        if unit_complete(lab_id, value, course):
+            return True
+        dependency = prerequisite(lab_id, course)
+        return bool(dependency) and unit_complete(dependency, value, course)
+    completed = {str(item) for item in value.get("completed_labs", [])}
+    if lab_id in completed:
+        return True
+    dependency = prerequisite(lab_id, course)
+    return dependency == base_id or dependency in completed
+
+
 def knowledge_available(lab_id: str, value: dict[str, Any]) -> bool:
     lab = curriculum_lab(lab_id)
     current = manifest(internal=True)
-    base = current.get("foundations", {})
-    base_id = str(base.get("id", "lab00"))
+    base_id = str(manifest_foundation(current).get("id", "lab00"))
     if lab_id == base_id:
         return True
+    if manifest_schema_version(current) >= 3:
+        return navigable(lab_id, value, current)
     if not knowledge_complete(base_id, value):
         return False
     dependency = str(lab.get("depends_on", base_id))
@@ -362,29 +439,32 @@ def knowledge_view(lab_id: str, value: dict[str, Any]) -> dict[str, Any]:
 
 def exposed_state(value: dict[str, Any]) -> dict[str, Any]:
     current = manifest(internal=True)
-    completed = {str(item) for item in value.get("completed_labs", [])}
-    base = current.get("foundations", {})
-    base_id = str(base.get("id", "lab00"))
-    unlocked = [base_id]
-    for lab in current.get("labs", []):
-        if not isinstance(lab, dict):
-            continue
-        lab_id = str(lab["id"])
-        dependency = str(lab.get("depends_on", base_id))
-        if lab_id in completed or dependency == base_id or dependency in completed:
-            unlocked.append(lab_id)
+    unlocked = [
+        str(unit["id"])
+        for unit in manifest_ordered_units(current)
+        if navigable(str(unit["id"]), value, current)
+    ]
     summary = score(value)
-    return {
+    exposed = {
         **value,
         "unlocked_labs": list(dict.fromkeys(unlocked)),
         "score": summary["verified"],
         "total_points": summary["total"],
     }
+    if manifest_schema_version(current) >= 3:
+        exposed["completed_preparatory_units"] = [
+            str(unit["id"])
+            for unit in manifest_preparatory_units(current)
+            if unit_complete(str(unit["id"]), value, current)
+        ]
+    return exposed
 
 
 def run_gate_reasons(lab_id: str, value: dict[str, Any]) -> list[str]:
     current = manifest(internal=True)
-    base_id = str(current.get("foundations", {}).get("id", "lab00"))
+    if is_preparatory_unit(lab_id):
+        return [f"{lab_id} is a knowledge-only preparatory unit"]
+    base_id = str(manifest_foundation(current).get("id", "lab00"))
     reasons = []
     if lab_id not in set(exposed_state(value)["unlocked_labs"]):
         reasons.append(f"navigate to {lab_id} only after completing its dependency")
@@ -400,9 +480,10 @@ def find_content(lab_id: str) -> dict[str, Any]:
     foundation = content.get("foundations")
     if isinstance(foundation, dict) and str(foundation.get("id")) == lab_id:
         return foundation
-    for lab in content.get("labs", []):
-        if isinstance(lab, dict) and str(lab.get("id")) == lab_id:
-            return lab
+    for group in ("preparatory_units", "labs"):
+        for lab in content.get(group, []):
+            if isinstance(lab, dict) and str(lab.get("id")) == lab_id:
+                return lab
     raise LookupError(f"unknown Lab: {lab_id}")
 
 
@@ -560,6 +641,10 @@ def question_workspace_path(
 ) -> tuple[str, tuple[str, ...]]:
     """Resolve one trusted manifest question to its gated learner file."""
 
+    if is_preparatory_unit(lab_id):
+        raise CodeFileLockedError(
+            f"{lab_id} is a knowledge-only preparatory unit"
+        )
     _lab, question = find_question(manifest(internal=True), lab_id, question_id)
     reasons = run_gate_reasons(lab_id, value)
     if reasons:
@@ -866,9 +951,15 @@ def create_app() -> FastAPI:
                 detail="Runner is busy with another grading request; try again shortly",
             )
         try:
+            current_manifest = manifest(internal=True)
+            if is_preparatory_unit(request.lab_id):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{request.lab_id} is a knowledge-only preparatory unit",
+                )
             try:
                 find_question(
-                    manifest(internal=True), request.lab_id, request.question_id
+                    current_manifest, request.lab_id, request.question_id
                 )
             except LookupError as error:
                 raise HTTPException(status_code=404, detail=str(error)) from error

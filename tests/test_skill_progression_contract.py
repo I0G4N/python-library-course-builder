@@ -275,7 +275,12 @@ def test_generated_readme_explains_the_shared_cli_and_web_progression() -> None:
     assert "三个关卡" in readme
     assert "Web 知识检查" in readme
     assert "同一份进度状态" in readme
-    assert "后续 Lab 保持禁用" in readme
+    assert "CLI、Web 和本地 Runner 使用同一份进度状态" in readme
+    assert "共享相同的课程顺序与知识状态" in readme
+    assert "初始只有 `lab00` 可导航" in readme
+    assert "`lab00 -> prep01 -> prep02 -> ... -> lab01`" in readme
+    assert "完成当前 `prepNN` 的知识检查" in readme
+    assert "不会虚构 `prepNN`" in readme
     assert "默认拒绝" in readme
     assert "初次 `/api/state` 加载" in readme
     assert "GET /api/knowledge/{lab_id}" in readme
@@ -302,11 +307,25 @@ def test_author_contract_requires_quiz_first_code_and_question_scoped_files() ->
     assert "Lab 00" in readme
     assert "没有代码工作区" in readme
     assert "流程关卡，而不是源码保密边界" in readme
+    assert "`lab00` 和所有 `prepNN` 都没有代码工作区" in readme
+    assert "没有编程题、代码工作区、分数、提交或 checkpoint" in readme
+    assert "Runner 会拒绝准备单元的文件读取、文件写入和执行 API" in readme
+    assert "课程总分只统计正式 Labs" in readme
 
     assert "GET /api/file?lab_id={lab_id}&question_id={question_id}" in architecture
     assert '"lab_id", "question_id", and "content"' in architecture
     assert "question-scoped file API" in forward
-    assert "基础章节和当前 Lab 的知识检查" in readme
+    assert "整条准备链以及当前正式 Lab 的知识检查" in readme
+
+
+def test_generated_readme_preserves_schema_v2_progression_compatibility() -> None:
+    readme = _read("assets/course-template/README.md")
+
+    assert "Schema v2 课程继续使用兼容流程" in readme
+    assert "它没有 `prepNN`" in readme
+    assert "`lab00` 是单一基础章节" in readme
+    assert "`lab00` 和 `lab01` 初始均可导航" in readme
+    assert "后续 Labs 仍在前一个正式 Lab 完成后开放" in readme
 
 
 def test_generated_readme_names_the_supported_local_operating_systems() -> None:
@@ -365,7 +384,7 @@ def test_skill_requires_the_mechanism_then_official_bridge_learning_cycle() -> N
     for document in (curriculum, authoring, forward):
         assert "wrong -> symptom -> cause -> fix" in document
 
-    assert "schema_version\": 2" in curriculum
+    assert "schema_version\": 3" in curriculum
     assert "course.audience" in curriculum
     assert "lesson_outline" in curriculum
     assert "answer_id" in curriculum
@@ -411,19 +430,19 @@ def test_skill_stage_three_requires_readiness_before_route_design() -> None:
             "primary official sources",
             "learning-prerequisite DAG",
             "package dependency metadata",
-            "route-relevant",
-            "safe to assume",
-            "teach in Lab 00",
-            "too large for this route",
-            "45-60 minute Lab 00",
-            "stop before writing the schema or destination file",
-            "prerequisite course or a narrower track",
+            "route JSON",
+            "temporary evidence JSON",
+            "needs_evidence",
+            "single `next_question`",
+            "ready",
+            "total preparatory time",
         ),
     )
-    assert "Give each graded Lab one new knowledge mainline" in stage_three
-    assert "Lab 02+ may also begin" in stage_three
-    assert "does not justify a second unrelated mainline" in stage_three
-    assert "Apply the exact adaptive time tiers" in stage_three
+    assert "preparatory_units[0]" in stage_three
+    assert "prep01" in stage_three and "prep02" in stage_three
+    assert "python -> library -> domain" in stage_three
+    assert "do not impose a prep-count ceiling" in stage_three
+    assert "one new knowledge mainline" in stage_three
 
 
 def test_skill_and_curriculum_document_assessed_authoring_contract() -> None:
@@ -434,6 +453,7 @@ def test_skill_and_curriculum_document_assessed_authoring_contract() -> None:
         for phrase in (
             "course.audience.level",
             "assessed",
+            "evidence-dialogue",
             "learner-self-report",
             "study_minutes",
             "operational_contract",
@@ -443,14 +463,8 @@ def test_skill_and_curriculum_document_assessed_authoring_contract() -> None:
         ):
             assert phrase in document
 
-    assert (
-        "Author new specifications with `course.audience.level: assessed`" in skill
-    )
-    assert (
-        "Treat legacy `basic-python` as validator compatibility input, "
-        "not the authoring default."
-        in skill
-    )
+    assert "Author new specifications only as schema v3" in skill
+    assert "Schema v2 `basic-python`" in skill
 
     json_blocks = re.findall(r"```json\n(.*?)\n```", curriculum, re.S)
     documented_default = json.loads(json_blocks[0])
@@ -458,8 +472,13 @@ def test_skill_and_curriculum_document_assessed_authoring_contract() -> None:
     assert set(audience) == {"level", "prerequisite_profile"}
     assert audience["level"] == "assessed"
     profile = audience["prerequisite_profile"]
-    assert set(profile) == {"assessment", "capabilities"}
-    assert profile["assessment"] == "learner-self-report"
+    assert set(profile) == {
+        "assessment",
+        "route_id",
+        "readiness_summary",
+        "capabilities",
+    }
+    assert profile["assessment"] == "evidence-dialogue"
     assert profile["capabilities"]
     capability_fields = {
         "id",
@@ -471,45 +490,37 @@ def test_skill_and_curriculum_document_assessed_authoring_contract() -> None:
         "basis",
         "source_ids",
         "first_used_in",
-        "foundation_concept_ids",
+        "preparatory_unit_id",
+        "preparatory_concept_ids",
     }
     assert all(
         set(capability) == capability_fields
         for capability in profile["capabilities"]
     )
     known = next(item for item in profile["capabilities"] if item["status"] == "known")
-    gap = next(item for item in profile["capabilities"] if item["status"] != "known")
-    assert (known["decision"], known["foundation_concept_ids"]) == ("assume", [])
-    assert gap["decision"] == "foundation" and gap["foundation_concept_ids"]
+    gap = next(item for item in profile["capabilities"] if item["status"] == "missing")
+    assert (known["decision"], known["preparatory_concept_ids"]) == ("assume", [])
+    assert known["preparatory_unit_id"] is None
+    assert gap["decision"] == "preparatory" and gap["preparatory_concept_ids"]
 
     assessed_section = curriculum.split("## Assessed readiness and duration", 1)[
         1
     ].split("## Structured `lesson`", 1)[0]
-    assert "`status` is `known`, `partial`, `missing`, or `unsure`" in assessed_section
-    assert "`decision` is `assume` or `foundation`" in assessed_section
-    assert (
-        "A `known` capability uses `assume` and an empty "
-        "`foundation_concept_ids`. Every other status uses `foundation`"
-        in assessed_section
-    )
-    legacy_clause = assessed_section.split(
-        "Legacy `course.audience.level: basic-python`", 1
-    )[1]
-    for legacy_field in ("assumes", "does_not_assume", "lab_minutes"):
-        assert legacy_field in legacy_clause
-    assert "readable **compatibility** input" in assessed_section
-    assert "it is not the new authoring default" in assessed_section
+    assert "`status` is the completed decision `known` or `missing`" in assessed_section
+    assert "`decision` is `assume` or `preparatory`" in assessed_section
+    assert "A `known` capability uses `assume`" in assessed_section
+    assert "Schema-v2 `basic-python` and `assessed/learner-self-report`" in assessed_section
+    assert "compatibility inputs" in assessed_section
 
     duration_payloads = [
         json.loads(payload)
         for payload in re.findall(r"`(\{\"tier\": .*?\})`", assessed_section)
     ]
     durations = {payload["tier"]: payload for payload in duration_payloads}
-    assert durations["foundation"] == {
-        "tier": "foundation",
-        "min": 45,
-        "max": 60,
-        "reason": "...",
+    assert durations["orientation"] == {
+        "tier": "orientation",
+        "min": 15,
+        "max": 30,
     }
     assert durations["standard"] == {"tier": "standard", "min": 30, "max": 45}
     assert durations["extended"] == {
@@ -570,13 +581,14 @@ def test_skill_and_curriculum_document_assessed_authoring_contract() -> None:
         for step in runnable["trace"]
     )
 
-    assert '"tier": "foundation"' in curriculum
+    assert '"tier": "orientation"' in curriculum
     assert '"tier": "standard"' in curriculum
     assert '"tier": "extended"' in curriculum
+    assert "15-30" in curriculum
     assert "45-60" in curriculum
     assert "30-45" in curriculum
-    assert "large gap" in curriculum
-    assert "before" in curriculum and "specification" in curriculum
+    assert "There is no hard prep-count ceiling" in curriculum
+    assert "Multiple dependency layers" in curriculum
 
 
 def test_teaching_depth_reference_defines_positive_chapter_recipe() -> None:
@@ -601,9 +613,9 @@ def test_teaching_depth_reference_defines_positive_chapter_recipe() -> None:
         ),
     )
     for phrase in (
-        "two-layer Lab 00",
-        "general-Python gaps",
-        "route-specific library and domain foundations",
+        "ordered prep",
+        "prerequisite-DAG level",
+        "python -> library -> domain",
         "api",
         "mechanism",
         "formula",
@@ -645,16 +657,12 @@ def test_teaching_depth_reference_defines_positive_chapter_recipe() -> None:
     time_contract = depth.split("## Choose time from the work", 1)[1].split(
         "## Review semantically", 1
     )[0]
-    assert "Lab 00 uses the `foundation` tier" in time_contract
-    assert "An ordinary graded Lab uses the `standard` tier" in time_contract
-    assert "may use the `extended` tier" in time_contract
-    assert time_contract.count("**45-60 minutes**") == 2
+    assert "`lab00` uses the `orientation` tier" in time_contract
+    assert "ordinary prep or graded Lab uses the `standard` tier" in time_contract
+    assert "prep or Lab may use the `extended` tier" in time_contract
+    assert time_contract.count("**45-60 minutes**") == 1
     assert time_contract.count("**30-45 minutes**") == 1
-    assert "specific reason tied to the assessed gaps" in time_contract
-    assert (
-        "A genuinely combined, derivation-heavy, or lifecycle-heavy Lab"
-        in time_contract
-    )
+    assert time_contract.count("**15-30 minutes**") == 1
     assert "with a specific reason naming that work" in time_contract
 
 
@@ -682,8 +690,8 @@ def test_teaching_depth_contract_expands_each_gap_and_graded_chapter() -> None:
         "## Close the operational contract", 1
     )[0]
 
-    assert "general-Python layer" in foundation
-    assert "route-specific library/domain layer" in foundation
+    assert "different DAG layers" in foundation
+    assert "`python`, `library`, and `domain` categories" in foundation
     _assert_in_order(
         foundation,
         (
@@ -695,7 +703,7 @@ def test_teaching_depth_contract_expands_each_gap_and_graded_chapter() -> None:
             "recovery and check",
         ),
     )
-    assert "every `foundation` capability" in foundation
+    assert "every `preparatory` capability" in foundation
     assert "one complete explanation" in foundation
 
     _assert_in_order(
@@ -919,9 +927,9 @@ def test_authoring_and_curriculum_require_the_deeper_teaching_sequences() -> Non
             "quiz, coding question, and capstone increment",
         ):
             assert phrase in document
-    assert "general-Python layer" in curriculum
-    assert "route-specific library/domain layer" in curriculum
-    assert "do not add parallel teaching-sequence fields" in curriculum
+    assert "DAG level" in curriculum
+    assert "python -> library -> domain" in curriculum
+    assert "no coding questions, points, submissions" in curriculum
 
 
 def test_teaching_contract_requires_end_to_end_boundary_witnesses() -> None:
@@ -991,9 +999,9 @@ def test_authoring_contract_requires_adaptive_depth_and_activity_alignment() -> 
 
     for phrase in (
         "evidence-based readiness",
-        "two-layer Lab 00",
-        "general-Python gaps",
-        "route-specific library and domain foundations",
+        "ordered `prepNN` units",
+        "DAG layer",
+        "python -> library -> domain",
         "new material",
         "review",
         "one new knowledge mainline",
@@ -1029,7 +1037,7 @@ def test_authoring_contract_requires_adaptive_depth_and_activity_alignment() -> 
 
     curriculum = _read("references/curriculum-contract.md")
     assert (
-        "every Lab 00 concept maps to a runnable trace, quiz, and diagnosis"
+        "every orientation/prep concept maps to a runnable trace, quiz, and diagnosis"
         in curriculum
     )
     assert (

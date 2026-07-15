@@ -686,6 +686,7 @@ def test_forward_plan_runs_scaffold_setup_and_full_verifier(tmp_path: Path) -> N
     scaffold = scripts / "scaffold_course.py"
     verifier = scripts / "verify_learning_project.py"
     spec = tmp_path / "forward" / "course.json"
+    readiness_plan = tmp_path / "forward" / "readiness-plan.json"
     project = tmp_path / "forward" / "generated-course"
 
     plan = validator.forward_verification_plan(
@@ -694,11 +695,22 @@ def test_forward_plan_runs_scaffold_setup_and_full_verifier(tmp_path: Path) -> N
         scaffold_script=scaffold,
         verifier_script=verifier,
         spec_path=spec,
+        readiness_plan_path=readiness_plan,
         project_path=project,
     )
 
     assert [(step.argv, step.cwd) for step in plan] == [
-        (("python3.13", str(scaffold), str(spec), str(project)), repository),
+        (
+            (
+                "python3.13",
+                str(scaffold),
+                str(spec),
+                str(project),
+                "--readiness-plan",
+                str(readiness_plan),
+            ),
+            repository,
+        ),
         (("npm", "run", "setup"), project),
         (
             ("python3.13", str(verifier), str(project), "--full"),
@@ -707,25 +719,33 @@ def test_forward_plan_runs_scaffold_setup_and_full_verifier(tmp_path: Path) -> N
     ]
 
 
-def test_forward_verification_writes_the_assessed_course_fixture(
+def test_forward_verification_writes_the_v3_course_and_readiness_fixture(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from tests.course_v2_fixture import make_assessed_spec
+    from tests.course_v3_fixture import make_v3_spec_and_plan
 
     validator = load_validator()
     captured: dict[str, object] = {}
 
     def capture_plan(**kwargs: object) -> tuple[()]:
         spec_path = kwargs["spec_path"]
+        readiness_plan_path = kwargs["readiness_plan_path"]
         assert isinstance(spec_path, Path)
+        assert isinstance(readiness_plan_path, Path)
         captured["spec"] = json.loads(spec_path.read_text(encoding="utf-8"))
+        captured["readiness_plan"] = json.loads(
+            readiness_plan_path.read_text(encoding="utf-8")
+        )
         return ()
 
     monkeypatch.setattr(validator, "forward_verification_plan", capture_plan)
 
     validator.run_forward_verification(ROOT)
 
-    assert captured["spec"] == make_assessed_spec()
+    spec, readiness_plan = make_v3_spec_and_plan(
+        missing_ids={"json-data-model", "domain-boundary"}
+    )
+    assert captured == {"spec": spec, "readiness_plan": readiness_plan}
 
 
 def test_forward_environment_is_a_closed_secret_free_allowlist(tmp_path: Path) -> None:

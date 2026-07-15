@@ -125,7 +125,11 @@ def render_course_route(spec: dict[str, Any]) -> str:
         ).replace("\r", "\n").replace("\n", "<br>")
 
     assessed = spec["course"]["audience"].get("level") == "assessed"
-    units = [spec["foundation"], *spec["labs"]]
+    units = (
+        [spec["foundation"], *spec["labs"]]
+        if spec["schema_version"] == 2
+        else [*spec["preparatory_units"], *spec["labs"]]
+    )
     rows = [(str(unit["id"]), str(unit["title"])) for unit in units]
     if assessed:
         lines = ["| 顺序 | 本章主题 | 预计用时 |", "| --- | --- | --- |"]
@@ -154,8 +158,31 @@ def render_learning_preparation(spec: dict[str, Any]) -> str:
             "设计权衡和错误代码诊断放在可展开区域中，避免干扰首次阅读。"
         )
 
-    capabilities = audience["prerequisite_profile"]["capabilities"]
+    profile = audience["prerequisite_profile"]
+    capabilities = profile["capabilities"]
     assumed = [item["title"] for item in capabilities if item["decision"] == "assume"]
+    if profile.get("assessment") == "evidence-dialogue":
+        units = spec["preparatory_units"]
+        time = {
+            "min": sum(int(unit["study_minutes"]["min"]) for unit in units),
+            "max": sum(int(unit["study_minutes"]["max"]) for unit in units),
+        }
+        lines = [
+            "## 学习准备",
+            "",
+            "这条路线已通过证据式短问答确定先修状态。课程会直接使用这些已掌握能力：",
+            "",
+        ]
+        lines.extend(f"- {title}" for title in assumed)
+        lines.extend(
+            [
+                "",
+                f"正式 Lab 前的准备总用时为 {time['min']}–{time['max']} 分钟，按知识依赖依次完成：",
+                "",
+            ]
+        )
+        lines.extend(f"- `{unit['id']}`：{unit['title']}" for unit in units)
+        return "\n".join(lines)
     foundation = [
         item["title"] for item in capabilities if item["decision"] == "foundation"
     ]
@@ -217,7 +244,114 @@ def _write_lesson(root: Path, lesson: dict[str, Any]) -> None:
     json_write(root / "lesson.json", payload)
 
 
+def _write_v3_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
+    """Write v3 prep units while reusing the stable formal-Lab projection."""
+
+    preparatory_units = spec["preparatory_units"]
+    surrogate = copy.deepcopy(spec)
+    surrogate["schema_version"] = 2
+    surrogate["foundation"] = copy.deepcopy(preparatory_units[0])
+    surrogate.pop("preparatory_units")
+    write_canonical_source(platform, surrogate)
+
+    source = platform / "course" / "source"
+    shutil.rmtree(source / "foundations")
+    course = spec["course"]
+    target = spec["target"]
+    summary = course["audience"]["prerequisite_profile"]["readiness_summary"]
+    curriculum_id = f"{course['id']}-v3-{summary}"
+    unit_order = [str(unit["id"]) for unit in preparatory_units]
+    lab_order = [str(lab["id"]) for lab in spec["labs"]]
+    unit_payloads: dict[str, dict[str, Any]] = {}
+    for order, unit in enumerate(preparatory_units):
+        unit_id = str(unit["id"])
+        unit_payloads[unit_id] = {
+            "id": unit_id,
+            "title": unit["title"],
+            "category": unit["category"],
+            "dag_level": unit["dag_level"],
+            "depends_on": unit["depends_on"],
+            "capability_ids": copy.deepcopy(unit["capability_ids"]),
+            "study_minutes": copy.deepcopy(unit["study_minutes"]),
+            "lesson": f"preparatory_units/{unit_id}/lesson.json",
+            "quiz": f"preparatory_units/{unit_id}/quiz.json",
+            "manifest": {
+                "id": unit_id,
+                "order": order,
+                "title": unit["title"],
+                "description": (
+                    "环境检查、学习流程和官方来源导览。"
+                    if unit_id == "lab00"
+                    else unit["lesson"]["capstone_bridge"]["increment"]
+                ),
+                "graded": False,
+                "directory": unit_id,
+                "readme": f"{unit_id}/README.md",
+                "git_scope": unit_id,
+                "checkpoint": {
+                    "require_submit": False,
+                    "git_initialized": False,
+                    "git_clean": False,
+                    "min_commits": 0,
+                },
+            },
+        }
+        unit_root = source / "preparatory_units" / unit_id
+        _write_lesson(unit_root, unit["lesson"])
+        json_write(unit_root / "quiz.json", _quiz(unit["quiz"]))
+
+    course_payload = {
+        "schema_version": 3,
+        "id": course["id"],
+        "title": course["title"],
+        "description": course["description"],
+        "audience": copy.deepcopy(course["audience"]),
+        "curriculum_id": curriculum_id,
+        "compatible_curriculum_ids": [curriculum_id],
+        "language": course["language"],
+        "python_requires": course["python_requires"],
+        "size": course["size"],
+        "dependencies": copy.deepcopy(course.get("dependencies", [])),
+        "capstone": course["capstone"],
+        "preparatory_order": unit_order,
+        "preparatory_units": unit_payloads,
+        "lab_order": lab_order,
+        "extensions": [],
+        "knowledge_title": f"{course['title']} 知识检查",
+        "manifest": {
+            "schema_version": 3,
+            "layout_version": 3,
+            "course_id": course["id"],
+            "curriculum_id": curriculum_id,
+            "title": course["title"],
+            "brand": course["title"],
+            "project": target["name"],
+            "language": course["language"],
+            "audience": copy.deepcopy(course["audience"]),
+            "python_requires": course["python_requires"],
+            "starter_root": "starter",
+            "source_root": "starter",
+            "reference_root": "reference",
+            "capstone": {
+                "name": target["name"],
+                "description": course["capstone"],
+            },
+            "target": {
+                "name": target["name"],
+                "kind": target["kind"],
+                "version": target["version"],
+                "track": target.get("track") or None,
+            },
+        },
+        "research": copy.deepcopy(spec["research"]),
+    }
+    json_write(source / "course.json", course_payload)
+
+
 def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
+    if spec["schema_version"] == 3:
+        _write_v3_canonical_source(platform, spec)
+        return
     source = platform / "course" / "source"
     course = spec["course"]
     target = spec["target"]
@@ -458,6 +592,9 @@ def compile_and_initialize(root: Path, spec: dict[str, Any]) -> None:
     course = spec["course"]
     course_dependencies = [str(value) for value in course.get("dependencies", [])]
     first_question_id = str(spec["labs"][0]["questions"][0]["id"])
+    next_unit_id = "lab01"
+    if spec["schema_version"] == 3 and len(spec["preparatory_units"]) > 1:
+        next_unit_id = str(spec["preparatory_units"][1]["id"])
     dependency_lines = "".join(
         f"  {json.dumps(requirement)},\n" for requirement in course_dependencies
     )
@@ -502,7 +639,7 @@ pythonpath = [".", "_course"]
 ```bash
 uv run course status
 uv run course unlock lab00
-uv run course unlock lab01
+uv run course unlock {next_unit_id}
 uv run course test {first_question_id}
 ```
 
@@ -575,8 +712,13 @@ def materialize_python_locks(root: Path, spec: dict[str, Any]) -> None:
             shutil.rmtree(cache, ignore_errors=True)
 
 
-def scaffold(spec_path: Path, output: Path) -> dict[str, Any]:
-    spec = load_and_validate(spec_path)
+def scaffold(
+    spec_path: Path,
+    output: Path,
+    *,
+    readiness_plan: Path | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    spec = load_and_validate(spec_path, readiness_plan=readiness_plan)
     destination = output.absolute()
     ensure_empty_target(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -593,22 +735,39 @@ def scaffold(spec_path: Path, output: Path) -> dict[str, Any]:
         if destination.exists():
             destination.rmdir()
         os.replace(workspace, destination)
-    return {
+    report = {
         "created": str(destination),
         "course_id": spec["course"]["id"],
         "target": spec["target"]["name"],
         "labs": len(spec["labs"]),
         "git_baseline": True,
     }
+    if spec["schema_version"] == 3:
+        report["preparatory_time"] = {
+            "min": sum(
+                int(unit["study_minutes"]["min"])
+                for unit in spec["preparatory_units"]
+            ),
+            "max": sum(
+                int(unit["study_minutes"]["max"])
+                for unit in spec["preparatory_units"]
+            ),
+        }
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("spec", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--readiness-plan", type=Path)
     args = parser.parse_args(argv)
     try:
-        report = scaffold(args.spec, args.output)
+        report = scaffold(
+            args.spec,
+            args.output,
+            readiness_plan=args.readiness_plan,
+        )
     except (OSError, SpecValidationError, ScaffoldError) as error:
         print(f"scaffold failed: {error}", file=sys.stderr)
         return 1

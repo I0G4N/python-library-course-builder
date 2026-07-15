@@ -24,7 +24,8 @@ project/
 ├── labs/                           the learner's obvious starting point
 │   ├── README.md
 │   ├── pyproject.toml
-│   ├── lab00/                      foundations and environment smoke test
+│   ├── lab00/                      environment and learning-loop orientation
+│   ├── prep01/ ... prepNN/         knowledge-only preparatory units when needed
 │   ├── lab01/ ... labNN/           learner code plus public tests
 │   └── _course/coursekit/          generic CLI, progress, and pytest support
 └── platform/                       all non-learner engine and private artifacts
@@ -60,7 +61,7 @@ CourseKit validation and deterministic compilation
       +--> reference + hidden tests ---> private verification/grader
 ```
 
-There is one split authoring source of truth. Schema-v2 `lesson.json`, example files, Lab metadata, code, and tests live under `course/source`; do not keep an editable source `authoring-spec.json`. The compiler independently validates this tree, renders complete Markdown, preserves a reconstructable `lesson_outline`, and emits the private compiler-generated parity snapshot. Do not duplicate lesson prose or a fixed Lab catalog in TypeScript, Python services, or CLI code. Consumers traverse the compiled manifest. Lab order, titles, dependencies, score totals, questions, lesson paths, and extensions are data.
+There is one split authoring source of truth. Schema-v3 prep lessons live under `course/source/preparatory_units/`; formal Lab metadata, code, and tests stay under `course/source/labs/`. Schema-v2 `foundations/` remains compatibility input. Do not keep an editable source `authoring-spec.json`. Consumers traverse the compiled manifest; unit order, titles, dependencies, score totals, questions, and lesson paths are data.
 
 Each coding question carries normalized `timeout_seconds` metadata in both internal and learner manifests. It must be an integer from 1 through 90 and defaults to 30 when omitted.
 
@@ -70,13 +71,13 @@ Each compiled question also carries compiler-owned `source_policy` metadata: its
 
 Progression has three independent, cumulative decisions:
 
-1. The **chapter navigation gate** makes Lab 00 and the first graded Lab navigable initially. A later Lab becomes navigable only after its declared dependency is in `completed_labs`; completed Labs remain revisitable.
-2. The **knowledge gate** makes the foundation quiz available first, then the current Lab quiz only when its knowledge prerequisites hold. It controls whether coding may run, not whether an already navigable lesson may be read.
+1. In schema v3 the **chapter navigation gate** makes only Lab 00 navigable initially. Each prep becomes navigable when its predecessor's knowledge is complete; Lab 01 follows the final prep or Lab 00. Formal-Lab dependencies still require verified completion. Schema v2 retains its original Lab 00 plus Lab 01 initial navigation.
+2. The **knowledge gate** makes each navigable unit's quiz answerable in order. Prep completion is derived from knowledge mastery and never enters `completed_labs`.
 3. The **coding verification gate** marks a Lab complete only after every declared coding question has passed verified submission. Passing one public test or one question cannot unlock the next Lab.
 
 CLI and Web/Runner mutations update the same curriculum-scoped state under `labs/.coursekit/state.json`; direct pytest reads that state to enforce its gate. The Runner is the authority for Web progression and exposes `GET /api/state`, `GET /api/knowledge/{lab_id}`, `POST /api/knowledge/answer`, and `POST /api/run`. Knowledge GET responses normalize choices and redact answer keys plus unselected choice feedback. An answer POST returns only correctness, the selected choice feedback, and the explanation permitted after that attempt. The generic Web quiz renders only this public payload; it never imports course-specific question logic.
 
-The Web must fail closed while initial state is unavailable: do not temporarily enable every chapter, quiz, editor, or run action. Disabled chapter controls stay non-interactive and explain the dependency. Lab 00 is lesson-and-quiz only and has no code workspace. A graded Lab mounts the code/result workspace and requests its file only after foundation and current-Lab knowledge are mastered. This is a workflow gate, not source secrecy: the learner still owns locally inspectable files under `labs/`. Poll only while the document is visible, clean up timers and listeners, and order snapshots by curriculum identity plus `updated_at`. Selection-scoped save and run responses must be ignored after navigation changes, and a failed answer submission must remain visibly retryable as that same submission rather than being erased by a background read.
+The Web must fail closed while initial state is unavailable. Every orientation/prep unit is lesson-and-quiz only and has no code workspace; it never mounts or requests one. A graded Lab mounts code/results only after the complete prep chain and current-Lab knowledge are mastered. The Runner explicitly rejects prep file and execution APIs before path resolution. This is a workflow gate, not source secrecy: formal starter files remain locally inspectable.
 
 ## Responsive workspace layout
 
@@ -109,7 +110,7 @@ Optional library-specific capabilities are declared extensions. A course without
 
 Compilation is deterministic: the same canonical input yields byte-identical declared artifacts. Check mode performs no writes and reports drift. Compile mode updates only artifacts recorded by its artifact index, preserves unrelated files, and rolls back on replacement failure.
 
-Curriculum schema is independent from runtime schemas. A mechanism-route rewrite uses a new incompatible `curriculum_id` such as `-v2`, but does not by itself bump progress-state version, artifact-index schema, engine version, or layout version. The compiled authoring snapshot is private verification material and never appears in the learner starter projection.
+Curriculum schema is independent from runtime schemas. Schema v3 uses `<course-id>-v3-<readiness_summary>` and declares no compatibility across different summaries. This does not itself bump progress-state, artifact-index, engine, or layout versions. The compiled authoring snapshot is private verification material and never appears in the learner starter projection.
 
 Workspace initialization is empty-target-only and transactional. Reject files, symlinks, and non-empty destinations before the first write. Generated projects contain copied files, never symlinks or imports back to the Skill, template, or originating repository.
 

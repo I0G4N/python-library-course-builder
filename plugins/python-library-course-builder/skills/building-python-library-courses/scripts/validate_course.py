@@ -6,12 +6,15 @@ from __future__ import annotations
 import argparse
 import ast
 from collections import Counter
+import copy
 import json
 from pathlib import Path, PurePosixPath
 import re
 import sys
 from typing import Any
 from urllib.parse import parse_qsl, urlparse
+
+from assess_readiness import ReadinessValidationError, validate_ready_plan
 
 
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -148,6 +151,36 @@ CAPABILITY_FIELDS = {
     "source_ids",
     "first_used_in",
     "foundation_concept_ids",
+}
+V3_PREREQUISITE_PROFILE_FIELDS = {
+    "assessment",
+    "route_id",
+    "readiness_summary",
+    "capabilities",
+}
+V3_CAPABILITY_FIELDS = {
+    "id",
+    "kind",
+    "subject",
+    "title",
+    "status",
+    "decision",
+    "basis",
+    "source_ids",
+    "first_used_in",
+    "preparatory_unit_id",
+    "preparatory_concept_ids",
+}
+V3_PREPARATORY_UNIT_FIELDS = {
+    "id",
+    "title",
+    "category",
+    "dag_level",
+    "depends_on",
+    "capability_ids",
+    "study_minutes",
+    "lesson",
+    "quiz",
 }
 OPERATIONAL_CONTRACT_FIELDS = {
     "kind",
@@ -1130,7 +1163,7 @@ def _validate_test(value: Any, label: str) -> tuple[str, str]:
     return path.as_posix(), code
 
 
-def validate_spec(payload: Any) -> dict[str, Any]:
+def _validate_spec_v2(payload: Any) -> dict[str, Any]:
     spec = _object(payload, "course spec")
     if spec.get("schema_version") != 2:
         raise SpecValidationError("schema_version must be 2")
@@ -1652,23 +1685,396 @@ def validate_spec(payload: Any) -> dict[str, Any]:
     return spec
 
 
-def load_and_validate(path: Path | str) -> dict[str, Any]:
+def _without_assessed_depth(lesson: dict[str, Any]) -> dict[str, Any]:
+    """Project a v3 lesson through the existing v2 structural validator."""
+
+    projected = copy.deepcopy(lesson)
+    for concept in projected["concepts"]:
+        concept.pop("operational_contract", None)
+    for example in projected["examples"]:
+        if example.get("kind") == "runnable":
+            example.pop("trace", None)
+    return projected
+
+
+def _v2_structural_projection(spec: dict[str, Any]) -> dict[str, Any]:
+    """Reuse the mature v2 Lab/module-cycle checks without weakening v3 depth."""
+
+    projected = copy.deepcopy(spec)
+    units = projected.pop("preparatory_units")
+    lab00 = units[0]
+    projected["schema_version"] = 2
+    projected["course"]["audience"] = {
+        "level": "basic-python",
+        "assumes": ["validated evidence-dialogue prerequisites"],
+        "does_not_assume": ["unselected route capabilities"],
+        "lab_minutes": {"min": 30, "max": 45},
+    }
+    projected["foundation"] = {
+        "id": "lab00",
+        "title": lab00["title"],
+        "lesson": _without_assessed_depth(lab00["lesson"]),
+        "quiz": copy.deepcopy(lab00["quiz"]),
+    }
+    previous = "lab00"
+    for lab in projected["labs"]:
+        lab["depends_on"] = previous
+        lab["lesson"] = _without_assessed_depth(lab["lesson"])
+        previous = str(lab["id"])
+    return projected
+
+
+def _validate_v3_minutes(value: Any, *, label: str, orientation: bool) -> None:
+    minutes = _object(value, label)
+    if orientation:
+        _require_exact_fields(minutes, {"tier", "min", "max"}, label)
+        if (
+            minutes.get("tier") != "orientation"
+            or type(minutes.get("min")) is not int
+            or type(minutes.get("max")) is not int
+            or minutes.get("min") != 15
+            or minutes.get("max") != 30
+        ):
+            raise SpecValidationError(
+                f"{label} must be orientation tier with the exact 15-30 minute range"
+            )
+        return
+    _validate_study_minutes(value, label=label, foundation=False)
+
+
+def _validate_spec_v3(
+    payload: Any, *, readiness_plan: Any | None
+) -> dict[str, Any]:
+    if readiness_plan is None:
+        raise SpecValidationError(
+            "schema v3 requires a complete --readiness-plan before validation"
+        )
+    try:
+        plan = validate_ready_plan(readiness_plan)
+    except ReadinessValidationError as error:
+        raise SpecValidationError(f"invalid readiness plan: {error}") from error
+
+    spec = copy.deepcopy(_object(payload, "course spec"))
+    _require_exact_fields(
+        spec,
+        {
+            "schema_version",
+            "course",
+            "target",
+            "research",
+            "preparatory_units",
+            "labs",
+        },
+        "course spec",
+    )
+    if spec.get("schema_version") != 3:
+        raise SpecValidationError("schema_version must be 3")
+
+    course = _object(spec.get("course"), "course")
+    audience = _object(course.get("audience"), "course.audience")
+    _require_exact_fields(audience, ASSESSED_AUDIENCE_FIELDS, "course.audience")
+    if audience.get("level") != "assessed":
+        raise SpecValidationError("schema v3 course.audience.level must be assessed")
+    profile_label = "course.audience.prerequisite_profile"
+    profile = _object(audience.get("prerequisite_profile"), profile_label)
+    _require_exact_fields(profile, V3_PREREQUISITE_PROFILE_FIELDS, profile_label)
+    if profile.get("assessment") != "evidence-dialogue":
+        raise SpecValidationError(
+            f"{profile_label}.assessment must be evidence-dialogue"
+        )
+    if profile.get("route_id") != plan["route_id"]:
+        raise SpecValidationError(f"{profile_label}.route_id does not match readiness plan")
+    if profile.get("readiness_summary") != plan["readiness_summary"]:
+        raise SpecValidationError(
+            f"{profile_label}.readiness_summary does not match readiness plan"
+        )
+
+    target = _object(spec.get("target"), "target")
+    target_sources = _array(
+        target.get("official_sources"), "target.official_sources"
+    )
+    if target_sources != plan["official_sources"]:
+        raise SpecValidationError(
+            "target official sources do not match the readiness plan"
+        )
+    source_ids = {str(source["id"]) for source in plan["official_sources"]}
+
+    raw_capabilities = _array(profile.get("capabilities"), f"{profile_label}.capabilities")
+    if not raw_capabilities:
+        raise SpecValidationError(f"{profile_label}.capabilities must not be empty")
+    plan_capabilities = {
+        str(capability["id"]): capability for capability in plan["capabilities"]
+    }
+    capability_ids: list[str] = []
+    capabilities: dict[str, dict[str, Any]] = {}
+    for index, raw_capability in enumerate(raw_capabilities):
+        label = f"{profile_label}.capabilities[{index}]"
+        capability = _object(raw_capability, label)
+        _require_exact_fields(capability, V3_CAPABILITY_FIELDS, label)
+        capability_id = _stable_id(capability, label)
+        if capability_id in capabilities:
+            raise SpecValidationError(f"duplicate capability id: {capability_id}")
+        capability_ids.append(capability_id)
+        capabilities[capability_id] = capability
+        planned = plan_capabilities.get(capability_id)
+        if planned is None:
+            raise SpecValidationError(
+                f"{label}.id is not present in the readiness plan"
+            )
+        projected = {
+            key: copy.deepcopy(capability[key])
+            for key in V3_CAPABILITY_FIELDS - {"preparatory_concept_ids"}
+        }
+        if projected != planned:
+            raise SpecValidationError(
+                f"{label} does not match the readiness plan capability decision"
+            )
+        concept_ids = _string_array(
+            capability.get("preparatory_concept_ids"),
+            f"{label}.preparatory_concept_ids",
+        ) if capability.get("preparatory_concept_ids") else []
+        if capability["status"] == "known":
+            if (
+                capability["decision"] != "assume"
+                or capability["preparatory_unit_id"] is not None
+                or concept_ids
+            ):
+                raise SpecValidationError(
+                    f"{label} known capability cannot claim preparatory coverage"
+                )
+        elif (
+            capability["status"] != "missing"
+            or capability["decision"] != "preparatory"
+            or not isinstance(capability["preparatory_unit_id"], str)
+            or not concept_ids
+        ):
+            raise SpecValidationError(
+                f"{label} missing capability requires a prep unit and concepts"
+            )
+    if capability_ids != plan["required_capability_ids"]:
+        raise SpecValidationError(
+            f"{profile_label}.capabilities must follow readiness plan order"
+        )
+
+    units = _array(spec.get("preparatory_units"), "preparatory_units")
+    planned_units = plan["preparatory_units"]
+    if len(units) != len(planned_units):
+        raise SpecValidationError(
+            "preparatory_units do not match the readiness plan"
+        )
+    quiz_ids: set[str] = set()
+    quiz_positions: list[tuple[int, int]] = []
+    unit_concepts: dict[str, set[str]] = {}
+    unit_concept_sources: dict[str, dict[str, set[str]]] = {}
+    for index, (raw_unit, planned_unit) in enumerate(zip(units, planned_units, strict=True)):
+        label = f"preparatory_units[{index}]"
+        unit = _object(raw_unit, label)
+        _require_exact_fields(unit, V3_PREPARATORY_UNIT_FIELDS, label)
+        expected_id = "lab00" if index == 0 else f"prep{index:02d}"
+        if unit.get("id") != expected_id:
+            raise SpecValidationError(f"{label}.id must be {expected_id}")
+        for key in (
+            "id",
+            "category",
+            "dag_level",
+            "depends_on",
+            "capability_ids",
+            "study_minutes",
+        ):
+            if unit.get(key) != planned_unit.get(key):
+                raise SpecValidationError(
+                    f"{label}.{key} does not match the readiness plan"
+                )
+        _text(unit, "title", label)
+        _validate_v3_minutes(
+            unit.get("study_minutes"),
+            label=f"{label}.study_minutes",
+            orientation=index == 0,
+        )
+        concept_ids, outcome_ids = _validate_lesson(
+            unit.get("lesson"),
+            label=f"{label}.lesson",
+            source_ids=source_ids,
+            assessed=True,
+        )
+        unit_id = str(unit["id"])
+        unit_concepts[unit_id] = concept_ids
+        unit_concept_sources[unit_id] = {
+            str(concept["id"]): {
+                str(claim["source_id"]) for claim in concept["source_claims"]
+            }
+            for concept in unit["lesson"]["concepts"]
+        }
+        quiz_positions.extend(
+            _validate_quiz(
+                unit.get("quiz"),
+                f"{label}.quiz",
+                concept_ids=concept_ids,
+                outcome_ids=outcome_ids,
+                quiz_ids=quiz_ids,
+            )
+        )
+        _validate_assessed_coverage(
+            unit,
+            label=unit_id,
+            concept_ids=concept_ids,
+            outcome_ids=outcome_ids,
+            quiz=unit["quiz"],
+            questions=None,
+        )
+
+    mapped_by_unit: dict[str, set[str]] = {
+        str(unit["id"]): set() for unit in units
+    }
+    for capability_id, capability in capabilities.items():
+        prep_id = capability["preparatory_unit_id"]
+        if prep_id is None:
+            continue
+        if prep_id not in unit_concepts or prep_id == "lab00":
+            raise SpecValidationError(
+                f"capability {capability_id} references an unknown prep unit"
+            )
+        mapped = set(capability["preparatory_concept_ids"])
+        if not mapped <= unit_concepts[prep_id]:
+            raise SpecValidationError(
+                f"capability {capability_id} references unknown prep concepts"
+            )
+        cited = {
+            source_id
+            for concept_id in mapped
+            for source_id in unit_concept_sources[prep_id][concept_id]
+        }
+        if not cited.intersection(capability["source_ids"]):
+            raise SpecValidationError(
+                f"capability {capability_id} prep concepts must cite its source ids"
+            )
+        mapped_by_unit[prep_id].update(mapped)
+    for unit in units[1:]:
+        unit_id = str(unit["id"])
+        if mapped_by_unit[unit_id] != unit_concepts[unit_id]:
+            missing = sorted(unit_concepts[unit_id] - mapped_by_unit[unit_id])
+            raise SpecValidationError(
+                f"{unit_id} concept(s) lack preparatory capability coverage: {', '.join(missing)}"
+            )
+
+    labs = _array(spec.get("labs"), "labs")
+    if not labs:
+        raise SpecValidationError("labs must not be empty")
+    previous_dependency = str(units[-1]["id"])
+    for index, raw_lab in enumerate(labs):
+        label = f"labs[{index}]"
+        lab = _object(raw_lab, label)
+        expected_id = f"lab{index + 1:02d}"
+        if lab.get("id") != expected_id:
+            raise SpecValidationError(f"{label}.id must be {expected_id}")
+        if lab.get("depends_on") != previous_dependency:
+            raise SpecValidationError(
+                f"{expected_id} must depend on {previous_dependency}"
+            )
+        previous_dependency = expected_id
+    graded_ids = {str(lab.get("id")) for lab in labs if isinstance(lab, dict)}
+    for capability_id, capability in capabilities.items():
+        if set(capability["source_ids"]) - source_ids:
+            raise SpecValidationError(
+                f"capability {capability_id} references unknown source ids"
+            )
+        if capability["first_used_in"] not in graded_ids:
+            raise SpecValidationError(
+                f"capability {capability_id}.first_used_in must resolve to a graded Lab"
+            )
+
+    for index, lab in enumerate(labs):
+        label = f"labs[{index}]"
+        for question in _array(lab.get("questions"), f"{label}.questions"):
+            if isinstance(question, dict):
+                question.setdefault("timeout_seconds", 30)
+        concept_ids, outcome_ids = _validate_lesson(
+            lab.get("lesson"),
+            label=f"{label}.lesson",
+            source_ids=source_ids,
+            assessed=True,
+        )
+        quiz_positions.extend(
+            _validate_quiz(
+                lab.get("quiz"),
+                f"{label}.quiz",
+                concept_ids=concept_ids,
+                outcome_ids=outcome_ids,
+                quiz_ids=quiz_ids,
+            )
+        )
+        _validate_assessed_coverage(
+            lab,
+            label=str(lab.get("id")),
+            concept_ids=concept_ids,
+            outcome_ids=outcome_ids,
+            quiz=lab["quiz"],
+            questions=lab["questions"],
+        )
+
+    if quiz_positions:
+        maximum_choices = max(choice_count for _, choice_count in quiz_positions)
+        observed_positions = {position for position, _ in quiz_positions}
+        if observed_positions != set(range(maximum_choices)):
+            raise SpecValidationError("quiz answer positions must use every position")
+        counts = Counter(position for position, _ in quiz_positions)
+        if max(counts.values()) / len(quiz_positions) > 0.40:
+            raise SpecValidationError(
+                "no quiz answer position may exceed 40% of the course"
+            )
+
+    _validate_spec_v2(_v2_structural_projection(spec))
+    serialized = json.dumps(spec, ensure_ascii=False)
+    token = TOKEN_PATTERN.search(serialized)
+    if token:
+        raise SpecValidationError(
+            f"course spec contains unresolved token: {token.group(0)}"
+        )
+    return spec
+
+
+def validate_spec(
+    payload: Any, *, readiness_plan: Any | None = None
+) -> dict[str, Any]:
+    spec = _object(payload, "course spec")
+    if spec.get("schema_version") == 2:
+        return _validate_spec_v2(payload)
+    if spec.get("schema_version") == 3:
+        return _validate_spec_v3(payload, readiness_plan=readiness_plan)
+    raise SpecValidationError("schema_version must be 2 or 3")
+
+
+def _load_json(path: Path | str, *, label: str) -> Any:
     source = Path(path)
     try:
-        payload = json.loads(source.read_text(encoding="utf-8"))
+        return json.loads(source.read_text(encoding="utf-8"))
     except FileNotFoundError as error:
-        raise SpecValidationError(f"course spec does not exist: {source}") from error
+        raise SpecValidationError(f"{label} does not exist: {source}") from error
     except json.JSONDecodeError as error:
-        raise SpecValidationError(f"course spec is invalid JSON: {error}") from error
-    return validate_spec(payload)
+        raise SpecValidationError(f"{label} is invalid JSON: {error}") from error
+
+
+def load_and_validate(
+    path: Path | str, *, readiness_plan: Path | str | dict[str, Any] | None = None
+) -> dict[str, Any]:
+    payload = _load_json(path, label="course spec")
+    plan_payload = (
+        readiness_plan
+        if isinstance(readiness_plan, dict)
+        else _load_json(readiness_plan, label="readiness plan")
+        if readiness_plan is not None
+        else None
+    )
+    return validate_spec(payload, readiness_plan=plan_payload)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("spec", type=Path)
+    parser.add_argument("--readiness-plan", type=Path)
     args = parser.parse_args(argv)
     try:
-        spec = load_and_validate(args.spec)
+        spec = load_and_validate(args.spec, readiness_plan=args.readiness_plan)
     except SpecValidationError as error:
         print(f"invalid course spec: {error}", file=sys.stderr)
         return 1

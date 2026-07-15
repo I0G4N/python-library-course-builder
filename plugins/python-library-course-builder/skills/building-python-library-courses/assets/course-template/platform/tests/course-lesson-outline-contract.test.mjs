@@ -124,6 +124,7 @@ test("content types and concept cards expose study time and first-practice actio
   assert.doesNotMatch(outputType, /constraints/);
   assert.match(lesson, /kind: OperationalContractKind/);
   assert.match(lesson, /export type StudyMinutes/);
+  assert.match(lesson, /tier: "orientation"; min: 15; max: 30; reason\?: never/);
   assert.match(lesson, /tier: "standard"; min: 30; max: 45; reason\?: never/);
   assert.match(lesson, /tier: "foundation" \| "extended"; min: 45; max: 60; reason: string/);
   assert.match(lesson, /export type PracticeLink/);
@@ -142,11 +143,11 @@ test("course shell renders readiness and routes practice to stable targets", asy
     readFile(cssUrl, "utf8"),
   ]);
 
-  assert.match(app, /readiness\?: \{\s*assumed: string\[\];\s*foundation: string\[\]/);
+  assert.match(app, /readiness\?: \{\s*assumed: string\[\];\s*foundation\?: string\[\];\s*preparatory\?: string\[\]/);
   assert.match(app, /study_minutes\?: StudyMinutes/);
   assert.match(app, /manifest\.readiness/);
   assert.match(app, /readiness\.assumed\.map/);
-  assert.match(app, /readiness\.foundation\.map/);
+  assert.match(app, /readinessPreparationTitles\(readiness\)/);
   assert.match(app, /lab\.study_minutes/);
   assert.match(app, /selectedLab\?\.study_minutes/);
   assert.match(app, /handlePractice/);
@@ -164,7 +165,7 @@ test("course shell renders readiness and routes practice to stable targets", asy
   assert.match(practiceHandler, /setFileLoadFailed\(false\)/);
   assert.match(practiceHandler, /setFileLoadRetryVersion/);
   assert.match(app, /readiness\.assumed\.map\(\(title, index\)/);
-  assert.match(app, /readiness\.foundation\.map\(\(title, index\)/);
+  assert.match(app, /preparationTitles\.map\(\(title, index\)/);
   assert.match(css, /\.readiness-summary/);
   assert.match(css, /\.sidebar-collapsed \.readiness-summary/);
   assert.match(css, /\.practice-action/);

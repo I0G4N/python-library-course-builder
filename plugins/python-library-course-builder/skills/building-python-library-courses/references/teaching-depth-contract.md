@@ -6,7 +6,7 @@ Read the [complete teaching example](complete-teaching-example.md) before writin
 
 ## Contents
 
-- [Turn readiness evidence into Lab 00](#turn-readiness-evidence-into-lab-00)
+- [Turn readiness evidence into ordered prep](#turn-readiness-evidence-into-ordered-prep)
 - [Teach every evidenced gap completely](#teach-every-evidenced-gap-completely)
 - [Expand every graded chapter](#expand-every-graded-chapter)
 - [Use one chapter sequence](#use-one-chapter-sequence)
@@ -19,18 +19,19 @@ Read the [complete teaching example](complete-teaching-example.md) before writin
 - [Choose time from the work](#choose-time-from-the-work)
 - [Review semantically](#review-semantically)
 
-## Turn readiness evidence into Lab 00
+## Turn readiness evidence into ordered prep
 
-Build a **two-layer Lab 00** from the assessed prerequisite profile:
+Keep `lab00` as a 15-30 minute environment and learning-loop orientation. Build any additional preparatory teaching from the completed readiness plan:
 
-1. Fill only evidenced **general-Python gaps** needed by this route. Use the learner's supplied code, answers, or examples as evidence; do not dump every Python basic.
-2. Teach the **route-specific library and domain foundations** needed before Lab 01, such as a data model, shape convention, unit, or lifecycle vocabulary.
+1. Reuse sufficient code evidence and conversation evidence tied to a matching, correctly answered route diagnostic; do not ask again or reteach that capability. Never promote free-form self-description to mastery evidence.
+2. Group missing capabilities by prerequisite-DAG level and then `python -> library -> domain`.
+3. Create the minimum `prep01 -> prep02 -> ...` sequence needed by the selected route. Do not impose a hard count ceiling.
 
-Treat unseen new material as new teaching, not as review. Map every `foundation` capability to the Lab 00 concepts that teach it and to the official sources that support it. A capability marked `assume` needs no foundation concept. If several prerequisite layers cannot form one focused Lab 00, stop and offer a prerequisite course or narrower route.
+Treat unseen material as new teaching, not review. Map every `preparatory` capability to concepts in its assigned prep unit and to supporting official sources. A capability marked `assume` needs no prep concept. Never place raw learner answers or code evidence in the course repository.
 
 ## Teach every evidenced gap completely
 
-Keep the **general-Python layer** and the **route-specific library/domain layer** visibly separate. Within those two layers, give every `foundation` capability one complete explanation in this order:
+Keep different DAG layers and `python`, `library`, and `domain` categories visibly separate. Give every `preparatory` capability one complete explanation in this order:
 
 1. **existing cognitive anchor** — begin with a behavior, value, or code pattern the learner's evidence shows they already understand;
 2. **define the term** — introduce one precise term in plain language and distinguish it from the nearby idea most likely to be confused with it;
@@ -57,7 +58,7 @@ An official bridge may reinforce the preceding mechanism, but it does not replac
 
 ## Use one chapter sequence
 
-Use this sequence in order for Lab 00 and every graded Lab, omitting only the coding step from Lab 00:
+Use this sequence in order for every orientation, prep, and graded Lab, omitting the coding step from all preparatory units:
 
 1. **concrete capstone problem** — name the observable problem this increment solves;
 2. **plain-language understanding** — give the learner one predictive idea in ordinary language;
@@ -170,13 +171,13 @@ Map authored activities forward from concepts and outcomes:
 - every outcome reaches an example and at least one quiz or coding assessment;
 - each question and example names the concept/outcome IDs it actually exercises.
 
-Order activities intentionally. The compiler derives each concept's **first practice link** from authored activity order: Lab 00 points to the first mapped knowledge check, and graded Labs point to the first mapped coding question. Authors maintain the forward mappings only; do not add reverse practice-link fields to the specification.
+Order activities intentionally. The compiler derives each concept's **first practice link** from authored activity order: preparatory units point to the first mapped knowledge check, and graded Labs point to the first mapped coding question. Authors maintain the forward mappings only; do not add reverse practice-link fields to the specification.
 
 ## Choose time from the work
 
-- Lab 00 uses the `foundation` tier, **45-60 minutes**, with a specific reason tied to the assessed gaps it fills.
-- An ordinary graded Lab uses the `standard` tier, **30-45 minutes**.
-- A genuinely combined, derivation-heavy, or lifecycle-heavy Lab may use the `extended` tier, **45-60 minutes**, with a specific reason naming that work.
+- `lab00` uses the `orientation` tier, **15-30 minutes**.
+- An ordinary prep or graded Lab uses the `standard` tier, **30-45 minutes**.
+- A derivation- or lifecycle-heavy prep or Lab may use the `extended` tier, **45-60 minutes**, with a specific reason naming that work.
 
 Do not pad a Lab to fit a tier. Narrow the mainline when the planned explanation, trace, diagnosis, and coding increment cannot fit coherently.
 

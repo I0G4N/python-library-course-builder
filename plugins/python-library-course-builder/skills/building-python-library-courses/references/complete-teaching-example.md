@@ -2,7 +2,7 @@
 
 这是一份教学内容示例，不是完整课程 JSON fixture，也不替代
 [`curriculum-contract.md`](curriculum-contract.md) 的字段约束。它展示如何把 readiness
-证据、Lab 00 基础补齐和一章计分内容写成连贯、具体的简体中文。真正生成课程时，应替换成
+证据、先修讲义和一章计分内容写成连贯、具体的简体中文。该例中的“Lab 00 基础补齐”是旧版命名；schema v3 创作时必须把环境/学习流程留在 `lab00`，并把这里的缺口教学投影为一个或多个 `prepNN`。真正生成课程时，应替换成
 当前目标、固定版本、官方来源和 capstone 的真实内容。
 
 示例 capstone 是一个离线配置检查器：它接收 JSON 文本，只在顶层是 JSON object 时返回

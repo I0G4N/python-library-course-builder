@@ -17,12 +17,94 @@ function requiredExport(name) {
   return layout[name];
 }
 
-test("coding workspace is visible only for a navigable formal Lab with both quizzes complete", () => {
+test("v3 unit metadata allows coding only in graded Labs and keeps the v2 fallback", () => {
+  const isCodingUnit = requiredExport("isCodingUnit");
+
+  assert.equal(
+    isCodingUnit({
+      unitType: "orientation",
+      graded: false,
+      legacyFoundationSelected: true,
+    }),
+    false,
+  );
+  assert.equal(
+    isCodingUnit({
+      unitType: "preparatory",
+      graded: false,
+      legacyFoundationSelected: false,
+    }),
+    false,
+  );
+  assert.equal(
+    isCodingUnit({
+      unitType: "preparatory",
+      graded: true,
+      legacyFoundationSelected: false,
+    }),
+    false,
+    "a contradictory prep payload must still fail closed",
+  );
+  assert.equal(
+    isCodingUnit({
+      unitType: "lab",
+      graded: true,
+      legacyFoundationSelected: false,
+    }),
+    true,
+  );
+  assert.equal(
+    isCodingUnit({
+      unitType: "lab",
+      graded: false,
+      legacyFoundationSelected: false,
+    }),
+    false,
+    "a v3 Lab must explicitly be graded before Web mounts coding",
+  );
+  assert.equal(
+    isCodingUnit({ legacyFoundationSelected: true, graded: false }),
+    false,
+    "the v2 foundation remains lesson-only without unit_type",
+  );
+  assert.equal(
+    isCodingUnit({ legacyFoundationSelected: false }),
+    true,
+    "a v2 formal Lab remains coding-compatible without v3 metadata",
+  );
+});
+
+test("v3 readiness and prep completion projections remain compatible with v2", () => {
+  const readinessPreparationTitles = requiredExport(
+    "readinessPreparationTitles",
+  );
+  const completedUnitIds = requiredExport("completedUnitIds");
+
+  assert.deepEqual(
+    readinessPreparationTitles({ preparatory: ["能力 A", "能力 B"] }),
+    ["能力 A", "能力 B"],
+  );
+  assert.deepEqual(
+    readinessPreparationTitles({ foundation: ["旧版基础"] }),
+    ["旧版基础"],
+  );
+  assert.deepEqual(readinessPreparationTitles({ preparatory: [] }), []);
+  assert.deepEqual(readinessPreparationTitles({}), []);
+  assert.deepEqual(
+    completedUnitIds({
+      completed_labs: ["lab01"],
+      completed_preparatory_units: ["lab00", "prep01", "lab01"],
+    }),
+    ["lab01", "lab00", "prep01"],
+  );
+});
+
+test("coding workspace is visible only for a navigable coding unit with both quizzes complete", () => {
   const shouldShowCodingWorkspace = requiredExport(
     "shouldShowCodingWorkspace",
   );
   const ready = {
-    formalLabSelected: true,
+    codingUnitSelected: true,
     selectedLabNavigable: true,
     foundationKnowledgeComplete: true,
     currentKnowledgeComplete: true,

@@ -44,6 +44,22 @@ class LabSource:
 
 
 @dataclass(frozen=True)
+class PreparatoryUnitSource:
+    unit_id: str
+    title: str
+    category: str
+    dag_level: int
+    depends_on: str | None
+    capability_ids: tuple[str, ...]
+    source_ids: tuple[str, ...]
+    quiz: tuple[dict[str, Any], ...]
+    root: Path
+    lesson: str
+    lesson_outline: dict[str, Any]
+    raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class CourseSource:
     schema_version: int
     course_id: str
@@ -68,6 +84,7 @@ class CourseSource:
     root: Path
     course: dict[str, Any]
     foundation: dict[str, Any]
+    preparatory_units: tuple[PreparatoryUnitSource, ...] = ()
 
     @property
     def total_points(self) -> int:

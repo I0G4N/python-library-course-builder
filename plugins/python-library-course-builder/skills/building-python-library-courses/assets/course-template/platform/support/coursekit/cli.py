@@ -12,7 +12,14 @@ from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-from .course import ROOT, find_lab, select_item, targets_for_item
+from .course import (
+    ROOT,
+    find_lab,
+    is_preparatory_unit,
+    load_manifest,
+    select_item,
+    targets_for_item,
+)
 from .execution import run_isolated_pytest
 from .source_policy import SourcePolicyError, preflight_question_source
 from .progress import (
@@ -23,12 +30,29 @@ from .progress import (
     record_answer,
     record_grade,
     score,
+    completed_preparatory_units,
+    unlocked_units,
     update_state,
     utc_now,
 )
 
 
 DEFAULT_RUNNER_URL = "http://127.0.0.1:8765"
+
+
+def _knowledge_only(lab_id: str) -> bool:
+    manifest = load_manifest()
+    return manifest.get("schema_version") == 3 and is_preparatory_unit(
+        lab_id, manifest
+    )
+
+
+def _reject_knowledge_only(lab_id: str) -> int:
+    print(
+        f"{lab_id} is a knowledge-only preparatory unit; use `course unlock {lab_id}`",
+        file=sys.stderr,
+    )
+    return 2
 
 
 def _questions(lab_id: str) -> list[dict[str, Any]]:
@@ -181,6 +205,8 @@ def _source_preflight(question: dict[str, Any]) -> bool:
 
 
 def test_exercise(item_id: str) -> int:
+    if _knowledge_only(item_id):
+        return _reject_knowledge_only(item_id)
     try:
         lab, question = select_item(item_id)
     except LookupError as error:
@@ -213,6 +239,8 @@ def test_exercise(item_id: str) -> int:
 
 
 def grade_lab(lab_id: str) -> int:
+    if _knowledge_only(lab_id):
+        return _reject_knowledge_only(lab_id)
     lab = find_lab(lab_id)
     questions = lab.get("questions", []) if isinstance(lab, dict) else []
     if lab is None or not questions:
@@ -278,6 +306,8 @@ def _runner_submit(lab_id: str, question_id: str) -> tuple[bool, str]:
 
 
 def submit_lab(lab_id: str) -> int:
+    if _knowledge_only(lab_id):
+        return _reject_knowledge_only(lab_id)
     lab = find_lab(lab_id)
     questions = lab.get("questions", []) if isinstance(lab, dict) else []
     if lab is None or not questions:
@@ -325,6 +355,8 @@ def _git_value(args: list[str]) -> str | None:
 
 
 def checkpoint(lab_id: str) -> int:
+    if _knowledge_only(lab_id):
+        return _reject_knowledge_only(lab_id)
     lab = find_lab(lab_id)
     questions = lab.get("questions", []) if isinstance(lab, dict) else []
     if lab is None or not questions:
@@ -439,7 +471,14 @@ def checkpoint(lab_id: str) -> int:
 def status() -> int:
     state = read_state()
     current = score(state)
-    print(json.dumps({"completed_labs": state["completed_labs"], "score": current}, indent=2))
+    payload: dict[str, Any] = {
+        "completed_labs": state["completed_labs"],
+        "score": current,
+    }
+    if load_manifest().get("schema_version") == 3:
+        payload["completed_preparatory_units"] = completed_preparatory_units(state)
+        payload["unlocked_labs"] = unlocked_units(state)
+    print(json.dumps(payload, indent=2))
     return 0
 
 

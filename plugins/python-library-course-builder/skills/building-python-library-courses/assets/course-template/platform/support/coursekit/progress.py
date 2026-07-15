@@ -11,7 +11,17 @@ import subprocess
 import tempfile
 from typing import Any, Callable, Iterator
 
-from .course import ROOT, formal_labs, foundation, load_manifest
+from .course import (
+    ROOT,
+    find_unit,
+    formal_labs,
+    foundation,
+    is_preparatory_unit,
+    load_manifest,
+    ordered_units,
+    preparatory_units,
+    schema_version,
+)
 
 
 STATE_VERSION = 1
@@ -91,8 +101,10 @@ def _compatible(value: Any, fresh: dict[str, Any]) -> dict[str, Any]:
         return fresh
     if value.get("course_id") != fresh["course_id"]:
         return fresh
+    manifest = load_manifest()
     compatible = {fresh["curriculum_id"]}
-    compatible.update(load_manifest().get("compatible_curriculum_ids", []))
+    if schema_version(manifest) < 3:
+        compatible.update(manifest.get("compatible_curriculum_ids", []))
     if value.get("curriculum_id") not in compatible:
         return fresh
     result = dict(fresh)
@@ -170,20 +182,67 @@ def record_answer(lab_id: str, question_id: str, correct: bool) -> dict[str, Any
     return update_state(mutation)
 
 
-def prerequisite(lab_id: str) -> str | None:
-    if lab_id == str(foundation().get("id")):
+def prerequisite(lab_id: str, manifest: dict[str, Any] | None = None) -> str | None:
+    current = manifest or load_manifest()
+    if lab_id == str(foundation(current).get("id")):
         return None
-    labs = formal_labs()
-    match = next((lab for lab in labs if str(lab.get("id")) == lab_id), None)
-    return str(match.get("depends_on")) if match else None
+    match = find_unit(lab_id, current)
+    dependency = match.get("depends_on") if isinstance(match, dict) else None
+    return str(dependency) if dependency is not None else None
+
+
+def unit_complete(
+    unit_id: str,
+    state: dict[str, Any] | None = None,
+    manifest: dict[str, Any] | None = None,
+) -> bool:
+    value = state if state is not None else read_state()
+    current = manifest or load_manifest()
+    if find_unit(unit_id, current) is None:
+        return False
+    if is_preparatory_unit(unit_id, current):
+        return knowledge_complete(unit_id, value)
+    return unit_id in {str(item) for item in value.get("completed_labs", [])}
+
+
+def completed_preparatory_units(
+    state: dict[str, Any] | None = None,
+    manifest: dict[str, Any] | None = None,
+) -> list[str]:
+    value = state if state is not None else read_state()
+    current = manifest or load_manifest()
+    return [
+        str(item["id"])
+        for item in preparatory_units(current)
+        if unit_complete(str(item["id"]), value, current)
+    ]
+
+
+def unlocked_units(
+    state: dict[str, Any] | None = None,
+    manifest: dict[str, Any] | None = None,
+) -> list[str]:
+    value = state if state is not None else read_state()
+    current = manifest or load_manifest()
+    return [
+        str(item["id"])
+        for item in ordered_units(current)
+        if navigable(str(item["id"]), value, current)
+    ]
 
 
 def knowledge_gate_reasons(
     lab_id: str, state: dict[str, Any] | None = None
 ) -> list[str]:
-    value = state or read_state()
-    base_id = str(foundation().get("id"))
+    value = state if state is not None else read_state()
+    manifest = load_manifest()
+    base_id = str(foundation(manifest).get("id"))
     if lab_id == base_id:
+        return []
+    if schema_version(manifest) >= 3:
+        dependency = prerequisite(lab_id, manifest)
+        if dependency and not unit_complete(dependency, value, manifest):
+            return [f"complete {dependency} first"]
         return []
     reasons = []
     if not knowledge_complete(base_id, value):
@@ -195,11 +254,23 @@ def knowledge_gate_reasons(
     return reasons
 
 
-def navigable(lab_id: str, state: dict[str, Any] | None = None) -> bool:
-    value = state or read_state()
-    base_id = str(foundation().get("id"))
+def navigable(
+    lab_id: str,
+    state: dict[str, Any] | None = None,
+    manifest: dict[str, Any] | None = None,
+) -> bool:
+    value = state if state is not None else read_state()
+    current = manifest or load_manifest()
+    if find_unit(lab_id, current) is None:
+        return False
+    base_id = str(foundation(current).get("id"))
     if lab_id == base_id:
         return True
+    if schema_version(current) >= 3:
+        if unit_complete(lab_id, value, current):
+            return True
+        dependency = prerequisite(lab_id, current)
+        return bool(dependency) and unit_complete(dependency, value, current)
     completed = {str(item) for item in value.get("completed_labs", [])}
     if lab_id in completed:
         return True
@@ -208,12 +279,19 @@ def navigable(lab_id: str, state: dict[str, Any] | None = None) -> bool:
 
 
 def gate_reasons(lab_id: str, state: dict[str, Any] | None = None) -> list[str]:
-    value = state or read_state()
+    value = state if state is not None else read_state()
+    manifest = load_manifest()
+    if schema_version(manifest) >= 3 and is_preparatory_unit(lab_id, manifest):
+        return [f"{lab_id} is a knowledge-only preparatory unit"]
     reasons = []
-    dependency = prerequisite(lab_id)
-    base_id = str(foundation().get("id"))
-    if not navigable(lab_id, value) and dependency:
+    dependency = prerequisite(lab_id, manifest)
+    base_id = str(foundation(manifest).get("id"))
+    if not navigable(lab_id, value, manifest) and dependency:
         reasons.append(f"complete {dependency} first")
+    if schema_version(manifest) >= 3:
+        if not knowledge_complete(lab_id, value):
+            reasons.append(f"run `course unlock {lab_id}` first")
+        return reasons
     if lab_id != base_id and not knowledge_complete(base_id, value):
         reasons.append(f"unlock {base_id} first")
     if not knowledge_complete(lab_id, value):
@@ -233,6 +311,13 @@ def record_grade(
         (item for item in formal_labs() if str(item.get("id")) == lab_id),
         None,
     )
+    current = load_manifest()
+    if (
+        lab is None
+        and schema_version(current) >= 3
+        and is_preparatory_unit(lab_id, current)
+    ):
+        raise ValueError(f"{lab_id} is not a graded Lab")
     declared = (
         [
             str(question["id"])

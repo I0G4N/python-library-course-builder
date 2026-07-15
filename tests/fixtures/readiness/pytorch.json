@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "route": {"id": "pytorch-route", "title": "PyTorch fixture route"},
+  "official_sources": [
+    {
+      "id": "target-docs",
+      "title": "Pinned official target documentation",
+      "url": "https://pytorch.org/docs/stable/",
+      "kind": "documentation",
+      "version": "fixture"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "python-base",
+      "kind": "python",
+      "subject": "Python base",
+      "title": "Use the route's Python value flow",
+      "requires": [],
+      "source_ids": ["target-docs"],
+      "first_used_in": "lab01",
+      "prep_tier": "standard",
+      "diagnostic": {"id": "pytorch-python-base", "kind": "prediction", "prompt": "Choose the predicted value flow.", "choices": [{"id": "a", "text": "first"}, {"id": "b", "text": "second"}, {"id": "c", "text": "third"}], "answer_id": "a"}
+    },
+    {
+      "id": "library-core",
+      "kind": "library",
+      "subject": "Library core",
+      "title": "Trace the selected library operation",
+      "requires": ["python-base"],
+      "source_ids": ["target-docs"],
+      "first_used_in": "lab01",
+      "prep_tier": "standard",
+      "diagnostic": {"id": "pytorch-library-core", "kind": "code_reading", "prompt": "Choose the observable produced by the snippet.", "choices": [{"id": "a", "text": "first"}, {"id": "b", "text": "second"}, {"id": "c", "text": "third"}], "answer_id": "b"}
+    },
+    {
+      "id": "domain-loop",
+      "kind": "domain",
+      "subject": "Domain loop",
+      "title": "Connect the operation to the route lifecycle",
+      "requires": ["library-core"],
+      "source_ids": ["target-docs"],
+      "first_used_in": "lab02",
+      "prep_tier": "extended",
+      "prep_reason": "This fixture capability spans a complete lifecycle.",
+      "diagnostic": {"id": "pytorch-domain-loop", "kind": "micro_code", "prompt": "Choose the smallest implementation preserving the lifecycle.", "choices": [{"id": "a", "text": "first"}, {"id": "b", "text": "second"}, {"id": "c", "text": "third"}], "answer_id": "c"}
+    }
+  ]
+}

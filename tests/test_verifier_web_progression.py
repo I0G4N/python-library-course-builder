@@ -460,8 +460,8 @@ def test_web_progression_workflow_rejects_state_that_omits_persisted_grades(
 ) -> None:
     _replace_runner_source(
         generated_course,
-        'return {\n        **value,\n        "unlocked_labs":',
-        'return {\n'
+        'exposed = {\n        **value,\n        "unlocked_labs":',
+        'exposed = {\n'
         '        **{key: item for key, item in value.items() if key != "grades"},\n'
         '        "unlocked_labs":',
     )

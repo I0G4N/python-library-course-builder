@@ -111,6 +111,12 @@ test("course navigation and coding controls fail closed around shared progressio
   assert.match(app, /new Set\(courseState\.unlocked_labs \?\? \[\]\)/);
   assert.doesNotMatch(app, /courseState\.unlocked_labs \?\? labs\.map/);
   assert.match(app, /const foundationLabId = labs\[0\]\?\.id \?\? ""/);
+  assert.match(app, /unit_type\?: CourseUnitType/);
+  assert.match(app, /graded\?: boolean/);
+  assert.match(app, /isCodingUnit\(\{/);
+  assert.match(app, /unitType: selectedLab\.unit_type/);
+  assert.match(app, /graded: selectedLab\.graded/);
+  assert.doesNotMatch(app, /selectedLab && selectedLab\.id !== foundationLabId/);
   assert.match(app, /disabled=\{!isUnlocked\}/);
   assert.match(app, /未解锁/);
   assert.match(app, /aria-label=\{isUnlocked \? lab\.title : `\$\{lab\.title\}，未解锁`\}/);
@@ -120,7 +126,7 @@ test("course navigation and coding controls fail closed around shared progressio
   assert.doesNotMatch(css, /\.coding-lock-reason\s*\{[^}]*white-space: nowrap/);
   assert.match(
     app,
-    /const codingReady =[\s\S]*selectedLabNavigable[\s\S]*foundationKnowledgeComplete[\s\S]*currentKnowledgeComplete/,
+    /const codingReady =[\s\S]*codingUnitSelected[\s\S]*selectedLabNavigable[\s\S]*foundationKnowledgeComplete[\s\S]*currentKnowledgeComplete/,
   );
   assert.match(app, /editable=\{[\s\S]*codingReady[\s\S]*\}/);
   assert.match(app, /aria-describedby=\{codingReady \? undefined : codingLockReasonId\}/);

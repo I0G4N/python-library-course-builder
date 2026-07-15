@@ -4,8 +4,26 @@ export type LayoutPreferences = {
   lessonRatio: number;
 };
 
+export type CourseUnitType = "orientation" | "preparatory" | "lab";
+
+export type CodingUnitMetadata = {
+  unitType?: CourseUnitType;
+  graded?: boolean;
+  legacyFoundationSelected: boolean;
+};
+
+export type ReadinessProjection = {
+  foundation?: unknown;
+  preparatory?: unknown;
+};
+
+export type CompletionProjection = {
+  completed_labs?: unknown;
+  completed_preparatory_units?: unknown;
+};
+
 export type CodingWorkspaceGate = {
-  formalLabSelected: boolean;
+  codingUnitSelected: boolean;
   selectedLabNavigable: boolean;
   foundationKnowledgeComplete: boolean;
   currentKnowledgeComplete: boolean;
@@ -47,6 +65,13 @@ export function nextSeparatorValue(
   min: number,
   max: number,
 ): number | null;
+export function isCodingUnit(metadata: CodingUnitMetadata): boolean;
+export function readinessPreparationTitles(
+  readiness: ReadinessProjection | null | undefined,
+): string[];
+export function completedUnitIds(
+  state: CompletionProjection | null | undefined,
+): string[];
 export function shouldShowCodingWorkspace(
   gate: CodingWorkspaceGate,
 ): boolean;

@@ -16,6 +16,7 @@ export type SharedCourseState = {
   course_id?: string;
   curriculum_id?: string;
   completed_labs?: string[];
+  completed_preparatory_units?: string[];
   unlocked_labs?: string[];
   score?: number;
   total_points?: number;

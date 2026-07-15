@@ -15,10 +15,22 @@ async function readSource(url) {
   }
 }
 
-test("Lab00 and quiz-locked Labs do not mount or preload the coding workspace", async () => {
+test("orientation, prep, and quiz-locked units do not mount or preload coding", async () => {
   const app = await readFile(appUrl, "utf8");
 
+  assert.match(app, /graded\?: boolean/);
+  assert.match(app, /unit_type\?: CourseUnitType/);
+  assert.match(
+    app,
+    /const codingUnitSelected = Boolean\([\s\S]*?isCodingUnit\(\{[\s\S]*?unitType: selectedLab\.unit_type,[\s\S]*?graded: selectedLab\.graded,[\s\S]*?legacyFoundationSelected: selectedLab\.id === foundationLabId/,
+  );
+  assert.doesNotMatch(
+    app,
+    /selectedLab && selectedLab\.id !== foundationLabId/,
+  );
+  assert.match(app, /selectedLab\?\.unit_type === "preparatory"/);
   assert.match(app, /const codingReady = shouldShowCodingWorkspace\(/);
+  assert.match(app, /codingUnitSelected,/);
   assert.match(app, /\{codingReady \? \([\s\S]*className="work-column"[\s\S]*\) : null\}/);
   assert.match(
     app,
@@ -85,4 +97,12 @@ test("layout state loads with the course and persists under its manifest id", as
     app,
     /const \[layoutPreferences, setLayoutPreferences\] =[\s\S]*?useState<LayoutPreferences>\(\{ \.\.\.DEFAULT_LAYOUT_PREFERENCES \}\)/,
   );
+});
+
+test("zero-gap v3 readiness reports no extra prep instead of an empty prep list", async () => {
+  const app = await readFile(appUrl, "utf8");
+
+  assert.match(app, /preparationTitles\.length > 0/);
+  assert.match(app, /无需额外先修/);
+  assert.match(app, /完成 Lab 00 导览后即可进入正式 Lab/);
 });

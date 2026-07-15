@@ -235,8 +235,8 @@ def test_forward_acceptance_is_local_generated_project_only() -> None:
 
 def test_skill_preserves_specification_to_split_source_boundary() -> None:
     _, body = _skill_frontmatter_and_body()
-    authoring_contract = "Author one UTF-8 schema-v2 JSON specification"
-    generation_contract = "Let the scaffolder create the split canonical source"
+    authoring_contract = "Author one UTF-8 schema-v3 JSON specification"
+    generation_contract = "The scaffolder creates the split canonical source"
 
     assert authoring_contract in body
     assert generation_contract in body

@@ -99,6 +99,7 @@ type LessonExample = {
 };
 
 export type StudyMinutes =
+  | { tier: "orientation"; min: 15; max: 30; reason?: never }
   | { tier: "standard"; min: 30; max: 45; reason?: never }
   | { tier: "foundation" | "extended"; min: 45; max: 60; reason: string };
 

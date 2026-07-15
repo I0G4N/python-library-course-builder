@@ -132,14 +132,43 @@ export function nextSeparatorValue(value, key, min, max) {
   return null;
 }
 
+export function isCodingUnit({
+  unitType,
+  graded,
+  legacyFoundationSelected,
+}) {
+  if (unitType !== undefined) {
+    return unitType === "lab" && graded === true;
+  }
+  if (legacyFoundationSelected) return false;
+  return graded !== false;
+}
+
+export function readinessPreparationTitles(readiness) {
+  if (!readiness || typeof readiness !== "object") return [];
+  const configured = readiness.preparatory ?? readiness.foundation ?? [];
+  return Array.isArray(configured)
+    ? configured.filter((value) => typeof value === "string")
+    : [];
+}
+
+export function completedUnitIds(state) {
+  if (!state || typeof state !== "object") return [];
+  const formal = Array.isArray(state.completed_labs) ? state.completed_labs : [];
+  const preparatory = Array.isArray(state.completed_preparatory_units)
+    ? state.completed_preparatory_units
+    : [];
+  return [...new Set([...formal, ...preparatory].filter((value) => typeof value === "string"))];
+}
+
 export function shouldShowCodingWorkspace({
-  formalLabSelected,
+  codingUnitSelected,
   selectedLabNavigable,
   foundationKnowledgeComplete,
   currentKnowledgeComplete,
 }) {
   return Boolean(
-    formalLabSelected &&
+    codingUnitSelected &&
       selectedLabNavigable &&
       foundationKnowledgeComplete &&
       currentKnowledgeComplete,

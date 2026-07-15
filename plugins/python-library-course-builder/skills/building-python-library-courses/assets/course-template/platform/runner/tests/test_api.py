@@ -47,6 +47,20 @@ def _coding_request() -> tuple[dict[str, str], dict[str, object]]:
     }, question
 
 
+def _preparatory_unit_ids(course: dict[str, object]) -> tuple[str, ...]:
+    units = course.get("preparatory_units")
+    if isinstance(units, list):
+        return tuple(
+            str(unit["id"])
+            for unit in units
+            if isinstance(unit, dict) and unit.get("id")
+        )
+    foundation = course.get("foundations")
+    if isinstance(foundation, dict) and foundation.get("id"):
+        return (str(foundation["id"]),)
+    raise AssertionError("manifest must declare preparatory_units or foundations")
+
+
 def _write_mastered_state(*lab_ids: str) -> None:
     knowledge = json.loads(
         (runner_app.COURSE_ROOT / "knowledge.json").read_text(encoding="utf-8")
@@ -71,20 +85,20 @@ def _set_question_file(path: str) -> None:
 def test_content_and_question_scoped_file_gate(client: TestClient) -> None:
     assert client.get("/api/content/lab01").status_code == 200
     request, question = _coding_request()
-    foundation_id = str(runner_app.manifest(internal=True)["foundations"]["id"])
+    preparatory_ids = _preparatory_unit_ids(runner_app.manifest(internal=True))
 
     assert client.get("/api/file", params=request).status_code == 409
     assert client.put(
         "/api/file", json={**request, "content": "pass\n"}
     ).status_code == 409
 
-    _write_mastered_state(foundation_id)
+    _write_mastered_state(*preparatory_ids)
     assert client.get("/api/file", params=request).status_code == 409
     assert client.put(
         "/api/file", json={**request, "content": "pass\n"}
     ).status_code == 409
 
-    _write_mastered_state(foundation_id, request["lab_id"])
+    _write_mastered_state(*preparatory_ids, request["lab_id"])
     current = client.get("/api/file", params=request)
     assert current.status_code == 200
     assert set(current.json()) == {"path", "content"}
@@ -131,8 +145,7 @@ def test_file_api_rejects_legacy_paths_and_unknown_questions(client: TestClient)
 def test_file_api_rejects_unsafe_manifest_path(client: TestClient) -> None:
     request, _question = _coding_request()
     course = runner_app.manifest(internal=True)
-    foundation_id = str(course["foundations"]["id"])
-    _write_mastered_state(foundation_id, request["lab_id"])
+    _write_mastered_state(*_preparatory_unit_ids(course), request["lab_id"])
     _set_question_file("../README.md")
 
     assert client.get("/api/file", params=request).status_code == 400
@@ -152,8 +165,7 @@ def test_file_api_distinguishes_missing_and_existing_non_regular_targets(
 ) -> None:
     request, _question = _coding_request()
     course = runner_app.manifest(internal=True)
-    foundation_id = str(course["foundations"]["id"])
-    _write_mastered_state(foundation_id, request["lab_id"])
+    _write_mastered_state(*_preparatory_unit_ids(course), request["lab_id"])
 
     _set_question_file("lab01/does-not-exist.py")
     assert client.get("/api/file", params=request).status_code == 404
@@ -171,8 +183,7 @@ def test_file_api_distinguishes_missing_and_existing_non_regular_targets(
 def test_file_api_rejects_final_symlink(client: TestClient, tmp_path: Path) -> None:
     request, _question = _coding_request()
     course = runner_app.manifest(internal=True)
-    foundation_id = str(course["foundations"]["id"])
-    _write_mastered_state(foundation_id, request["lab_id"])
+    _write_mastered_state(*_preparatory_unit_ids(course), request["lab_id"])
     outside = tmp_path / "outside.py"
     outside.write_text("SECRET = True\n", encoding="utf-8")
     target = runner_app.WORKSPACE_ROOT / "lab01" / "escape.py"
@@ -190,8 +201,7 @@ def test_file_api_rejects_final_symlink(client: TestClient, tmp_path: Path) -> N
 def test_file_api_rejects_intermediate_symlink(client: TestClient, tmp_path: Path) -> None:
     request, _question = _coding_request()
     course = runner_app.manifest(internal=True)
-    foundation_id = str(course["foundations"]["id"])
-    _write_mastered_state(foundation_id, request["lab_id"])
+    _write_mastered_state(*_preparatory_unit_ids(course), request["lab_id"])
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "solution.py").write_text("SECRET = True\n", encoding="utf-8")
@@ -211,8 +221,7 @@ def test_file_api_rejects_intermediate_symlink(client: TestClient, tmp_path: Pat
 def test_file_api_rejects_non_regular_targets(client: TestClient) -> None:
     request, _question = _coding_request()
     course = runner_app.manifest(internal=True)
-    foundation_id = str(course["foundations"]["id"])
-    _write_mastered_state(foundation_id, request["lab_id"])
+    _write_mastered_state(*_preparatory_unit_ids(course), request["lab_id"])
     if not hasattr(os, "mkfifo"):  # pragma: no cover - Windows
         pytest.skip("FIFO creation is unavailable")
     target = runner_app.WORKSPACE_ROOT / "lab01" / "blocked.fifo"
@@ -237,8 +246,7 @@ def test_file_api_limits_utf8_bytes_not_python_characters(
 ) -> None:
     request, question = _coding_request()
     course = runner_app.manifest(internal=True)
-    foundation_id = str(course["foundations"]["id"])
-    _write_mastered_state(foundation_id, request["lab_id"])
+    _write_mastered_state(*_preparatory_unit_ids(course), request["lab_id"])
     target = runner_app.WORKSPACE_ROOT / str(question["file"])
     before = target.read_bytes()
     monkeypatch.setattr(runner_app, "MAX_FILE_BYTES", 8)
@@ -268,7 +276,7 @@ def test_runner_enforces_unlock_then_runs_public_and_verified_tests(client: Test
 
     knowledge = json.loads((runner_app.COURSE_ROOT / "knowledge.json").read_text(encoding="utf-8"))
     state = runner_app.initial_state()
-    for lab_id in (course["foundations"]["id"], lab["id"]):
+    for lab_id in (*_preparatory_unit_ids(course), lab["id"]):
         state["knowledge"][lab_id] = {
             str(item["id"]): True for item in knowledge["labs"][lab_id]["questions"]
         }
@@ -295,7 +303,7 @@ def test_submit_hides_all_private_test_diagnostics(client: TestClient) -> None:
 
     knowledge = json.loads((runner_app.COURSE_ROOT / "knowledge.json").read_text(encoding="utf-8"))
     state = runner_app.initial_state()
-    for lab_id in (course["foundations"]["id"], lab["id"]):
+    for lab_id in (*_preparatory_unit_ids(course), lab["id"]):
         state["knowledge"][lab_id] = {
             str(item["id"]): True for item in knowledge["labs"][lab_id]["questions"]
         }
