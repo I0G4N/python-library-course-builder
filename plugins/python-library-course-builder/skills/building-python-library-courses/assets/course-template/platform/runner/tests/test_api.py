@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 import runner.app as runner_app
+from support.coursekit.locale import copy_for_manifest
 
 
 @pytest.fixture
@@ -45,6 +46,10 @@ def _coding_request() -> tuple[dict[str, str], dict[str, object]]:
         "lab_id": str(lab["id"]),
         "question_id": str(question["id"]),
     }, question
+
+
+def _copy() -> dict[str, str]:
+    return copy_for_manifest(runner_app.manifest(internal=True))
 
 
 def _preparatory_unit_ids(course: dict[str, object]) -> tuple[str, ...]:
@@ -232,12 +237,12 @@ def test_file_api_rejects_non_regular_targets(client: TestClient) -> None:
     _set_question_file("lab01/blocked.fifo")
     response = client.get("/api/file", params=request)
     assert response.status_code == 400
-    assert "regular file" in response.text
+    assert response.json()["detail"] == _copy()["workspace_regular"]
     written = client.put(
         "/api/file", json={**request, "content": "pass\n"}
     )
     assert written.status_code == 400
-    assert "regular file" in written.text
+    assert written.json()["detail"] == _copy()["workspace_regular"]
 
 
 def test_file_api_limits_utf8_bytes_not_python_characters(
@@ -331,7 +336,11 @@ def test_submit_hides_all_private_test_diagnostics(client: TestClient) -> None:
     response = client.post("/api/run", json={**request, "mode": "submit"})
     assert response.status_code == 200, response.text
     assert response.json()["passed"] is False
-    assert "Hidden verification failed (1 private target(s) checked)." in response.json()["output"]
+    copy = _copy()
+    assert response.json()["output"] == copy["hidden_result"].format(
+        result=copy["hidden_failed"],
+        count=1,
+    )
     for private_detail in (
         str(runner_app.COURSE_ROOT),
         "private_contract_test.py",
