@@ -23,6 +23,13 @@ import {
 import { PythonCodeEditor } from "./PythonCode";
 import { ResizeSeparator } from "./ResizeSeparator";
 import {
+  courseCopy,
+  resolveCourseLanguage,
+  STATIC_COURSE_LANGUAGE,
+  type CourseCopy,
+  type CourseLanguage,
+} from "./courseLocale.mjs";
+import {
   DEFAULT_LAYOUT_PREFERENCES,
   LESSON_MIN_WIDTH,
   RESIZE_SEPARATOR_SIZE,
@@ -85,6 +92,8 @@ type CourseLab = {
 };
 
 type CourseManifest = {
+  schema_version?: number;
+  language?: string;
   course_id?: string;
   title: string;
   description?: string;
@@ -132,8 +141,8 @@ type FoundationKnowledgePayload = KnowledgeProgress & {
 type ConnectionState = "loading" | "online" | "error";
 type RunMode = "public" | "submit";
 
-function studyTimeLabel(study: StudyMinutes): string {
-  return `${study.min}–${study.max} 分钟`;
+function studyTimeLabel(study: StudyMinutes, t: CourseCopy): string {
+  return t.studyMinutes(study.min, study.max);
 }
 
 function detailFromPayload(payload: unknown): string | null {
@@ -150,6 +159,7 @@ function detailFromPayload(payload: unknown): string | null {
 
 async function runnerRequest<T>(
   path: string,
+  t: CourseCopy,
   init?: RequestInit,
   timeoutMs = 8_000,
 ): Promise<T> {
@@ -168,7 +178,7 @@ async function runnerRequest<T>(
     if (!response.ok) {
       throw new Error(
         detailFromPayload(payload) ??
-          `Runner request failed (${response.status} ${response.statusText})`,
+          t.runnerRequestStatus(response.status, response.statusText),
       );
     }
     return payload as T;
@@ -187,11 +197,11 @@ function manifestCourseId(value: CourseManifest): string {
   return value.course_id?.trim() || value.title || "course";
 }
 
-function displayError(error: unknown): string {
+function displayError(error: unknown, t: CourseCopy): string {
   if (error instanceof DOMException && error.name === "AbortError") {
-    return "本地 Runner 响应超时。请确认学习服务仍在运行。";
+    return t.runnerTimeout;
   }
-  return error instanceof Error ? error.message : "发生未知错误。";
+  return error instanceof Error ? error.message : t.unknownError;
 }
 
 export function CourseKitApp() {
@@ -200,6 +210,9 @@ export function CourseKitApp() {
   const stateRefreshRequestRef = useRef(0);
   const operationLifecycleRef = useRef(createOperationLifecycle());
   const stateArbiterRef = useRef(createStateSnapshotArbiter());
+  const [courseLanguage, setCourseLanguage] =
+    useState<CourseLanguage>(STATIC_COURSE_LANGUAGE);
+  const t = courseCopy(courseLanguage);
   const [connection, setConnection] = useState<ConnectionState>("loading");
   const [manifest, setManifest] = useState<CourseManifest | null>(null);
   const [courseState, setCourseState] = useState<CourseState>({
@@ -221,7 +234,9 @@ export function CourseKitApp() {
   const [fileLoadRetryVersion, setFileLoadRetryVersion] = useState(0);
   const [running, setRunning] = useState<RunMode | null>(null);
   const [result, setResult] = useState<RunPayload | null>(null);
-  const [notice, setNotice] = useState("正在连接本地 Runner…");
+  const [notice, setNotice] = useState(
+    courseCopy(STATIC_COURSE_LANGUAGE).connectingRunner,
+  );
   const [layoutPreferences, setLayoutPreferences] =
     useState<LayoutPreferences>({ ...DEFAULT_LAYOUT_PREFERENCES });
   const [layoutReadyCourseId, setLayoutReadyCourseId] = useState("");
@@ -278,14 +293,14 @@ export function CourseKitApp() {
   const codingLockReasonId = "coding-lock-reason";
   const codingLockReason = !codingUnitSelected
     ? selectedLab?.unit_type === "preparatory"
-      ? "先修单元不包含编码练习；完成知识检查后继续下一单元。"
-      : "基础章节不包含编码练习；完成知识检查后进入正式 Lab。"
+      ? t.prepNoCoding
+      : t.orientationNoCoding
     : !selectedLabNavigable
-      ? "此 Lab 尚未解锁，完成前置 Lab 后才能编码。"
+      ? t.labNotNavigable
       : !foundationKnowledgeComplete
-        ? "请先完成基础章节的知识检查，之后才能编辑和运行代码。"
+        ? t.foundationKnowledgeRequired
         : !currentKnowledgeComplete
-          ? "请先完成当前 Lab 的知识检查，之后才能编辑和运行代码。"
+          ? t.currentKnowledgeRequired
           : null;
   const handlePractice = useCallback((link: PracticeLink) => {
     if (!selectedLab) return;
@@ -302,8 +317,8 @@ export function CourseKitApp() {
       setRunning(null);
       setNotice(
         codingReady
-          ? "正在载入所选练习…"
-          : "完成本章知识检查后即可进入这道编码练习。",
+          ? t.loadingSelectedPractice
+          : t.knowledgeBeforeCoding,
       );
       targetId = codingReady ? "work-column" : targetId;
     }
@@ -312,7 +327,7 @@ export function CourseKitApp() {
       target?.focus({ preventScroll: true });
       target?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
-  }, [codingReady, selectedLab]);
+  }, [codingReady, courseLanguage, selectedLab, t]);
   const dirty = source !== loadedSource;
   const earned = courseState.score ?? result?.score;
   const total = courseState.total_points ?? manifest?.total_points;
@@ -367,6 +382,10 @@ export function CourseKitApp() {
     window.addEventListener("resize", measureViewport);
     return () => window.removeEventListener("resize", measureViewport);
   }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = courseLanguage;
+  }, [courseLanguage]);
 
   useEffect(() => {
     if (!manifest || layoutReadyCourseId !== courseId) return;
@@ -428,36 +447,40 @@ export function CourseKitApp() {
     async function refreshCourseState() {
       const requestId = ++stateRefreshRequestRef.current;
       try {
-        const payload = await runnerRequest<CourseState>("/api/state");
+        const payload = await runnerRequest<CourseState>("/api/state", t);
         if (requestId !== stateRefreshRequestRef.current) return;
         if (!acceptCourseState(payload)) return;
         setKnowledgeRefreshVersion((value) => value + 1);
       } catch (error) {
         if (requestId !== stateRefreshRequestRef.current) return;
-        setNotice(`进度同步失败：${displayError(error)}`);
+        setNotice(t.progressSyncFailed(displayError(error, t)));
       }
     },
-    [acceptCourseState],
+    [acceptCourseState, courseLanguage, t],
   );
 
   useEffect(() => {
     let active = true;
-    void runnerRequest<CoursePayload>("/api/course")
+    const bootCopy = courseCopy(STATIC_COURSE_LANGUAGE);
+    void runnerRequest<CoursePayload>("/api/course", bootCopy)
       .then((payload) => {
         if (!active) return;
+        if (!payload.manifest) {
+          throw new Error(bootCopy.invalidCoursePayload);
+        }
+        const loadedLanguage = resolveCourseLanguage(
+          payload.manifest.schema_version,
+          payload.manifest.language,
+        );
+        const loadedCopy = courseCopy(loadedLanguage);
         if (
-          !payload.manifest ||
           !Array.isArray(payload.manifest.labs) ||
           !Array.isArray(payload.state?.unlocked_labs)
         ) {
-          throw new Error(
-            "Runner 返回的课程清单缺少 labs 或 state.unlocked_labs；课程已保持锁定。",
-          );
+          throw new Error(loadedCopy.invalidCoursePayload);
         }
         if (!acceptCourseState(payload.state)) {
-          throw new Error(
-            "Runner 返回的共享进度身份或更新时间无效；课程已保持锁定。",
-          );
+          throw new Error(loadedCopy.invalidSharedState);
         }
         const loadedCourseId = manifestCourseId(payload.manifest);
         let restoredLayout = { ...DEFAULT_LAYOUT_PREFERENCES };
@@ -469,6 +492,7 @@ export function CourseKitApp() {
           // Storage can be unavailable in privacy-restricted browser contexts.
         }
         operationLifecycleRef.current.changeSelection();
+        setCourseLanguage(loadedLanguage);
         setLayoutPreferences(restoredLayout);
         setLayoutReadyCourseId(loadedCourseId);
         setManifest(payload.manifest);
@@ -477,12 +501,12 @@ export function CourseKitApp() {
         setFileLoading(false);
         setFileLoadFailed(false);
         setConnection("online");
-        setNotice("已连接本地 Runner。代码只保存在你的本地工作区。");
+        setNotice(loadedCopy.connectedRunner);
       })
       .catch((error) => {
         if (!active) return;
         setConnection("error");
-        setNotice(displayError(error));
+        setNotice(displayError(error, bootCopy));
       });
     return () => {
       active = false;
@@ -530,6 +554,7 @@ export function CourseKitApp() {
     let active = true;
     void runnerRequest<FoundationKnowledgePayload>(
       `/api/knowledge/${encodeURIComponent(foundationLabId)}`,
+      t,
     )
       .then((payload) => {
         if (!active) return;
@@ -547,6 +572,7 @@ export function CourseKitApp() {
     };
   }, [
     foundationLabId,
+    courseLanguage,
     knowledgeRefreshVersion,
     recordKnowledgeProgress,
     selectedLab?.id,
@@ -557,6 +583,7 @@ export function CourseKitApp() {
     let active = true;
     void runnerRequest<CourseContentItem>(
       `/api/content/${encodeURIComponent(selectedLab.id)}`,
+      t,
     )
       .then((payload) => {
         if (active) setLesson(payload);
@@ -564,7 +591,7 @@ export function CourseKitApp() {
       .catch((error) => {
         if (active) {
           setLesson(null);
-          setNotice(`讲义加载失败：${displayError(error)}`);
+          setNotice(t.lessonLoadFailed(displayError(error, t)));
         }
       })
       .finally(() => {
@@ -573,7 +600,7 @@ export function CourseKitApp() {
     return () => {
       active = false;
     };
-  }, [selectedLab]);
+  }, [courseLanguage, selectedLab, t]);
 
   useEffect(() => {
     if (!codingReady || !selectedLab || !selectedQuestion) {
@@ -588,6 +615,7 @@ export function CourseKitApp() {
     const selection = operationLifecycleRef.current.captureSelection();
     void runnerRequest<FileReadPayload>(
       `/api/file?lab_id=${encodeURIComponent(selectedLab.id)}&question_id=${encodeURIComponent(selectedQuestion.id)}`,
+      t,
     )
       .then((payload) => {
         if (
@@ -608,7 +636,7 @@ export function CourseKitApp() {
         setFileLoadFailed(true);
         setSource("");
         setLoadedSource("");
-        setNotice(`代码加载失败：${displayError(error)}`);
+        setNotice(t.codeLoadFailed(displayError(error, t)));
       })
       .finally(() => {
         if (
@@ -619,7 +647,7 @@ export function CourseKitApp() {
     return () => {
       active = false;
     };
-  }, [codingReady, fileLoadRetryVersion, selectedLab, selectedQuestion]);
+  }, [codingReady, courseLanguage, fileLoadRetryVersion, selectedLab, selectedQuestion, t]);
 
   async function saveSource(operation?: OperationToken): Promise<boolean> {
     if (!codingReady) return false;
@@ -636,7 +664,7 @@ export function CourseKitApp() {
     const needsSave = captured.source !== loadedSource;
     if (!needsSave) return true;
     try {
-      const payload = await runnerRequest<FileWritePayload>("/api/file", {
+      const payload = await runnerRequest<FileWritePayload>("/api/file", t, {
         method: "PUT",
         body: JSON.stringify({
           lab_id: captured.labId,
@@ -645,7 +673,7 @@ export function CourseKitApp() {
         }),
       });
       if (payload.status !== "saved") {
-        throw new Error("Runner 没有确认文件已保存。");
+        throw new Error(t.runnerDidNotConfirmSave);
       }
       if (!operationLifecycleRef.current.isOperationCurrent(captured)) {
         return false;
@@ -657,11 +685,11 @@ export function CourseKitApp() {
         captured.path,
         captured.source,
       );
-      setNotice("代码已保存到本地工作区。");
+      setNotice(t.codeSaved);
       return true;
     } catch (error) {
       if (operationLifecycleRef.current.isOperationCurrent(captured)) {
-        setNotice(`保存失败：${displayError(error)}`);
+        setNotice(t.saveFailed(displayError(error, t)));
       }
       return false;
     }
@@ -677,12 +705,13 @@ export function CourseKitApp() {
     });
     setRunning(mode);
     setResult(null);
-    setNotice(mode === "public" ? "正在运行公开测试…" : "正在运行提交测试…");
+    setNotice(mode === "public" ? t.runningPublicTests : t.runningSubmitTests);
     try {
       if (!(await saveSource(operation))) return;
       if (!operationLifecycleRef.current.isOperationCurrent(operation)) return;
       const payload = await runnerRequest<RunPayload>(
         "/api/run",
+        t,
         {
           method: "POST",
           body: JSON.stringify({
@@ -699,14 +728,14 @@ export function CourseKitApp() {
       setNotice(
         payload.passed
           ? mode === "submit"
-            ? "提交测试通过，进度已记录。"
-            : "公开测试通过。继续检查边界条件后再提交。"
-          : "测试未通过；根据输出定位第一个失败。",
+            ? t.submitPassed
+            : t.publicPassed
+          : t.testsFailed,
       );
     } catch (error) {
       if (operationLifecycleRef.current.isOperationCurrent(operation)) {
-        setResult({ passed: false, output: displayError(error) });
-        setNotice("Runner 执行失败。");
+        setResult({ passed: false, output: displayError(error, t) });
+        setNotice(t.runnerExecutionFailed);
       }
     } finally {
       if (operationLifecycleRef.current.isOperationCurrent(operation)) {
@@ -720,12 +749,12 @@ export function CourseKitApp() {
       <main className="boot-screen">
         <div className="boot-card">
           <span className={`status-dot ${connection}`} aria-hidden="true" />
-          <p className="eyebrow">COURSEKIT LOCAL</p>
-          <h1>{connection === "error" ? "无法连接课程" : "正在载入课程"}</h1>
+          <p className="eyebrow">{t.localCourseLabel}</p>
+          <h1>{connection === "error" ? t.courseLoadError : t.courseLoading}</h1>
           <p>{notice}</p>
           {connection === "error" ? (
             <p className="boot-command">
-              请在项目根目录运行 <code>npm run learn</code>，然后刷新页面。
+              {t.startRunnerHelp}
             </p>
           ) : null}
         </div>
@@ -746,16 +775,16 @@ export function CourseKitApp() {
         <header className="brand-block">
           <span className="brand-mark" aria-hidden="true">CK</span>
           <div className="brand-copy">
-            <p className="eyebrow">PYTHON COURSE</p>
+            <p className="eyebrow">{t.pythonCourseLabel}</p>
             <h1>{manifest.title}</h1>
           </div>
           <button
             type="button"
             className="sidebar-toggle"
-            aria-label={layoutPreferences.sidebarCollapsed ? "展开章节导航" : "折叠章节导航"}
+            aria-label={layoutPreferences.sidebarCollapsed ? t.expandNavigation : t.collapseNavigation}
             aria-expanded={!layoutPreferences.sidebarCollapsed}
             aria-controls="course-sidebar"
-            title={layoutPreferences.sidebarCollapsed ? "展开章节导航" : "折叠章节导航"}
+            title={layoutPreferences.sidebarCollapsed ? t.expandNavigation : t.collapseNavigation}
             onClick={() =>
               setLayoutPreferences((current) =>
                 current.sidebarCollapsed
@@ -772,25 +801,25 @@ export function CourseKitApp() {
 
         {readiness ? (
           <section className="readiness-summary" aria-labelledby="readiness-title">
-            <h2 id="readiness-title">学习准备</h2>
-            <h3>课程直接使用</h3>
+            <h2 id="readiness-title">{t.learningReadiness}</h2>
+            <h3>{t.usedDirectly}</h3>
             <ul>{readiness.assumed.map((title, index) => <li key={`assumed-${index}-${title}`}>{title}</li>)}</ul>
             <h3>
               {hasAdditionalPreparation
                 ? readiness.preparatory
-                  ? "正式 Lab 前会先讲"
-                  : "Lab 00 会先讲"
-                : "无需额外先修"}
+                  ? t.taughtBeforeFormalLab
+                  : t.taughtInLab00
+                : t.noExtraPreparation}
             </h3>
             {hasAdditionalPreparation ? (
               <ul>{preparationTitles.map((title, index) => <li key={`preparation-${index}-${title}`}>{title}</li>)}</ul>
             ) : (
-              <p>完成 Lab 00 导览后即可进入正式 Lab。</p>
+              <p>{t.afterOrientation}</p>
             )}
           </section>
         ) : null}
 
-        <nav className="lab-nav" aria-label="课程章节">
+        <nav className="lab-nav" aria-label={t.courseChapters}>
           {labs.map((lab, index) => {
             const isSelected = lab.id === selectedLab?.id;
             const isComplete = completed.has(lab.id);
@@ -801,8 +830,8 @@ export function CourseKitApp() {
                 key={lab.id}
                 className={isSelected ? "lab-link selected" : "lab-link"}
                 disabled={!isUnlocked}
-                aria-label={isUnlocked ? lab.title : `${lab.title}，未解锁`}
-                title={isUnlocked ? lab.title : `${lab.title} · 未解锁`}
+                aria-label={isUnlocked ? lab.title : t.lockedLab(lab.title)}
+                title={isUnlocked ? lab.title : t.lockedLabTitle(lab.title)}
                 onClick={() => {
                   if (!isUnlocked || !shouldChangeLab(selectedLab?.id, lab.id)) return;
                   const firstQuestion = lab.questions?.[0];
@@ -814,7 +843,7 @@ export function CourseKitApp() {
                   setLoadedSource("");
                   setResult(null);
                   setRunning(null);
-                  setNotice("正在载入所选学习内容…");
+                  setNotice(t.loadingSelectedContent);
                   setLessonLoading(true);
                   setFileLoading(false);
                   setFileLoadFailed(false);
@@ -828,9 +857,9 @@ export function CourseKitApp() {
                 </span>
                 <span>
                   <strong>{lab.title}</strong>
-                  <small>{isUnlocked ? lab.id : `${lab.id} · 未解锁`}</small>
+                  <small>{isUnlocked ? lab.id : t.lockedLabTitle(lab.id)}</small>
                   {lab.study_minutes ? (
-                    <small>{studyTimeLabel(lab.study_minutes)}</small>
+                    <small>{studyTimeLabel(lab.study_minutes, t)}</small>
                   ) : null}
                 </span>
               </button>
@@ -841,17 +870,18 @@ export function CourseKitApp() {
         <footer className="sidebar-footer">
           {typeof earned === "number" && typeof total === "number" ? (
             <div className="score-line">
-              <span>已验证</span>
+              <span>{t.verifiedScore}</span>
               <strong>{earned} / {total}</strong>
             </div>
           ) : null}
-          <span className="runner-state"><i /> Runner online</span>
+          <span className="runner-state"><i /> {t.runnerOnline}</span>
         </footer>
       </aside>
 
       <ResizeSeparator
         className="sidebar-separator"
-        label="调整章节导航宽度"
+        labelKey="resizeNavigation"
+        language={courseLanguage}
         controls="course-sidebar course-main"
         value={sidebarWidth}
         min={
@@ -872,7 +902,7 @@ export function CourseKitApp() {
         <header className="course-toolbar">
           <div>
             <p className="eyebrow">{selectedLab?.id ?? "LAB"}</p>
-            <h2>{selectedLab?.title ?? "选择一个 Lab"}</h2>
+            <h2>{selectedLab?.title ?? t.chooseLab}</h2>
           </div>
           <div className="course-toolbar-meta">
             <p className="course-summary">
@@ -880,7 +910,7 @@ export function CourseKitApp() {
             </p>
             {selectedLab?.study_minutes ? (
               <p className="selected-study-time">
-                <strong>预计学习时间：{studyTimeLabel(selectedLab.study_minutes)}</strong>
+                <strong>{t.estimatedStudyTime}{studyTimeLabel(selectedLab.study_minutes, t)}</strong>
                 {selectedLab.study_minutes.reason ? ` · ${selectedLab.study_minutes.reason}` : null}
               </p>
             ) : null}
@@ -895,17 +925,17 @@ export function CourseKitApp() {
           <section
             className="panel lesson-panel"
             id="lesson-panel"
-            aria-label="课程讲义"
+            aria-label={t.courseLesson}
           >
             <div className="panel-heading">
-              <span>LEARN</span>
-              <small>{lessonLoading ? "正在加载…" : "定义 · 原理 · 示例"}</small>
+              <span>{t.learnLabel}</span>
+              <small>{lessonLoading ? t.loading : t.lessonSubtitle}</small>
             </div>
             <div className="panel-scroll lesson-scroll">
               {lesson ? (
-                <CourseLesson content={lesson} onPractice={handlePractice} />
+                <CourseLesson content={lesson} language={courseLanguage} onPractice={handlePractice} />
               ) : (
-                <p className="empty-copy">这个 Lab 暂时没有可用讲义。</p>
+                <p className="empty-copy">{t.missingLesson}</p>
               )}
               {selectedLab ? (
                 <div
@@ -916,6 +946,7 @@ export function CourseKitApp() {
                   <KnowledgeCheck
                     key={selectedLab.id}
                     labId={selectedLab.id}
+                    language={courseLanguage}
                     refreshVersion={knowledgeRefreshVersion}
                     onProgressChange={recordKnowledgeProgress}
                     onStateChange={acceptCourseState}
@@ -929,7 +960,8 @@ export function CourseKitApp() {
             <>
               <ResizeSeparator
                 className="workspace-separator"
-                label="调整讲义与编码区宽度"
+                labelKey="resizeWorkspace"
+                language={courseLanguage}
                 controls="lesson-panel work-column"
                 value={lessonWidth}
                 min={LESSON_MIN_WIDTH}
@@ -940,16 +972,16 @@ export function CourseKitApp() {
                 className="work-column"
                 id="work-column"
                 tabIndex={-1}
-                aria-label="编码与测试"
+                aria-label={t.codingAndTesting}
               >
             <div className="panel code-panel">
               <div className="panel-heading code-heading">
                 <div>
-                  <span>CODE</span>
-                  <small>{filePath || "未选择文件"}</small>
+                  <span>{t.codeLabel}</span>
+                  <small>{filePath || t.noFileSelected}</small>
                 </div>
                 <label>
-                  <span className="sr-only">选择练习</span>
+                  <span className="sr-only">{t.chooseExercise}</span>
                   <select
                     value={selectedQuestion?.id ?? ""}
                     onChange={(event) => {
@@ -957,7 +989,7 @@ export function CourseKitApp() {
                       setSelectedQuestionId(event.target.value);
                       setResult(null);
                       setRunning(null);
-                      setNotice("正在载入所选练习…");
+                      setNotice(t.loadingSelectedPractice);
                       setFileLoading(true);
                       setFileLoadFailed(false);
                     }}
@@ -982,28 +1014,28 @@ export function CourseKitApp() {
                 <div className="question-brief">
                   <div>
                     <strong>{selectedQuestion.title}</strong>
-                    <p>{selectedQuestion.prompt ?? `补全 ${selectedQuestion.symbol ?? selectedQuestion.id}。`}</p>
+                    <p>{selectedQuestion.prompt ?? t.completeSymbol(selectedQuestion.symbol ?? selectedQuestion.id)}</p>
                   </div>
                   {typeof selectedQuestion.points === "number" ? (
-                    <span>{selectedQuestion.points} pts</span>
+                    <span>{t.points(selectedQuestion.points)}</span>
                   ) : null}
                 </div>
               ) : (
-                <p className="empty-copy question-empty">本章没有编码题。</p>
+                <p className="empty-copy question-empty">{t.noCodingQuestions}</p>
               )}
 
               {selectedQuestion?.example ? (
                 <details className="example-disclosure">
-                  <summary>查看示例与解释</summary>
+                  <summary>{t.viewExample}</summary>
                   <dl>
                     {selectedQuestion.example.input ? (
-                      <><dt>输入</dt><dd><code>{selectedQuestion.example.input}</code></dd></>
+                      <><dt>{t.input}</dt><dd><code>{selectedQuestion.example.input}</code></dd></>
                     ) : null}
                     {selectedQuestion.example.output ? (
-                      <><dt>输出</dt><dd><code>{selectedQuestion.example.output}</code></dd></>
+                      <><dt>{t.output}</dt><dd><code>{selectedQuestion.example.output}</code></dd></>
                     ) : null}
                     {selectedQuestion.example.explanation ? (
-                      <><dt>解释</dt><dd>{selectedQuestion.example.explanation}</dd></>
+                      <><dt>{t.explanation}</dt><dd>{selectedQuestion.example.explanation}</dd></>
                     ) : null}
                   </dl>
                 </details>
@@ -1014,18 +1046,18 @@ export function CourseKitApp() {
                   <div className="editor-loading">
                     <span>
                       {fileLoadFailed
-                        ? "代码读取失败，编辑器保持锁定。"
-                        : "正在读取本地文件…"}
+                        ? t.codeReadFailed
+                        : t.readingLocalFile}
                     </span>
                     {fileLoadFailed ? (
                       <button
                         type="button"
                         onClick={() => {
-                          setNotice("正在重新读取代码文件…");
+                          setNotice(t.retryingCodeRead);
                           setFileLoadRetryVersion((value) => value + 1);
                         }}
                       >
-                        重试读取
+                        {t.retryRead}
                       </button>
                     ) : null}
                   </div>
@@ -1042,14 +1074,15 @@ export function CourseKitApp() {
                     setSource(value);
                     if (filePath) draftsRef.current[filePath] = value;
                   }}
-                  ariaLabel={`${selectedQuestion?.title ?? "Python"} 代码编辑器`}
+                  language={courseLanguage}
+                  ariaLabel={t.codeEditorLabel(selectedQuestion?.title ?? "Python")}
                 />
               </div>
 
               <div className="action-bar">
                 <div className="action-meta">
                   <span className={dirty ? "save-state dirty" : "save-state"}>
-                    {dirty ? "未保存" : "已同步"}
+                    {dirty ? t.unsaved : t.synced}
                   </span>
                   {codingLockReason ? (
                     <span className="coding-lock-reason" id={codingLockReasonId}>
@@ -1069,7 +1102,7 @@ export function CourseKitApp() {
                   }
                   aria-describedby={codingReady ? undefined : codingLockReasonId}
                 >
-                  {running === "public" ? "运行中…" : "运行公开测试"}
+                  {running === "public" ? t.running : t.runPublicTests}
                 </button>
                 <button
                   type="button"
@@ -1083,16 +1116,20 @@ export function CourseKitApp() {
                   }
                   aria-describedby={codingReady ? undefined : codingLockReasonId}
                 >
-                  {running === "submit" ? "提交中…" : "提交评分"}
+                  {running === "submit" ? t.submitting : t.submitForGrading}
                 </button>
               </div>
             </div>
 
             <div className="panel result-panel" aria-live="polite">
               <div className="panel-heading">
-                <span>RESULT</span>
+                <span>{t.resultLabel}</span>
                 <small className={result?.passed ? "result-pass" : result ? "result-fail" : ""}>
-                  {result ? (result.passed ? "PASSED" : "FAILED") : "等待运行"}
+                  {result
+                    ? result.passed
+                      ? t.passedLabel
+                      : t.failedLabel
+                    : t.waitingToRun}
                 </small>
               </div>
               <div className="result-body">

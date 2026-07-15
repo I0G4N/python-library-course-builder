@@ -184,6 +184,17 @@ def test_scaffolded_readmes_use_simplified_chinese_for_fixed_guidance(
     assert "uv run course status" in labs_readme
 
 
+def test_cli_unlock_joins_multiple_zh_cn_gate_reasons_with_full_width_separator(
+    generated_course: Path,
+) -> None:
+    result = _run_cli(generated_course, "unlock", "lab02")
+
+    assert result.returncode == 3
+    assert result.stderr == (
+        "解锁 lab02 前请先满足：请先解锁 lab00；请先完成 lab01\n"
+    )
+
+
 def test_scaffolded_lesson_documents_localize_only_compiler_owned_structure(
     generated_course: Path,
 ) -> None:
@@ -420,7 +431,7 @@ def test_cli_source_policy_preflight_blocks_before_pytest(
     result = _run_cli(generated_course, "test", str(question["id"]))
 
     assert result.returncode == 1
-    assert "source policy" in result.stdout + result.stderr
+    assert "源码策略违规" in result.stdout + result.stderr
 
 
 def test_cli_rejects_unsafe_manifest_public_selectors(
@@ -563,7 +574,7 @@ def test_progression_cli_unlock_uses_the_backend_knowledge_prerequisites(
     )
 
     assert blocked_first_lab.returncode == 3
-    assert "unlock lab00" in blocked_first_lab.stderr
+    assert "解锁 lab00" in blocked_first_lab.stderr
     assert "answer>" not in blocked_first_lab.stdout
 
     foundation = _run_cli(
@@ -588,7 +599,7 @@ def test_progression_cli_unlock_uses_the_backend_knowledge_prerequisites(
     assert foundation.returncode == 0, foundation.stdout + foundation.stderr
     assert first_lab.returncode == 0, first_lab.stdout + first_lab.stderr
     assert blocked_later_lab.returncode == 3
-    assert "complete lab01" in blocked_later_lab.stderr
+    assert "完成 lab01" in blocked_later_lab.stderr
     assert "answer>" not in blocked_later_lab.stdout
 
 

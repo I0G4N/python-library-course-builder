@@ -6,6 +6,7 @@ Run the assessor, validator, scaffolder, and verifier through the uv-managed Pyt
 
 ## Contents
 
+- [Course language](#course-language)
 - [Top-level shape](#top-level-shape)
 - [Stable identity and evidence](#stable-identity-and-evidence)
 - [Assessed readiness and duration](#assessed-readiness-and-duration)
@@ -15,6 +16,10 @@ Run the assessor, validator, scaffolder, and verifier through the uv-managed Pyt
 - [Coding interfaces](#coding-interfaces)
 - [Split canonical source and compilation](#split-canonical-source-and-compilation)
 - [Adaptive size](#adaptive-size)
+
+## Course language
+
+`course.language` is exactly `zh-CN` or `en` and matches the fresh-invocation choice, readiness route, ready plan, split source, manifest, README, Markdown, Web, and handoff. Unknown locales and mismatches fail closed; no component silently falls back. The JSON below illustrates `zh-CN`; localize every learner-facing string for `en` while preserving IDs, code, commands, API names, source titles, and URLs.
 
 ## Top-level shape
 
@@ -290,7 +295,7 @@ Every `lab00`, `prepNN`, and formal Lab uses the same `lesson` object:
 
 Write each new lesson from the assessed readiness evidence and its unit-specific `study_minutes`, not from a universal beginner label or duration. Each concept still defines the term, purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source claims.
 
-Every graded lesson expands one new knowledge mainline through the existing fields in this order: **project problem**, **plain-language predictive model**, **precise inputs, outputs, effects, and failures**, **same concrete value through the complete flow**, **valid case and boundary case**, **diagnosis and recovery**, then **quiz, coding question, and capstone increment**. Those practice surfaces map to the same concept and outcome. Render them as connected natural Simplified Chinese, not as an author-field inventory.
+Every graded lesson expands one new knowledge mainline through the existing fields in this order: **project problem**, **plain-language predictive model**, **precise inputs, outputs, effects, and failures**, **same concrete value through the complete flow**, **valid case and boundary case**, **diagnosis and recovery**, then **quiz, coding question, and capstone increment**. Those practice surfaces map to the same concept and outcome. Render them as connected natural prose in the selected language, not as an author-field inventory.
 
 In assessed mode every concept also has a closed `operational_contract` with exactly:
 

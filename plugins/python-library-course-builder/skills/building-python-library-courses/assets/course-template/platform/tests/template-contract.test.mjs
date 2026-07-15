@@ -62,18 +62,18 @@ test("grading clients allow exactly 105 seconds while ordinary Web requests stay
   assert.match(learnerCli, /urlopen\(request, timeout=105\)/);
   assert.doesNotMatch(learnerCli, /urlopen\(request, timeout=60\)/);
   assert.match(app, /timeoutMs = 8_000/);
-  assert.match(app, /runnerRequest<CoursePayload>\("\/api\/course"\)/);
+  assert.match(app, /runnerRequest<CoursePayload>\("\/api\/course", bootCopy\)/);
   assert.match(
     app,
-    /runnerRequest<CourseContentItem>\(\s*`\/api\/content\/\$\{encodeURIComponent\(selectedLab\.id\)\}`,\s*\)/,
+    /runnerRequest<CourseContentItem>\(\s*`\/api\/content\/\$\{encodeURIComponent\(selectedLab\.id\)\}`,\s*t,\s*\)/,
   );
   assert.match(
     app,
-    /runnerRequest<FileReadPayload>\(\s*`\/api\/file\?lab_id=\$\{encodeURIComponent\(selectedLab\.id\)\}&question_id=\$\{encodeURIComponent\(selectedQuestion\.id\)\}`,\s*\)/,
+    /runnerRequest<FileReadPayload>\(\s*`\/api\/file\?lab_id=\$\{encodeURIComponent\(selectedLab\.id\)\}&question_id=\$\{encodeURIComponent\(selectedQuestion\.id\)\}`,\s*t,\s*\)/,
   );
   assert.match(
     app,
-    /runnerRequest<FileWritePayload>\("\/api\/file", \{\s*method: "PUT",\s*body: JSON\.stringify\(\{\s*lab_id: captured\.labId,\s*question_id: captured\.questionId,\s*content: captured\.source,\s*\}\),\s*\}\);/,
+    /runnerRequest<FileWritePayload>\("\/api\/file", t, \{\s*method: "PUT",\s*body: JSON\.stringify\(\{\s*lab_id: captured\.labId,\s*question_id: captured\.questionId,\s*content: captured\.source,\s*\}\),\s*\}\);/,
   );
   assert.match(
     app,

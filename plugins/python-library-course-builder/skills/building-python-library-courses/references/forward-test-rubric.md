@@ -40,7 +40,7 @@ Run every check from fresh output.
 - every lesson defines purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source-backed claims for every concept;
 - every assessed concept has a closed operational contract; every runnable example has a complete concrete-value trace of at least two steps; concept/outcome activity coverage satisfies the assessed Lab 00 versus graded-Lab surfaces;
 - every prep gap connects an existing cognitive anchor, term definition, current-route need, complete value flow, misconception or boundary, and recovery check;
-- every graded chapter keeps one new knowledge mainline and connects its project problem, plain-language predictive model, precise contract, one same-value complete flow, valid/boundary cases, diagnosis/recovery, quiz, coding question, and capstone increment in natural Simplified Chinese;
+- every graded chapter keeps one new knowledge mainline and connects its project problem, plain-language predictive model, precise contract, one same-value complete flow, valid/boundary cases, diagnosis/recovery, quiz, coding question, and capstone increment in the selected `zh-CN` or `en` locale, with no mixed-language or fallback text;
 - a boundary witness for every declared failure and every independently stated boundary must execute one representative counterexample, apply its recovery, re-execute the corrected path, record the recovered observable, and prove its prose contract, runnable or diagnostic code, expected output, diagnostic quiz and, for graded concepts, coding prompt plus public and hidden tests agree on the condition, observable, and recovery;
 - every lesson has at least two examples: a CPU/offline runnable example with exact command/output and a diagnostic wrong -> symptom -> cause -> fix example;
 - every runnable command is exactly `python {path}` for its declared lesson-relative file;
@@ -80,7 +80,7 @@ Run every check from fresh output.
 - The **chapter navigation gate**, **knowledge gate**, and **coding verification gate** use the same manifest order and persisted knowledge state across CLI, Web, and Runner.
 - production Web build and TypeScript checks pass;
 - the rendered course uses manifest Lab titles/counts and compiled Markdown lessons;
-- structured `lesson_outline` renders the assessed **open core** with exact time/reason, `先这样理解`, `输入和输出是什么`, `拿一个具体输入走一遍`, concrete trace, and first practice link before accessible disclosures for principles, design choices, sources, and diagnostics; the full Markdown fallback remains usable;
+- structured `lesson_outline` renders the assessed **open core** with exact time/reason, the selected locale's exact predictive-model, operational-contract, and concrete-trace labels from `teaching-depth-contract.md`, the concrete trace, and first practice link before accessible disclosures for principles, design choices, sources, and diagnostics; the full Markdown fallback remains usable;
 - manifest and README readiness projections show assumed capabilities plus ordered prep without raw evidence or internal author data; Web/Markdown use learner-safe labels;
 - Python lesson fences and the editor have syntax highlighting and monospace alignment;
 - no orientation/prep unit has a code workspace; in short, prep has no code workspace. Each graded Lab hides code/results and makes no file request until the prep chain and current knowledge are complete;

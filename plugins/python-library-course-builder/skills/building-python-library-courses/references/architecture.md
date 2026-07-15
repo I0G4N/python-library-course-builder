@@ -10,6 +10,7 @@ The generic template and bundled course infrastructure are independently authore
 - [Data flow](#data-flow)
 - [Three-gate progression](#three-gate-progression)
 - [Responsive workspace layout](#responsive-workspace-layout)
+- [Course language ownership](#course-language-ownership)
 - [Runtime boundaries](#runtime-boundaries)
 - [Compilation and workspace rules](#compilation-and-workspace-rules)
 - [Privacy model](#privacy-model)
@@ -84,6 +85,12 @@ The Web must fail closed while initial state is unavailable. Every orientation/p
 At desktop widths of 1024px and above, the Web uses sidebar, lesson, and code/result columns with two keyboard-accessible separators. The sidebar defaults to 208px, remains between 160px and 320px while expanded, and the sidebar can collapse to 64px. The lesson and work areas preserve minimum widths of 320px and 440px. Pointer drag adjusts widths; a focused separator supports Arrow keys in 16px steps plus Home and End, exposes `role="separator"` and current/min/max values, and keeps a usable focus target. The desktop shell is clamped to the dynamic viewport with no fixed minimum height; the lesson and code/result columns scroll vertically and independently so a short or resized browser window cannot hide their lower content. The toolbar keeps its summary and study-time metadata in one grid cell so this viewport budget is stable.
 
 Validated, clamped preferences live in per-course localStorage under `coursekit.layout.v1.<course_id>` so unrelated courses never share layout state. Invalid or stale values fall back safely. From 760px through 1023px the lesson and work areas stack inside the learning surface, and the inner lesson scroller permits scroll chaining to the outer stacked surface so a newly unlocked workspace remains reachable. Below 760px the compact chapter navigation and readiness summary use explicit grid areas, and the page returns to natural document scrolling without a capped lesson pane or sticky nested surface. Both medium and small layouts have no resize separators.
+
+## Course language ownership
+
+Every fresh Skill invocation asks for exactly one course locale before target discovery or readiness. The supported set is closed to `zh-CN` and `en`; an already worded language preference does not skip this first question. The accepted locale is immutable input to the route, readiness plan, schema-v3 source, compiled manifest, generated README and Markdown, Web catalog, CLI output, and handoff. Unknown, missing, mixed, or mismatched locale state fails closed instead of falling back.
+
+Learner-facing prose, readiness diagnostics, labels, feedback, and generated documentation use the selected locale. Code, shell commands, identifiers, target API names, and official source titles and URLs retain their original spelling. Locale selection is not capability evidence, and raw language answers are not copied into the generated repository.
 
 ## Runtime boundaries
 

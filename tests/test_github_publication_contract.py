@@ -14,42 +14,44 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ROOT = ROOT / "plugins" / "python-library-course-builder"
 SKILL_ROOT = PLUGIN_ROOT / "skills" / "building-python-library-courses"
 TEMPLATE_README = SKILL_ROOT / "assets" / "course-template" / "README.md"
+CHINESE_README = ROOT / "README.zh-CN.md"
+RELEASE_VERSION = "0.2.0"
 
 SKILL_DESCRIPTION = (
     "Use when a user asks to build, create, author, or learn through a "
-    "structured, Chinese-first hands-on course project for a Python "
+    "structured, language-selectable hands-on course project for a Python "
     "standard-library module, PyPI package, framework, or repository instead "
     "of receiving a one-off explanation."
 )
-SHORT_DESCRIPTION = "Build Chinese-first Python learning projects"
+SHORT_DESCRIPTION = "Build Python courses in Chinese or English"
 DEFAULT_PROMPT = (
     "Use $building-python-library-courses to create a source-backed "
-    "Chinese-first course for a Python library or repository."
+    "course for a Python library or repository."
 )
 PLUGIN_DESCRIPTION = (
-    "Build source-backed, Chinese-first hands-on learning repositories for "
-    "Python libraries."
+    "Build source-backed hands-on learning repositories for Python libraries "
+    "in Simplified Chinese or English."
 )
 PLUGIN_LONG_DESCRIPTION = (
-    "Turn a Python library into a Chinese-first cumulative beginner course "
-    "with lessons, coding labs, CLI and Web grading."
+    "Turn a Python library into a cumulative beginner course in Simplified "
+    "Chinese or English, with lessons, coding labs, CLI and Web grading."
 )
 MARKETPLACE_COMMAND = (
     "codex plugin marketplace add I0G4N/python-library-course-builder "
-    "--ref v0.1.1"
+    f"--ref v{RELEASE_VERSION}"
 )
 PLUGIN_COMMAND = (
     "codex plugin add python-library-course-builder@python-library-course-builder"
 )
 CLONE_COMMAND = (
-    "git clone --branch v0.1.1 --depth 1 "
+    f"git clone --branch v{RELEASE_VERSION} --depth 1 "
     "https://github.com/I0G4N/python-library-course-builder.git"
 )
 OFFICIAL_CODEX_DOCS = (
     "https://learn.chatgpt.com/docs/build-plugins#add-a-marketplace-from-the-cli"
 )
 NO_EXPORT_SENTENCE = (
-    "Version 0.1.1 does not provide an automated learner-only export."
+    f"Version {RELEASE_VERSION} does not provide an automated learner-only export."
 )
 PRIVATE_REPOSITORY_SENTENCE = (
     "The supported secrecy path is to keep the complete teacher/authoring "
@@ -64,9 +66,9 @@ CI_BADGE = (
     "python-library-course-builder/actions/workflows/ci.yml)"
 )
 README_HERO = (
-    "# 像刷 CS61A 一样，系统攻下一门 Python 库\n"
-    "## Turn Any Python Library into a CS61A-Style Course"
+    "# Learn Any Python Library the Way You'd Work Through CS61A"
 )
+LANGUAGE_NAV = "English | [简体中文](README.zh-CN.md)"
 EARLY_INDEPENDENCE_NOTICE = (
     "No CS61A code, assignments, tests, or instructional text are included, "
     "and this independently authored project is not affiliated with or "
@@ -119,7 +121,7 @@ def _advertises_learner_only_artifact(document: str) -> bool:
     )
 
 
-def test_chinese_first_metadata_and_skill_language_contract_are_exact() -> None:
+def test_language_selectable_metadata_and_skill_language_contract_are_exact() -> None:
     frontmatter, skill_body = _skill_frontmatter_and_body()
     manifest = _json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
     agent = yaml.safe_load(_text(SKILL_ROOT / "agents" / "openai.yaml"))
@@ -133,32 +135,77 @@ def test_chinese_first_metadata_and_skill_language_contract_are_exact() -> None:
     assert manifest["interface"]["defaultPrompt"] == [DEFAULT_PROMPT]
 
     language_contract = (
-        "Write learner-facing lessons, quiz prompts, feedback, generated "
-        "documentation, and course prose in Simplified Chinese.",
+        "On every fresh invocation, make the first question a course-language "
+        "choice: ask the learner to choose exactly one course language before "
+        "any other question or action",
+        "Ask even when the request already names a language.",
+        "Support exactly `zh-CN` and `en`.",
+        "Write learner-facing lessons, readiness questions, quiz prompts, "
+        "feedback, generated documentation, and course prose in the selected language.",
         "Keep code, shell commands, identifiers, target API names, and official "
         "source titles and URLs in their original form.",
-        "Version 0.1.1 has no language switch.",
     )
     for clause in language_contract:
         assert clause in skill_body
     assert len(skill_body.split()) <= 1_500
 
     readme = _text(ROOT / "README.md")
+    chinese_readme = _text(CHINESE_README)
     changelog = _text(ROOT / "CHANGELOG.md")
-    assert "Chinese-first" in readme[:800]
-    assert "Simplified Chinese" in readme
-    assert "Chinese-first" in changelog
-    assert "Simplified Chinese" in changelog
+    assert "Simplified Chinese or English" in readme[:1_200]
+    assert "简体中文或英语" in chinese_readme[:1_200]
+    assert "language-selectable" in changelog
+
+
+def test_root_readme_is_english_canonical_and_cross_links_complete_chinese_readme() -> None:
+    readme = _text(ROOT / "README.md")
+    chinese_readme = _text(CHINESE_README)
+
+    assert readme.startswith(f"{README_HERO}\n\n{LANGUAGE_NAV}\n\n{CI_BADGE}\n")
+    english_body = readme.replace("简体中文", "")
+    assert re.search(r"[\u3400-\u9fff]", english_body) is None
+    assert chinese_readme.startswith(
+        "# 像刷 CS61A 一样，系统攻下一门 Python 库\n\n"
+        "[English](README.md) | 简体中文\n"
+    )
+    for required in (
+        "evidence-dialogue readiness preflight",
+        "`lab00`",
+        "`prep01`",
+        "`lab01`",
+        "Codex",
+        "Python 3.13",
+        "Node.js 22.13",
+        "authoring repository",
+    ):
+        assert required.casefold() in readme.casefold()
+    for required in (
+        "evidence-dialogue readiness preflight",
+        "`lab00`",
+        "`prep01`",
+        "`lab01`",
+        "Codex",
+        "Python 3.13",
+        "Node.js 22.13",
+        "作者仓库",
+    ):
+        assert required.casefold() in chinese_readme.casefold()
 
 
 def test_public_install_commands_pin_the_synchronized_release_version() -> None:
     readme = _text(ROOT / "README.md")
-    commands = {
-        line.strip()
-        for block in _fenced_shell_blocks(readme)
-        for line in block.splitlines()
-        if line.strip()
-    }
+    chinese_readme = _text(CHINESE_README)
+    command_sets = []
+    for document in (readme, chinese_readme):
+        command_sets.append(
+            {
+                line.strip()
+                for block in _fenced_shell_blocks(document)
+                for line in block.splitlines()
+                if line.strip()
+            }
+        )
+    commands = command_sets[0]
     project = tomllib.loads(_text(ROOT / "pyproject.toml"))
     manifest = _json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
     changelog_match = re.search(
@@ -179,12 +226,13 @@ def test_public_install_commands_pin_the_synchronized_release_version() -> None:
         re.search(r"--ref v([^ ]+)$", MARKETPLACE_COMMAND).group(1),
         re.search(r"--branch v([^ ]+)", CLONE_COMMAND).group(1),
     }
-    assert versions == {"0.1.1"}
+    assert versions == {RELEASE_VERSION}
+    assert command_sets[0] == command_sets[1]
 
     for template in ("bug.yml", "feature.yml"):
         issue_template = _text(ROOT / ".github" / "ISSUE_TEMPLATE" / template)
-        assert "placeholder: v0.1.1 or a full commit SHA" in issue_template
-        assert "placeholder: v0.1.0 or a full commit SHA" not in issue_template
+        assert f"placeholder: v{RELEASE_VERSION} or a full commit SHA" in issue_template
+        assert "placeholder: v0.1.1 or a full commit SHA" not in issue_template
 
 
 def test_all_secrecy_docs_publish_only_the_supported_private_repository_path() -> None:
@@ -199,6 +247,10 @@ def test_all_secrecy_docs_publish_only_the_supported_private_repository_path() -
         assert NO_EXPORT_SENTENCE in document, label
         assert PRIVATE_REPOSITORY_SENTENCE in document, label
         assert not _advertises_learner_only_artifact(document), label
+
+    chinese_readme = _text(CHINESE_README)
+    assert "0.2.0 版本不提供自动化的仅学员导出" in chinese_readme
+    assert "完整的教师/作者仓库保持为私有仓库" in chinese_readme
 
 
 @pytest.mark.parametrize(
@@ -290,8 +342,8 @@ def test_github_community_files_publish_structured_issue_and_pr_contracts() -> N
 
 def test_readme_publishes_badge_official_docs_boundaries_and_first_use_loop() -> None:
     readme = _text(ROOT / "README.md")
-    assert readme.startswith(f"{README_HERO}\n\n{CI_BADGE}\n")
-    assert EARLY_INDEPENDENCE_NOTICE in readme.split("## 不是", 1)[0]
+    assert readme.startswith(f"{README_HERO}\n\n{LANGUAGE_NAV}\n\n{CI_BADGE}\n")
+    assert EARLY_INDEPENDENCE_NOTICE in readme.split("## Why", 1)[0]
 
     github_installation = readme.split("### Install from GitHub", 1)[1].split(
         "### Install from a local checkout", 1
@@ -380,7 +432,7 @@ def test_release_checklist_keeps_all_hosted_publication_gates_unchecked() -> Non
         "v* tag ruleset",
         MARKETPLACE_COMMAND,
         "hosted main ci",
-        "hosted v0.1.1 tag forward job",
+        f"hosted v{RELEASE_VERSION} tag forward job",
     )
     for fragment in required_fragments:
         assert fragment.casefold() in folded

@@ -66,6 +66,7 @@ AUTHOR_QUESTION_FIELDS = {
     "hidden_test",
 }
 QUIZ_KINDS = {"execution_trace", "diagnostic"}
+V3_COURSE_LANGUAGES = {"zh-CN", "en"}
 QUIZ_QUESTION_FIELDS = {
     "id",
     "kind",
@@ -1771,6 +1772,14 @@ def _validate_spec_v3(
         raise SpecValidationError("schema_version must be 3")
 
     course = _object(spec.get("course"), "course")
+    course_language = course.get("language")
+    if course_language not in V3_COURSE_LANGUAGES:
+        raise SpecValidationError("course.language must be one of: zh-CN, en")
+    plan_language = plan.get("language", "zh-CN")
+    if course_language != plan_language:
+        raise SpecValidationError(
+            "course.language does not match readiness plan language"
+        )
     audience = _object(course.get("audience"), "course.audience")
     _require_exact_fields(audience, ASSESSED_AUDIENCE_FIELDS, "course.audience")
     if audience.get("level") != "assessed":

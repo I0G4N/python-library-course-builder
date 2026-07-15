@@ -22,6 +22,21 @@ from scaffold_course import scaffold  # noqa: E402
 from tests.course_v3_fixture import make_v3_spec_and_plan  # noqa: E402
 
 
+def test_cli_verifier_uses_the_course_language_for_prep_refusals() -> None:
+    assert (
+        verifier._knowledge_only_refusal_marker({"language": "zh-CN"})
+        == "仅包含知识学习"
+    )
+    assert (
+        verifier._knowledge_only_refusal_marker({"language": "en"})
+        == "knowledge-only"
+    )
+    assert (
+        verifier._knowledge_only_refusal_marker({"schema_version": 2})
+        == "仅包含知识学习"
+    )
+
+
 @pytest.fixture()
 def generated_v3_course(tmp_path: Path) -> Path:
     spec, plan = make_v3_spec_and_plan(
@@ -37,6 +52,40 @@ def generated_v3_course(tmp_path: Path) -> Path:
     for cache in target.rglob("__pycache__"):
         shutil.rmtree(cache)
     return target
+
+
+def test_v3_english_scaffold_localizes_generated_learning_surfaces(
+    tmp_path: Path,
+) -> None:
+    spec, plan = make_v3_spec_and_plan(language="en")
+    spec_path = tmp_path / "english-spec.json"
+    spec_path.write_text(
+        json.dumps(spec, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    target = tmp_path / "english-generated"
+
+    scaffold(spec_path, target, readiness_plan=plan)
+
+    root_readme = (target / "README.md").read_text(encoding="utf-8")
+    labs_readme = (target / "labs/README.md").read_text(encoding="utf-8")
+    lesson = (target / "labs/lab00/README.md").read_text(encoding="utf-8")
+    manifest = json.loads(
+        (target / "platform/course/manifest.json").read_text(encoding="utf-8")
+    )
+    web_locale = (
+        target / "platform/app/courseLocale.mjs"
+    ).read_text(encoding="utf-8")
+    assert manifest["language"] == "en"
+    assert 'const GENERATED_COURSE_LANGUAGE = "en";' in web_locale
+    assert "__COURSEKIT_LANGUAGE__" not in web_locale
+    assert "## Prerequisites" in root_readme
+    assert "## Course route" in root_readme
+    assert "learner workspace" in labs_readme
+    assert "Start with `lab00/README.md`" in labs_readme
+    assert "## Prerequisites" in lesson
+    assert "Start with this mental model" in lesson
+    assert not (target / "README.en.md").exists()
 
 
 def _replace_runner_source(course: Path, before: str, after: str) -> None:

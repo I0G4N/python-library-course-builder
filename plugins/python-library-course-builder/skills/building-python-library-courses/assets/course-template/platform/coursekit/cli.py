@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from .compiler import CourseKitError, compile_course, initialize_workspace
+from support.coursekit.locale import CourseLanguageError, copy_for_manifest, render
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,7 +35,20 @@ def main(argv: list[str] | None = None) -> int:
     except CourseKitError as error:
         print(error, file=sys.stderr)
         return 1
-    print(f"{args.command}: {len(written)} artifact(s)")
+    manifest_path = (
+        args.compiled / "manifest.json"
+        if args.command == "init-workspace"
+        else args.source / "course.json"
+    )
+    try:
+        configured = json.loads(manifest_path.read_text(encoding="utf-8"))
+        copy = copy_for_manifest(configured)
+    except CourseLanguageError as error:
+        print(error, file=sys.stderr)
+        return 2
+    except (OSError, ValueError, json.JSONDecodeError):
+        copy = copy_for_manifest({"schema_version": 2})
+    print(render(copy, "artifacts_written", command=args.command, count=len(written)))
     return 0
 
 

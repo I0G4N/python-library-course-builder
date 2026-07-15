@@ -58,6 +58,10 @@ This runs both validation layers, then generates, sets up, and fully verifies a 
 
 Teach public behavior from primary official documentation and upstream source. Distinguish documented guarantees from implementation details, pin the taught version, and keep examples deterministic and CPU/offline runnable.
 
+`README.md` is the canonical English repository introduction and `README.zh-CN.md` is its complete Simplified Chinese translation. A change to installation commands, supported platforms, release versions, course behavior, language support, security boundaries, or operational limitations must update both in the same commit. Keep fenced shell commands byte-equivalent and preserve reciprocal language links.
+
+The generated-course language contract is separate from repository-document language. New courses support exactly `zh-CN` and `en`; learner-facing content uses the selected locale while code, commands, identifiers, API names, and official source titles and URLs retain their original spelling. Do not describe an unsupported locale or silent fallback.
+
 The bundled course design is independently authored. Contributions must not copy proprietary or course-restricted assignments, solutions, tests, or prose. Include attribution and license compatibility for any permitted third-party material.
 
 ## Security and privacy

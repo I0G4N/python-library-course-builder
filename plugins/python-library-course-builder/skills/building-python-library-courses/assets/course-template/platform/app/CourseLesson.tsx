@@ -1,6 +1,11 @@
 import { Fragment, type ReactNode } from "react";
 
 import { PythonCodeBlock } from "./PythonCode";
+import {
+  courseCopy,
+  type CourseCopy,
+  type CourseLanguage,
+} from "./courseLocale.mjs";
 
 type LessonPrerequisite = {
   id: string;
@@ -143,6 +148,7 @@ export type CourseContentItem = {
 
 export type CourseLessonProps = {
   content: CourseContentItem;
+  language: CourseLanguage;
   onPractice?: (link: PracticeLink) => void;
 };
 
@@ -176,7 +182,7 @@ function tableCells(line: string): string[] {
   return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
 }
 
-function markdownBlocks(markdown: string): ReactNode[] {
+function markdownBlocks(markdown: string, t: CourseCopy): ReactNode[] {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let index = 0;
@@ -199,7 +205,7 @@ function markdownBlocks(markdown: string): ReactNode[] {
       const code = body.join("\n");
       blocks.push(
         language === "python" || language === "py" ? (
-          <PythonCodeBlock key={`code-${blocks.length}`} code={code} ariaLabel="讲义 Python 示例" />
+          <PythonCodeBlock key={`code-${blocks.length}`} code={code} ariaLabel={t.lessonPythonExample} />
         ) : (
           <pre key={`code-${blocks.length}`} className="plain-code"><code>{code}</code></pre>
         ),
@@ -285,42 +291,42 @@ function BulletList({ items }: { items: string[] }) {
   return <ul>{items.map((item, index) => <li key={index}>{inlineMarkdown(item)}</li>)}</ul>;
 }
 
-function formatStudyMinutes(study: StudyMinutes): string {
-  return `${study.min}–${study.max} 分钟`;
+function formatStudyMinutes(study: StudyMinutes, t: CourseCopy): string {
+  return t.studyMinutes(study.min, study.max);
 }
 
-function OperationalContractView({ concept }: { concept: LessonConcept }) {
+function OperationalContractView({ concept, t }: { concept: LessonConcept; t: CourseCopy }) {
   const operational_contract = concept.operational_contract;
   if (!operational_contract) return null;
   return (
-    <section className="operational-contract" aria-label={`${concept.name} 的输入输出契约`}>
-      <h4>输入和输出是什么</h4>
-      <p><strong>可用形式：</strong>{operational_contract.forms.map((form) => <code key={form}>{form}</code>)}</p>
-      <h5>输入</h5>
+    <section className="operational-contract" aria-label={t.inputOutputContract(concept.name)}>
+      <h4>{t.inputOutputHeading}</h4>
+      <p><strong>{t.availableForms}</strong>{operational_contract.forms.map((form) => <code key={form}>{form}</code>)}</p>
+      <h5>{t.input}</h5>
       {operational_contract.inputs.map((input) => (
         <dl key={input.name}>
           <dt>{input.name}</dt><dd>{input.meaning}</dd>
-          <dt>形式</dt><dd><code>{input.form}</code></dd>
-          <dt>具体例子</dt><dd><code>{input.example}</code></dd>
-          {input.constraints.length ? <><dt>约束</dt><dd><BulletList items={input.constraints} /></dd></> : null}
+          <dt>{t.form}</dt><dd><code>{input.form}</code></dd>
+          <dt>{t.concreteExample}</dt><dd><code>{input.example}</code></dd>
+          {input.constraints.length ? <><dt>{t.constraints}</dt><dd><BulletList items={input.constraints} /></dd></> : null}
         </dl>
       ))}
-      <h5>输出</h5>
+      <h5>{t.output}</h5>
       {operational_contract.outputs.map((output) => (
         <dl key={output.name}>
           <dt>{output.name}</dt><dd>{output.meaning}</dd>
-          <dt>形式</dt><dd><code>{output.form}</code></dd>
-          <dt>具体例子</dt><dd><code>{output.example}</code></dd>
+          <dt>{t.form}</dt><dd><code>{output.form}</code></dd>
+          <dt>{t.concreteExample}</dt><dd><code>{output.example}</code></dd>
         </dl>
       ))}
-      <h5>可观察影响</h5>
+      <h5>{t.observableEffects}</h5>
       <BulletList items={operational_contract.effects} />
-      <h5>失败时会发生什么</h5>
+      <h5>{t.failureBehavior}</h5>
       {operational_contract.failure_modes.map((failure, index) => (
         <dl key={index}>
-          <dt>条件</dt><dd>{failure.condition}</dd>
-          <dt>可观察结果</dt><dd>{failure.observable}</dd>
-          <dt>恢复方式</dt><dd>{failure.recovery}</dd>
+          <dt>{t.condition}</dt><dd>{failure.condition}</dd>
+          <dt>{t.observableResult}</dt><dd>{failure.observable}</dd>
+          <dt>{t.recovery}</dt><dd>{failure.recovery}</dd>
         </dl>
       ))}
     </section>
@@ -331,26 +337,28 @@ function ConceptOverview({
   concept,
   practice,
   onPractice,
+  t,
 }: {
   concept: LessonConcept;
   practice?: PracticeLink;
   onPractice?: (link: PracticeLink) => void;
+  t: CourseCopy;
 }) {
   return (
     <article className="lesson-concept-overview" aria-labelledby={`${concept.id}-overview-title`}>
       <h3 id={`${concept.id}-overview-title`}>{concept.name}</h3>
-      <p><strong>定义：</strong>{concept.definition}</p>
-      <p><strong>它解决什么：</strong>{concept.purpose}</p>
-      <h4>先这样理解</h4>
+      <p><strong>{t.definition}</strong>{concept.definition}</p>
+      <p><strong>{t.purpose}</strong>{concept.purpose}</p>
+      <h4>{t.mentalModel}</h4>
       <p>{concept.mental_model}</p>
-      <OperationalContractView concept={concept} />
+      <OperationalContractView concept={concept} t={t} />
       {practice ? (
         <button
           type="button"
           className="practice-action"
           onClick={() => onPractice?.(practice)}
         >
-          <span>先做这个练习</span>
+          <span>{t.practiceFirst}</span>
           <strong>{practice.title}</strong>
         </button>
       ) : null}
@@ -358,24 +366,24 @@ function ConceptOverview({
   );
 }
 
-function ConceptDeepDive({ concept }: { concept: LessonConcept }) {
+function ConceptDeepDive({ concept, t }: { concept: LessonConcept; t: CourseCopy }) {
   return (
     <section className="lesson-concept" aria-labelledby={`${concept.id}-title`}>
       <h4 id={`${concept.id}-title`}>{concept.name}</h4>
-      <h4>运行过程</h4>
+      <h4>{t.runtimeProcess}</h4>
       <ol>{concept.mechanism.map((step, index) => <li key={index}>{inlineMarkdown(step)}</li>)}</ol>
       <div className="lesson-tradeoff-grid">
-        <section><h4>为什么这样设计</h4><BulletList items={concept.design_reasons} /></section>
-        <section><h4>带来的好处</h4><BulletList items={concept.benefits} /></section>
-        <section><h4>要付出的代价</h4><BulletList items={concept.tradeoffs} /></section>
-        <section><h4>必须保持的条件</h4><BulletList items={concept.invariants} /></section>
-        <section><h4>适用边界</h4><BulletList items={concept.boundaries} /></section>
-        <section><h4>常见误区</h4><BulletList items={concept.pitfalls} /></section>
+        <section><h4>{t.designReasons}</h4><BulletList items={concept.design_reasons} /></section>
+        <section><h4>{t.benefits}</h4><BulletList items={concept.benefits} /></section>
+        <section><h4>{t.tradeoffs}</h4><BulletList items={concept.tradeoffs} /></section>
+        <section><h4>{t.invariants}</h4><BulletList items={concept.invariants} /></section>
+        <section><h4>{t.boundaries}</h4><BulletList items={concept.boundaries} /></section>
+        <section><h4>{t.pitfalls}</h4><BulletList items={concept.pitfalls} /></section>
       </div>
-      <div className="lesson-claims" aria-label="本概念的来源依据">
+      <div className="lesson-claims" aria-label={t.sourceBasis}>
         {concept.source_claims.map((claim, index) => (
           <p key={`${claim.source_id}-${index}`}>
-            <span>{claim.status === "documented" ? "公开契约" : "实现细节"}</span>
+            <span>{claim.status === "documented" ? t.documentedContract : t.implementationDetail}</span>
             {claim.claim}
           </p>
         ))}
@@ -389,11 +397,13 @@ function StructuredLesson({
   studyMinutes,
   practiceLinks,
   onPractice,
+  t,
 }: {
   outline: LessonOutline;
   studyMinutes?: StudyMinutes;
   practiceLinks: PracticeLink[];
   onPractice?: (link: PracticeLink) => void;
+  t: CourseCopy;
 }) {
   const runnableExamples = outline.examples.filter((example) => example.kind === "runnable");
   const diagnosticExamples = outline.examples.filter((example) => example.kind === "diagnostic");
@@ -405,32 +415,32 @@ function StructuredLesson({
       <section className="lesson-beginner-core">
         {studyMinutes ? (
           <aside className="study-time">
-            <strong>预计学习时间：{formatStudyMinutes(studyMinutes)}</strong>
+            <strong>{t.estimatedStudyTime}{formatStudyMinutes(studyMinutes, t)}</strong>
             {studyMinutes.reason ? <span>{studyMinutes.reason}</span> : null}
           </aside>
         ) : null}
-        <h2>学习前先确认</h2>
+        <h2>{t.studyPrerequisites}</h2>
         <div className="lesson-prerequisites">
           {outline.prerequisites.map((item) => (
             <article key={item.id}>
               <h3>{item.title}</h3>
-              <p><strong>为什么需要：</strong>{item.why}</p>
-              <p><strong>快速复习：</strong>{item.refresh}</p>
+              <p><strong>{t.whyNeeded}</strong>{item.why}</p>
+              <p><strong>{t.quickReview}</strong>{item.refresh}</p>
             </article>
           ))}
         </div>
 
-        <h2>本章要解决的问题</h2>
+        <h2>{t.chapterProblem}</h2>
         <p>{outline.problem.context}</p>
         <blockquote>
-          <strong>看似简单的做法：</strong> {outline.problem.naive_approach}<br />
-          <strong>它为什么会失败：</strong> {outline.problem.failure}
+          <strong>{t.naiveApproach}</strong> {outline.problem.naive_approach}<br />
+          <strong>{t.whyItFails}</strong> {outline.problem.failure}
         </blockquote>
 
-        <h2>学完你将能够</h2>
+        <h2>{t.outcomes}</h2>
         <ul>{outline.outcomes.map((outcome) => <li key={outcome.id}>{outcome.text}</li>)}</ul>
 
-        <h2>先认识本章概念</h2>
+        <h2>{t.conceptsFirst}</h2>
         <div className="lesson-concept-overviews">
           {outline.concepts.map((concept) => (
             <ConceptOverview
@@ -438,31 +448,32 @@ function StructuredLesson({
               concept={concept}
               practice={practiceLinksByConcept.get(concept.id)}
               onPractice={onPractice}
+              t={t}
             />
           ))}
         </div>
 
-        <h2>讲义可运行示例</h2>
+        <h2>{t.runnableExamples}</h2>
         {runnableExamples.map((example) => (
           <article className="lesson-runnable" key={example.id}>
             <h3>{example.title}</h3>
             <p>{example.explanation}</p>
-            {example.code ? <PythonCodeBlock code={example.code} ariaLabel={`${example.title} Python 示例`} /> : null}
+            {example.code ? <PythonCodeBlock code={example.code} ariaLabel={t.pythonExampleLabel(example.title)} /> : null}
             <dl>
-              <dt>运行</dt><dd><code>{example.command}</code></dd>
-              <dt>预期</dt><dd><code>{example.expected_output}</code></dd>
+              <dt>{t.run}</dt><dd><code>{example.command}</code></dd>
+              <dt>{t.expected}</dt><dd><code>{example.expected_output}</code></dd>
             </dl>
             {example.trace?.length ? (
-              <section className="lesson-trace" aria-label={`${example.title} 的具体执行轨迹`}>
-                <h4>拿一个具体输入走一遍</h4>
+              <section className="lesson-trace" aria-label={t.traceLabel(example.title)}>
+                <h4>{t.concreteTrace}</h4>
                 <ol>
                   {example.trace.map((step) => (
                     <li key={step.id}>
                       <dl>
-                        <dt>输入状态</dt><dd>{step.input_state}</dd>
-                        <dt>执行动作</dt><dd>{step.operation}</dd>
-                        <dt>输出状态</dt><dd>{step.output_state}</dd>
-                        <dt>为什么</dt><dd>{step.explanation}</dd>
+                        <dt>{t.inputState}</dt><dd>{step.input_state}</dd>
+                        <dt>{t.operation}</dt><dd>{step.operation}</dd>
+                        <dt>{t.outputState}</dt><dd>{step.output_state}</dd>
+                        <dt>{t.why}</dt><dd>{step.explanation}</dd>
                       </dl>
                     </li>
                   ))}
@@ -474,50 +485,51 @@ function StructuredLesson({
       </section>
 
       <details className="lesson-deep-dive">
-        <summary>运行细节：深入原理与设计取舍</summary>
+        <summary>{t.deepDive}</summary>
         <div className="lesson-disclosure-body">
-          {outline.concepts.map((concept) => <ConceptDeepDive key={concept.id} concept={concept} />)}
+          {outline.concepts.map((concept) => <ConceptDeepDive key={concept.id} concept={concept} t={t} />)}
         </div>
       </details>
 
       <details className="lesson-deep-dive lesson-diagnostic">
-        <summary>错误现象、原因与修复</summary>
+        <summary>{t.diagnostics}</summary>
         <div className="lesson-disclosure-body">
           {diagnosticExamples.map((example) => (
             <article key={example.id}>
               <h3>{example.title}</h3>
               <p>{example.explanation}</p>
-              <h4>错误代码</h4>
-              {example.wrong_code ? <PythonCodeBlock code={example.wrong_code} ariaLabel={`${example.title} 错误代码`} /> : null}
-              <p><strong>你会看到：</strong>{example.symptom}</p>
-              <p><strong>根本原因：</strong>{example.cause}</p>
-              <h4>修复代码</h4>
-              {example.fix_code ? <PythonCodeBlock code={example.fix_code} ariaLabel={`${example.title} 修复代码`} /> : null}
+              <h4>{t.wrongCode}</h4>
+              {example.wrong_code ? <PythonCodeBlock code={example.wrong_code} ariaLabel={t.wrongCodeLabel(example.title)} /> : null}
+              <p><strong>{t.symptom}</strong>{example.symptom}</p>
+              <p><strong>{t.rootCause}</strong>{example.cause}</p>
+              <h4>{t.fixedCode}</h4>
+              {example.fix_code ? <PythonCodeBlock code={example.fix_code} ariaLabel={t.fixedCodeLabel(example.title)} /> : null}
             </article>
           ))}
         </div>
       </details>
 
-      <section className="lesson-bridge" aria-label="本章与累计项目的连接">
-        <h2>把这一章接回累计项目</h2>
+      <section className="lesson-bridge" aria-label={t.capstoneBridgeLabel}>
+        <h2>{t.capstoneBridge}</h2>
         <dl>
-          <dt>输入</dt><dd>{outline.capstone_bridge.input}</dd>
-          <dt>输出</dt><dd>{outline.capstone_bridge.output}</dd>
-          <dt>本章增量</dt><dd>{outline.capstone_bridge.increment}</dd>
-          <dt>下一章</dt><dd>{outline.capstone_bridge.next}</dd>
+          <dt>{t.input}</dt><dd>{outline.capstone_bridge.input}</dd>
+          <dt>{t.output}</dt><dd>{outline.capstone_bridge.output}</dd>
+          <dt>{t.chapterIncrement}</dt><dd>{outline.capstone_bridge.increment}</dd>
+          <dt>{t.nextChapter}</dt><dd>{outline.capstone_bridge.next}</dd>
         </dl>
-        <h3>本章小结</h3>
+        <h3>{t.chapterSummary}</h3>
         <BulletList items={outline.summary} />
       </section>
     </>
   );
 }
 
-export function CourseLesson({ content, onPractice }: CourseLessonProps) {
+export function CourseLesson({ content, language, onPractice }: CourseLessonProps) {
+  const t = courseCopy(language);
   return (
-    <article className="course-lesson" aria-label={`${content.title} 讲义`}>
+    <article className="course-lesson" aria-label={t.lessonLabel(content.title)}>
       {content.concepts?.length ? (
-        <div className="concept-row" aria-label="本章概念">
+        <div className="concept-row" aria-label={t.chapterConcepts}>
           {content.concepts.map((concept) => <span key={concept}>{concept}</span>)}
         </div>
       ) : null}
@@ -528,16 +540,17 @@ export function CourseLesson({ content, onPractice }: CourseLessonProps) {
               studyMinutes={content.study_minutes}
               practiceLinks={content.practice_links ?? []}
               onPractice={onPractice}
+              t={t}
             />
           )
-        : markdownBlocks(content.lesson)}
+        : markdownBlocks(content.lesson, t)}
       {content.capstone_increment ? (
-        <aside className="capstone-note"><strong>CAPSTONE</strong><span>{content.capstone_increment}</span></aside>
+        <aside className="capstone-note"><strong>{t.capstoneLabel}</strong><span>{content.capstone_increment}</span></aside>
       ) : null}
       {content.sources?.length ? (
         <details className="source-list">
-          <summary>依据与延伸：官方参考资料</summary>
-          <div aria-label="参考资料">
+          <summary>{t.sourcesSummary}</summary>
+          <div aria-label={t.references}>
             {content.sources.map((source) => (
               <a key={source.id} href={source.url} target="_blank" rel="noopener noreferrer">{source.title}</a>
             ))}

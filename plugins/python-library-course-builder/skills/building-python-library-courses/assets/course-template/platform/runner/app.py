@@ -16,6 +16,7 @@ import time
 from typing import Any, Callable, Iterator, Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -30,6 +31,11 @@ from support.coursekit.course import (
     schema_version as manifest_schema_version,
 )
 from support.coursekit.source_policy import preflight_question_source
+from support.coursekit.locale import (
+    CourseLanguageError,
+    copy_for_manifest,
+    localize_detail,
+)
 
 
 PLATFORM_ROOT = Path(__file__).resolve().parents[1]
@@ -714,6 +720,7 @@ def canonical_test_targets(root: Path, selectors: list[Any]) -> list[str]:
 
 def run_tests(request: RunRequest) -> tuple[bool, bool, str]:
     internal = manifest(internal=True)
+    copy = copy_for_manifest(internal)
     _, question = find_question(internal, request.lab_id, request.question_id)
     timeout_seconds = question.get("timeout_seconds", 30)
     if (
@@ -729,7 +736,7 @@ def run_tests(request: RunRequest) -> tuple[bool, bool, str]:
     )
     public_remaining = deadline - time.monotonic()
     if public_remaining <= 0:
-        return False, False, "[coursekit] pytest timed out before public tests started"
+        return False, False, copy["public_timeout"]
     public_result = run_isolated_pytest(
         WORKSPACE_ROOT,
         public_targets,
@@ -747,8 +754,7 @@ def run_tests(request: RunRequest) -> tuple[bool, bool, str]:
             return (
                 False,
                 True,
-                "Public tests passed. Hidden verification failed "
-                f"(timeout budget exhausted before {len(hidden_targets)} private target(s) could be checked).",
+                copy["hidden_timeout"].format(count=len(hidden_targets)),
             )
         hidden_result = run_isolated_pytest(
             WORKSPACE_ROOT,
@@ -762,14 +768,13 @@ def run_tests(request: RunRequest) -> tuple[bool, bool, str]:
         return (
             False,
             True,
-            "Public tests passed. "
-            "Hidden verification failed (private grader unavailable).",
+            copy["hidden_unavailable"],
         )
     target_count = len(hidden_targets)
-    result = "passed" if hidden_result.passed else "failed"
-    output = (
-        "Public tests passed. "
-        f"Hidden verification {result} ({target_count} private target(s) checked)."
+    result = copy["hidden_passed"] if hidden_result.passed else copy["hidden_failed"]
+    output = copy["hidden_result"].format(
+        result=result,
+        count=target_count,
     )
     return hidden_result.passed, True, output
 
@@ -832,8 +837,10 @@ def score(value: dict[str, Any]) -> dict[str, int]:
 def create_app() -> FastAPI:
     title = "CourseKit Local Runner"
     try:
-        title = f"{manifest(internal=True)['title']} Local Runner"
-    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        current_manifest = manifest(internal=True)
+        copy = copy_for_manifest(current_manifest)
+        title = f"{current_manifest['title']} {copy['local_runner']}"
+    except (OSError, ValueError, KeyError, json.JSONDecodeError, CourseLanguageError):
         pass
     app = FastAPI(title=title)
     app.add_middleware(
@@ -843,13 +850,44 @@ def create_app() -> FastAPI:
         allow_headers=["content-type"],
     )
 
+    @app.middleware("http")
+    async def require_supported_course_language(
+        request: Any, call_next: Callable[[Any], Any]
+    ) -> Any:
+        if request.url.path != "/api/health":
+            try:
+                copy_for_manifest(manifest(internal=True))
+            except CourseLanguageError as error:
+                return JSONResponse(
+                    status_code=500,
+                    content={"detail": str(error)},
+                )
+        return await call_next(request)
+
+    @app.exception_handler(HTTPException)
+    async def localized_http_error(_request: Any, error: HTTPException) -> JSONResponse:
+        try:
+            copy = copy_for_manifest(manifest(internal=True))
+            detail = localize_detail(error.detail, copy)
+            status_code = error.status_code
+        except CourseLanguageError as language_error:
+            detail = str(language_error)
+            status_code = 500
+        return JSONResponse(
+            status_code=status_code,
+            content={"detail": detail},
+            headers=error.headers,
+        )
+
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/api/course")
     def course() -> dict[str, Any]:
-        return {"manifest": learner_manifest(), "state": exposed_state(read_state())}
+        learner = learner_manifest()
+        copy_for_manifest(learner)
+        return {"manifest": learner, "state": exposed_state(read_state())}
 
     @app.get("/api/state")
     def state() -> dict[str, Any]:

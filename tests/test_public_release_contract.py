@@ -19,15 +19,16 @@ PLUGIN_NAME = "python-library-course-builder"
 SKILL_NAME = "building-python-library-courses"
 SKILL_DESCRIPTION = (
     "Use when a user asks to build, create, author, or learn through a "
-    "structured, Chinese-first hands-on course project for a Python "
+    "structured, language-selectable hands-on course project for a Python "
     "standard-library module, PyPI package, framework, or repository instead "
     "of receiving a one-off explanation."
 )
-SKILL_SHORT_DESCRIPTION = "Build Chinese-first Python learning projects"
+SKILL_SHORT_DESCRIPTION = "Build Python courses in Chinese or English"
 SKILL_DEFAULT_PROMPT = (
     "Use $building-python-library-courses to create a source-backed "
-    "Chinese-first course for a Python library or repository."
+    "course for a Python library or repository."
 )
+RELEASE_VERSION = "0.2.0"
 PLUGIN_ROOT = ROOT / "plugins" / PLUGIN_NAME
 SKILL_ROOT = PLUGIN_ROOT / "skills" / SKILL_NAME
 SCRIPTS_ROOT = SKILL_ROOT / "scripts"
@@ -126,7 +127,7 @@ def test_plugin_manifest_and_marketplace_publish_exact_skill_only_metadata() -> 
     manifest = _required_json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
 
     assert manifest["name"] == PLUGIN_NAME
-    assert manifest["version"] == "0.1.1"
+    assert manifest["version"] == RELEASE_VERSION
     assert manifest["author"]["name"] == "I0G4N"
     assert manifest["author"]["url"] == "https://github.com/I0G4N"
     assert "email" not in manifest["author"]
@@ -256,7 +257,7 @@ def test_changelog_publishes_the_release_version_from_project_metadata() -> None
     manifest = _required_json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
     changelog_version = release.group("version")
 
-    assert changelog_version == "0.1.1"
+    assert changelog_version == RELEASE_VERSION
     assert release.group("date") == "2026-07-15"
     assert project["project"]["version"] == changelog_version
     assert manifest["version"] == changelog_version
@@ -264,6 +265,7 @@ def test_changelog_publishes_the_release_version_from_project_metadata() -> None
 
 def test_release_docs_link_the_changelog_and_publish_exact_validation_commands() -> None:
     readme = _required_text(ROOT / "README.md")
+    chinese_readme = _required_text(ROOT / "README.zh-CN.md")
     contributing = _required_text(ROOT / "CONTRIBUTING.md")
     checklist = _required_text(ROOT / "RELEASE_CHECKLIST.md")
     changelog_link = re.compile(
@@ -272,6 +274,9 @@ def test_release_docs_link_the_changelog_and_publish_exact_validation_commands()
     )
 
     assert changelog_link.search(readme), "README.md must link CHANGELOG.md"
+    assert changelog_link.search(chinese_readme), (
+        "README.zh-CN.md must link CHANGELOG.md"
+    )
     assert changelog_link.search(checklist), (
         "RELEASE_CHECKLIST.md must link CHANGELOG.md"
     )
@@ -295,13 +300,18 @@ def test_release_docs_link_the_changelog_and_publish_exact_validation_commands()
 
 
 def test_readme_publishes_a_generic_local_marketplace_install_flow() -> None:
-    commands = _fenced_shell_commands(_required_text(ROOT / "README.md"))
+    readmes = (
+        _required_text(ROOT / "README.md"),
+        _required_text(ROOT / "README.zh-CN.md"),
+    )
 
-    assert "codex plugin marketplace add ./python-library-course-builder" in commands
-    assert (
-        "codex plugin add "
-        "python-library-course-builder@python-library-course-builder"
-    ) in commands
+    for readme in readmes:
+        commands = _fenced_shell_commands(readme)
+        assert "codex plugin marketplace add ./python-library-course-builder" in commands
+        assert (
+            "codex plugin add "
+            "python-library-course-builder@python-library-course-builder"
+        ) in commands
 
 
 def test_public_repository_files_and_generated_template_license_are_present(
@@ -309,6 +319,7 @@ def test_public_repository_files_and_generated_template_license_are_present(
 ) -> None:
     required = (
         "README.md",
+        "README.zh-CN.md",
         "LICENSE",
         "NOTICE",
         "SECURITY.md",
@@ -388,7 +399,11 @@ def test_public_docs_are_neutral_navigable_and_state_runtime_boundaries() -> Non
     }
     for name, document in documents.items():
         lowered = document.casefold()
-        assert re.search(r"^## (?:prerequisites|requirements)$", document, re.MULTILINE), name
+        assert re.search(
+            r"^## (?:prerequisites|requirements)$",
+            document,
+            re.MULTILINE | re.IGNORECASE,
+        ), name
         for prerequisite in ("python 3.13", "uv", "node.js 22.13", "git"):
             assert prerequisite in lowered, f"{name} does not state {prerequisite}"
         assert "authoring repository" in lowered, name

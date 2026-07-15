@@ -638,17 +638,19 @@ def test_teaching_depth_reference_defines_positive_chapter_recipe() -> None:
         "先这样理解",
         "输入和输出是什么",
         "拿一个具体输入走一遍",
+        "Start with this mental model",
+        "What are the inputs and outputs?",
+        "Walk one concrete input through the flow",
         "first practice link",
         "word count",
     ):
         assert phrase.lower() in depth_lower
 
-    natural = depth.split("## Write natural learner-facing Chinese", 1)[1].split(
+    natural = depth.split("## Write natural learner-facing prose", 1)[1].split(
         "## Adapt the recipe to the concept kind", 1
     )[0]
     assert "Define a term at first use" in natural
-    assert "Use short transitions" in natural
-    assert "这在这里重要，因为" in natural
+    assert "Use short natural transitions" in natural
     assert "Alternate explanation with concrete values" in natural
     assert "schema-field dump" in natural
     assert "stiff glossary" in natural
@@ -666,18 +668,43 @@ def test_teaching_depth_reference_defines_positive_chapter_recipe() -> None:
     assert "with a specific reason naming that work" in time_contract
 
 
-def test_skill_links_the_complete_positive_teaching_example_directly() -> None:
+def test_skill_asks_for_supported_language_first_on_every_fresh_invocation() -> None:
+    skill = _read("SKILL.md")
+    language = skill.split("## Choose the course language", 1)[1].split(
+        "## requirements", 1
+    )[0]
+
+    _assert_in_order(
+        language,
+        (
+            "first question",
+            "before any other question or action",
+            "even when the request already names a language",
+            "Simplified Chinese (`zh-CN`)",
+            "English (`en`)",
+            "wait for the answer",
+        ),
+    )
+    assert "Support exactly `zh-CN` and `en`" in language
+    assert "Do not infer" in language
+
+
+def test_skill_links_locale_specific_complete_positive_teaching_examples() -> None:
     skill = _read("SKILL.md")
     depth = _read("references/teaching-depth-contract.md")
-    example_path = SKILL_ROOT / "references/complete-teaching-example.md"
-    example_link = (
-        "[complete-teaching-example.md](references/complete-teaching-example.md)"
-    )
-    relative_link = "[complete teaching example](complete-teaching-example.md)"
+    index_path = SKILL_ROOT / "references/complete-teaching-example.md"
+    locale_paths = {
+        "zh-CN": SKILL_ROOT / "references/complete-teaching-example.zh-CN.md",
+        "en": SKILL_ROOT / "references/complete-teaching-example.en.md",
+    }
 
-    assert example_path.is_file(), "the Skill needs one first-class positive example"
-    assert example_link in skill
-    assert relative_link in depth
+    assert index_path.is_file(), "the Skill needs a locale-routing example index"
+    for locale, path in locale_paths.items():
+        assert path.is_file(), f"the Skill needs a complete {locale} positive example"
+        assert path.name in skill
+        assert path.name in depth
+        assert len(path.read_text(encoding="utf-8").splitlines()) >= 350
+    assert "Read only the example matching the selected course language" in skill
     assert "before authoring learner-facing prose" in skill
 
 
@@ -722,9 +749,9 @@ def test_teaching_depth_contract_expands_each_gap_and_graded_chapter() -> None:
     assert "same concept and outcome" in graded
 
 
-def test_teaching_contract_requires_connected_natural_simplified_chinese() -> None:
+def test_teaching_contract_requires_connected_natural_selected_language() -> None:
     depth = _read("references/teaching-depth-contract.md")
-    natural = depth.split("## Write natural learner-facing Chinese", 1)[1].split(
+    natural = depth.split("## Write natural learner-facing prose", 1)[1].split(
         "## Adapt the recipe to the concept kind", 1
     )[0]
 
@@ -738,14 +765,23 @@ def test_teaching_contract_requires_connected_natural_simplified_chinese() -> No
             "concrete value",
         ),
     )
-    assert "Simplified Chinese" in natural
+    for label in (
+        "先这样理解",
+        "输入和输出是什么",
+        "拿一个具体输入走一遍",
+        "Start with this mental model",
+        "What are the inputs and outputs?",
+        "Walk one concrete input through the flow",
+    ):
+        assert label in natural
+    assert "selected language" in natural
     assert "author-field inventory" in natural
     assert "definition -> purpose -> mechanism" in natural
     assert "connected explanation" in natural
 
 
 def test_complete_example_models_two_structured_lab00_layers() -> None:
-    path = SKILL_ROOT / "references/complete-teaching-example.md"
+    path = SKILL_ROOT / "references/complete-teaching-example.zh-CN.md"
     assert path.is_file()
     example = path.read_text(encoding="utf-8")
 
@@ -775,7 +811,7 @@ def test_complete_example_models_two_structured_lab00_layers() -> None:
 def test_complete_example_executes_every_lab00_boundary_recovery(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    example = _read("references/complete-teaching-example.md")
+    example = _read("references/complete-teaching-example.zh-CN.md")
     lab00 = dict(_markdown_children(example, level=2))[
         "Lab 00：只补证据指向的缺口"
     ]
@@ -816,7 +852,7 @@ def test_complete_example_executes_every_lab00_boundary_recovery(
 
 
 def test_complete_example_keeps_the_graded_chapter_to_one_mainline() -> None:
-    example = _read("references/complete-teaching-example.md")
+    example = _read("references/complete-teaching-example.zh-CN.md")
     top_level_sections = _markdown_section_map(example, level=2)
     graded = top_level_sections["计分章节：把 JSON 文本变成可验证的配置值"]
     lead = _markdown_lead(graded, child_level=3)
@@ -850,7 +886,7 @@ def test_complete_example_keeps_the_graded_chapter_to_one_mainline() -> None:
 def test_complete_example_executes_load_settings_and_both_recoveries(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    example = _read("references/complete-teaching-example.md")
+    example = _read("references/complete-teaching-example.zh-CN.md")
     graded = _markdown_section_map(example, level=2)[
         "计分章节：把 JSON 文本变成可验证的配置值"
     ]
@@ -940,7 +976,7 @@ def test_teaching_contract_requires_end_to_end_boundary_witnesses() -> None:
     heading = "## Prove every declared boundary end to end"
     assert heading in depth
     witness = depth.split(heading, 1)[1].split(
-        "## Write natural learner-facing Chinese", 1
+        "## Write natural learner-facing prose", 1
     )[0]
     _assert_in_order(
         witness,
@@ -1059,6 +1095,12 @@ def test_skill_docs_reject_old_agent_evaluation_terms_and_keep_local_acceptance(
         "complete-teaching-example.md": _read(
             "references/complete-teaching-example.md"
         ),
+        "complete-teaching-example.zh-CN.md": _read(
+            "references/complete-teaching-example.zh-CN.md"
+        ),
+        "complete-teaching-example.en.md": _read(
+            "references/complete-teaching-example.en.md"
+        ),
         "forward-test-rubric.md": _read("references/forward-test-rubric.md"),
     }
     forward = documents["forward-test-rubric.md"]
@@ -1121,13 +1163,31 @@ def test_skill_docs_reject_old_agent_evaluation_terms_and_keep_local_acceptance(
         "manifest",
         "README",
         "open core",
-        "先这样理解",
-        "输入和输出是什么",
-        "拿一个具体输入走一遍",
+        "selected locale's exact predictive-model",
+        "operational-contract",
+        "concrete-trace labels",
+        "teaching-depth-contract.md",
         "first practice link",
         "learner-safe labels",
     ):
         assert phrase in forward
+
+
+def test_complete_english_example_uses_the_english_contract_without_chinese_fallback() -> None:
+    example = _read("references/complete-teaching-example.en.md")
+
+    assert re.search(r"[\u3400-\u9fff]", example) is None
+    for heading in (
+        "### Predict what happens",
+        "### What are the inputs and outputs?",
+        "### Walk one concrete input through the flow",
+        "### Diagnosis and recovery",
+        "### Knowledge check",
+        "### Coding task and capstone increment",
+    ):
+        assert heading in example
+    assert "exactly one new knowledge mainline" in example
+    assert "concept_ids: [lab01.c-json-object-boundary]" in example
 
 
 def test_skill_requires_executable_content_quality() -> None:

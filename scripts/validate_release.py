@@ -74,6 +74,7 @@ EXPECTED_TEMPLATE_TOKENS = {
     "__COURSEKIT_CAPSTONE__",
     "__COURSEKIT_DESCRIPTION__",
     "__COURSEKIT_FIRST_QUESTION__",
+    "__COURSEKIT_LANGUAGE__",
     "__COURSEKIT_PREPARATION__",
     "__COURSEKIT_PYTHON_REQUIRES__",
     "__COURSEKIT_ROUTE__",
@@ -98,6 +99,7 @@ PRIVATE_HOST_PATTERNS = (
     re.compile(br"[A-Za-z]:\\Users\\[^\\\s]+\\"),
 )
 TEMPLATE_TOKEN_RE = re.compile(r"__COURSEKIT_[A-Z0-9_]+__")
+HAN_CHARACTER_RE = re.compile(r"[\u3400-\u9fff]")
 STRICT_SEMVER_RE = re.compile(
     r"^(0|[1-9]\d*)\."
     r"(0|[1-9]\d*)\."
@@ -222,6 +224,7 @@ def scan_inventory(root: Path, files: Iterable[Path]) -> list[str]:
     legacy_marker_allowlist = {
         ("CS61A" + "-style").casefold(): {
             Path("README.md"),
+            Path("README.zh-CN.md"),
             Path("CHANGELOG.md"),
         },
     }
@@ -953,6 +956,220 @@ def forward_verification_plan(
     )
 
 
+def forward_fixture_locale_errors(
+    language: str,
+    spec: Mapping[str, object],
+    readiness_plan: Mapping[str, object],
+) -> list[str]:
+    errors: list[str] = []
+    if language not in {"zh-CN", "en"}:
+        return [f"unsupported forward fixture language: {language}"]
+    course = spec.get("course")
+    course_language = course.get("language") if isinstance(course, Mapping) else None
+    if course_language != language:
+        errors.append("forward fixture course.language does not match its locale")
+    if readiness_plan.get("language") != language:
+        errors.append("forward readiness plan language does not match its locale")
+    serialized = json.dumps(
+        {"spec": spec, "readiness_plan": readiness_plan},
+        ensure_ascii=False,
+    )
+    has_han = HAN_CHARACTER_RE.search(serialized) is not None
+    if language == "en" and has_han:
+        errors.append("English forward fixture contains Han learner-facing text")
+    if language == "zh-CN" and not has_han:
+        errors.append("zh-CN forward fixture contains no Chinese learner-facing text")
+    if language == "zh-CN":
+        errors.extend(_zh_fixture_anchor_errors(spec, readiness_plan))
+    return errors
+
+
+def _require_han_text(errors: list[str], label: str, value: object) -> None:
+    if not isinstance(value, str) or HAN_CHARACTER_RE.search(value) is None:
+        errors.append(f"zh-CN learner-facing field must contain Chinese text: {label}")
+
+
+def _object_list(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
+
+def _zh_fixture_anchor_errors(
+    spec: Mapping[str, object],
+    readiness_plan: Mapping[str, object],
+) -> list[str]:
+    errors: list[str] = []
+    course = spec.get("course")
+    course = course if isinstance(course, Mapping) else {}
+    for field in ("title", "description", "capstone"):
+        _require_han_text(errors, f"spec.course.{field}", course.get(field))
+
+    for index, capability in enumerate(
+        _object_list(readiness_plan.get("capabilities"))
+    ):
+        for field in ("subject", "title"):
+            _require_han_text(
+                errors,
+                f"readiness_plan.capabilities[{index}].{field}",
+                capability.get(field),
+            )
+
+    for collection in ("preparatory_units", "labs"):
+        for index, unit in enumerate(_object_list(spec.get(collection))):
+            prefix = f"spec.{collection}[{index}]"
+            _require_han_text(errors, f"{prefix}.title", unit.get("title"))
+            lesson = unit.get("lesson")
+            lesson = lesson if isinstance(lesson, Mapping) else {}
+            problem = lesson.get("problem")
+            problem = problem if isinstance(problem, Mapping) else {}
+            _require_han_text(
+                errors,
+                f"{prefix}.lesson.problem.context",
+                problem.get("context"),
+            )
+            outcomes = _object_list(lesson.get("outcomes"))
+            _require_han_text(
+                errors,
+                f"{prefix}.lesson.outcomes[0].text",
+                outcomes[0].get("text") if outcomes else None,
+            )
+            concepts = _object_list(lesson.get("concepts"))
+            _require_han_text(
+                errors,
+                f"{prefix}.lesson.concepts[0].definition",
+                concepts[0].get("definition") if concepts else None,
+            )
+            quiz = _object_list(unit.get("quiz"))
+            first_question = quiz[0] if quiz else {}
+            _require_han_text(
+                errors,
+                f"{prefix}.quiz[0].prompt",
+                first_question.get("prompt"),
+            )
+            choices = _object_list(first_question.get("choices"))
+            _require_han_text(
+                errors,
+                f"{prefix}.quiz[0].choices[0].text",
+                choices[0].get("text") if choices else None,
+            )
+    return errors
+
+
+def _zh_generated_anchor_errors(
+    project: Path,
+    manifest: Mapping[str, object],
+    surfaces: Mapping[Path, str],
+) -> list[str]:
+    errors: list[str] = []
+    readme_path = project / "README.md"
+    labs_readme_path = project / "labs/README.md"
+    for path, anchors in (
+        (readme_path, ("## 课程路线", "## 开始学习", "知识检查")),
+        (
+            labs_readme_path,
+            ("学员工作区", "公开测试", "从 `lab00/README.md` 开始"),
+        ),
+    ):
+        text = surfaces.get(path, "")
+        for anchor in anchors:
+            if anchor not in text:
+                errors.append(
+                    f"zh-CN generated locale surface is missing anchor {anchor!r}: {path}"
+                )
+
+    _require_han_text(errors, "generated manifest.title", manifest.get("title"))
+    for collection in ("preparatory_units", "labs"):
+        for index, unit in enumerate(_object_list(manifest.get(collection))):
+            _require_han_text(
+                errors,
+                f"generated manifest.{collection}[{index}].title",
+                unit.get("title"),
+            )
+
+    content_path = project / "platform/course/content.json"
+    try:
+        content = json.loads(surfaces.get(content_path, ""))
+    except json.JSONDecodeError as error:
+        errors.append(f"cannot parse generated zh-CN content: {error}")
+        return errors
+    if not isinstance(content, Mapping):
+        errors.append("generated zh-CN content must be an object")
+        return errors
+    for collection in ("preparatory_units", "labs"):
+        for index, unit in enumerate(_object_list(content.get(collection))):
+            prefix = f"generated content.{collection}[{index}]"
+            _require_han_text(errors, f"{prefix}.title", unit.get("title"))
+            outline = unit.get("lesson_outline")
+            outline = outline if isinstance(outline, Mapping) else {}
+            problem = outline.get("problem")
+            problem = problem if isinstance(problem, Mapping) else {}
+            _require_han_text(
+                errors,
+                f"{prefix}.lesson_outline.problem.context",
+                problem.get("context"),
+            )
+            outcomes = _object_list(outline.get("outcomes"))
+            _require_han_text(
+                errors,
+                f"{prefix}.lesson_outline.outcomes[0].text",
+                outcomes[0].get("text") if outcomes else None,
+            )
+            concepts = _object_list(outline.get("concepts"))
+            _require_han_text(
+                errors,
+                f"{prefix}.lesson_outline.concepts[0].definition",
+                concepts[0].get("definition") if concepts else None,
+            )
+    return errors
+
+
+def forward_generated_locale_errors(project: Path, language: str) -> list[str]:
+    errors: list[str] = []
+    manifest_path = project / "platform/course/manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"cannot read generated forward manifest: {error}"]
+    if not isinstance(manifest, dict) or manifest.get("language") != language:
+        errors.append("generated forward manifest language does not match its locale")
+    learner_paths = (
+        project / "README.md",
+        project / "labs/README.md",
+        project / "platform/course/content.json",
+        manifest_path,
+    )
+    surfaces: dict[Path, str] = {}
+    for path in learner_paths:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as error:
+            errors.append(f"cannot read generated locale surface {path}: {error}")
+            continue
+        surfaces[path] = text
+        has_han = HAN_CHARACTER_RE.search(text) is not None
+        if language == "en" and has_han:
+            errors.append(
+                f"English generated learner surface contains Han text: {path}"
+            )
+        if language == "zh-CN" and not has_han:
+            errors.append(
+                f"zh-CN generated learner surface contains no Chinese text: {path}"
+            )
+    if language == "zh-CN":
+        errors.extend(_zh_generated_anchor_errors(project, manifest, surfaces))
+    locale_path = project / "platform/app/courseLocale.mjs"
+    try:
+        locale_source = locale_path.read_text(encoding="utf-8")
+    except OSError as error:
+        errors.append(f"cannot read generated Web locale configuration: {error}")
+    else:
+        expected = f'const GENERATED_COURSE_LANGUAGE = "{language}";'
+        if expected not in locale_source:
+            errors.append("generated Web first-paint locale does not match the course")
+    return errors
+
+
 def _plugin_paths(root: Path) -> dict[str, Path]:
     plugin = root / "plugins" / PLUGIN_NAME
     skill = plugin / "skills" / SKILL_NAME
@@ -1188,37 +1405,54 @@ def run_forward_verification(root: Path) -> None:
 
     with tempfile.TemporaryDirectory(prefix="course-builder-forward-") as raw:
         temporary = Path(raw)
-        spec_path = temporary / "course.json"
-        readiness_plan_path = temporary / "readiness-plan.json"
-        project_path = temporary / "generated-course"
-        spec, readiness_plan = make_v3_spec_and_plan(
-            missing_ids={"json-data-model", "domain-boundary"}
-        )
-        spec_path.write_text(
-            json.dumps(spec, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        readiness_plan_path.write_text(
-            json.dumps(readiness_plan, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        plan = forward_verification_plan(
-            python_executable=sys.executable,
-            repository=root,
-            scaffold_script=paths["scripts"] / "scaffold_course.py",
-            verifier_script=paths["scripts"] / "verify_learning_project.py",
-            spec_path=spec_path,
-            readiness_plan_path=readiness_plan_path,
-            project_path=project_path,
-        )
         environment = _forward_environment(os.environ, temporary)
-        for step in plan:
-            run_checked(
-                step.argv,
-                cwd=step.cwd,
-                environment=environment,
-                timeout=1800,
+        for language in ("zh-CN", "en"):
+            locale_slug = language.lower().replace("-", "_")
+            spec_path = temporary / f"course-{locale_slug}.json"
+            readiness_plan_path = temporary / f"readiness-plan-{locale_slug}.json"
+            project_path = temporary / f"generated-course-{locale_slug}"
+            spec, readiness_plan = make_v3_spec_and_plan(
+                missing_ids={"json-data-model", "domain-boundary"},
+                language=language,
             )
+            fixture_errors = forward_fixture_locale_errors(
+                language,
+                spec,
+                readiness_plan,
+            )
+            if fixture_errors:
+                raise RuntimeError("; ".join(fixture_errors))
+            spec_path.write_text(
+                json.dumps(spec, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            readiness_plan_path.write_text(
+                json.dumps(readiness_plan, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            plan = forward_verification_plan(
+                python_executable=sys.executable,
+                repository=root,
+                scaffold_script=paths["scripts"] / "scaffold_course.py",
+                verifier_script=paths["scripts"] / "verify_learning_project.py",
+                spec_path=spec_path,
+                readiness_plan_path=readiness_plan_path,
+                project_path=project_path,
+            )
+            for index, step in enumerate(plan):
+                run_checked(
+                    step.argv,
+                    cwd=step.cwd,
+                    environment=environment,
+                    timeout=1800,
+                )
+                if index == 0:
+                    generated_errors = forward_generated_locale_errors(
+                        project_path,
+                        language,
+                    )
+                    if generated_errors:
+                        raise RuntimeError("; ".join(generated_errors))
 
 
 def validate_release(*, codex_validators: bool, forward: bool) -> None:

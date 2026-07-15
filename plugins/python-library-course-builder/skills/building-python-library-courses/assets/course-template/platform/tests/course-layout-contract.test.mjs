@@ -54,7 +54,7 @@ test("orientation, prep, and quiz-locked units do not mount or preload coding", 
   );
   assert.match(
     app,
-    /\}, \[codingReady, fileLoadRetryVersion, selectedLab, selectedQuestion\]\);/,
+    /\}, \[codingReady,[^\]]*fileLoadRetryVersion,[^\]]*selectedLab, selectedQuestion, t\]\);/,
   );
 });
 
@@ -65,8 +65,8 @@ test("desktop columns use two native accessible vertical separators", async () =
     readFile(cssUrl, "utf8"),
   ]);
 
-  assert.match(app, /<ResizeSeparator[\s\S]*label="调整章节导航宽度"/);
-  assert.match(app, /<ResizeSeparator[\s\S]*label="调整讲义与编码区宽度"/);
+  assert.match(app, /<ResizeSeparator[\s\S]*labelKey="resizeNavigation"[\s\S]*language=\{courseLanguage\}/);
+  assert.match(app, /<ResizeSeparator[\s\S]*labelKey="resizeWorkspace"[\s\S]*language=\{courseLanguage\}/);
   assert.match(separator, /role="separator"/);
   assert.match(separator, /aria-orientation="vertical"/);
   assert.match(separator, /aria-valuemin=\{min\}/);
@@ -190,8 +190,8 @@ test("zero-gap v3 readiness reports no extra prep instead of an empty prep list"
   const app = await readFile(appUrl, "utf8");
 
   assert.match(app, /preparationTitles\.length > 0/);
-  assert.match(app, /无需额外先修/);
-  assert.match(app, /完成 Lab 00 导览后即可进入正式 Lab/);
+  assert.match(app, /t\.noExtraPreparation/);
+  assert.match(app, /t\.afterOrientation/);
 });
 
 test("chapter navigation uses the shared Lab and Prep badge formatter", async () => {

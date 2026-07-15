@@ -34,17 +34,25 @@ import {
 } from "@codemirror/view";
 import { classHighlighter, highlightTree } from "@lezer/highlight";
 
+import {
+  courseCopy,
+  type CourseLanguage,
+} from "./courseLocale.mjs";
+
 const externalUpdate = Annotation.define<boolean>();
 
 export function PythonCodeBlock({
   code,
   className,
-  ariaLabel = "Python 代码",
+  ariaLabel,
+  language = "zh-CN",
 }: {
   code: string;
   className?: string;
   ariaLabel?: string;
+  language?: CourseLanguage;
 }) {
+  const resolvedAriaLabel = ariaLabel ?? courseCopy(language).pythonCode;
   const highlighted = useMemo<ReactNode[]>(() => {
     const nodes: ReactNode[] = [];
     let position = 0;
@@ -63,7 +71,7 @@ export function PythonCodeBlock({
   }, [code]);
 
   return (
-    <pre className={`python-code-block${className ? ` ${className}` : ""}`} aria-label={ariaLabel}>
+    <pre className={`python-code-block${className ? ` ${className}` : ""}`} aria-label={resolvedAriaLabel}>
       <code>{highlighted}</code>
     </pre>
   );
@@ -74,21 +82,24 @@ export function PythonCodeEditor({
   documentKey,
   editable,
   onChange,
-  ariaLabel = "Python 编辑器",
+  ariaLabel,
+  language = "zh-CN",
 }: {
   value: string;
   documentKey: string;
   editable: boolean;
   onChange: (value: string) => void;
   ariaLabel?: string;
+  language?: CourseLanguage;
 }) {
+  const resolvedAriaLabel = ariaLabel ?? courseCopy(language).pythonEditor;
   const hostRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   const initialValueRef = useRef(value);
   const initialEditableRef = useRef(editable);
-  const ariaLabelRef = useRef(ariaLabel);
+  const ariaLabelRef = useRef(resolvedAriaLabel);
   const editableCompartmentRef = useRef(new Compartment());
 
   useEffect(() => {

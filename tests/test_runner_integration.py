@@ -346,6 +346,54 @@ def test_file_api_rejects_path_addressing_and_unknown_questions(runtime: Runtime
     ).status_code == 404
 
 
+@pytest.mark.parametrize("invalid_language", [None, "fr"])
+def test_v3_invalid_language_blocks_stateful_apis_before_side_effects(
+    runtime: Runtime,
+    invalid_language: str | None,
+) -> None:
+    manifest_path = runtime.course_root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 3
+    if invalid_language is None:
+        manifest.pop("language", None)
+    else:
+        manifest["language"] = invalid_language
+    _write_json(manifest_path, manifest)
+    source_path = runtime.workspace / "lab01/answer.py"
+    state_path = runtime.workspace / ".coursekit/state.json"
+    source_before = source_path.read_bytes()
+    state_before = state_path.read_bytes()
+
+    responses = [
+        runtime.client.get("/api/course"),
+        runtime.client.get("/api/state"),
+        runtime.client.get("/api/knowledge/lab01"),
+        runtime.client.post(
+            "/api/knowledge/answer",
+            json={
+                "lab_id": "lab01",
+                "question_id": "lab01.k01",
+                "choice_id": "yes",
+            },
+        ),
+        runtime.client.get("/api/file", params=runtime.request),
+        runtime.client.put(
+            "/api/file",
+            json={**runtime.request, "content": "mutated = True\n"},
+        ),
+        runtime.client.post(
+            "/api/run",
+            json={**runtime.request, "mode": "public"},
+        ),
+    ]
+
+    assert runtime.client.get("/api/health").status_code == 200
+    assert all(response.status_code == 500 for response in responses)
+    assert all("language" in response.json()["detail"] for response in responses)
+    assert source_path.read_bytes() == source_before
+    assert state_path.read_bytes() == state_before
+
+
 def test_file_api_rejects_unsafe_or_symlink_manifest_targets(
     runtime: Runtime,
     tmp_path: Path,
@@ -490,7 +538,7 @@ def test_runner_source_policy_preflight_blocks_import_bypasses_before_pytest(
     response = runtime.client.post("/api/run", json=runtime.request)
 
     assert response.status_code == 400
-    assert "source policy" in response.json()["detail"]
+    assert "源码策略违规" in response.json()["detail"]
     assert called is False
 
 
@@ -522,7 +570,7 @@ def test_runner_source_policy_follows_same_lab_helpers_before_pytest(
     response = runtime.client.post("/api/run", json=runtime.request)
 
     assert response.status_code == 400
-    assert "lab01/helper.py imports forbidden module" in response.json()["detail"]
+    assert "lab01/helper.py 导入了禁止模块" in response.json()["detail"]
     assert called is False
 
 
@@ -553,7 +601,7 @@ def test_runner_source_policy_follows_package_root_init_before_pytest(
     response = runtime.client.post("/api/run", json=runtime.request)
 
     assert response.status_code == 400
-    assert "lab01/__init__.py imports forbidden module" in response.json()["detail"]
+    assert "lab01/__init__.py 导入了禁止模块" in response.json()["detail"]
     assert called is False
 
 
@@ -686,10 +734,7 @@ def test_submit_never_exposes_hidden_runner_diagnostics(
 
     assert calls == 2
     assert (passed, public_passed) == (False, True)
-    assert output == (
-        "Public tests passed. "
-        "Hidden verification failed (1 private target(s) checked)."
-    )
+    assert output == "公开测试通过。隐藏验证失败（已检查 1 个私有目标）。"
     assert "PRIVATE_TEST_PATH" not in output
     assert "test_secret" not in output
     assert "PRIVATE_ASSERTION_BODY" not in output
@@ -726,10 +771,7 @@ def test_submit_hides_hidden_runner_exceptions(
 
     assert calls == 2
     assert (passed, public_passed) == (False, True)
-    assert output == (
-        "Public tests passed. "
-        "Hidden verification failed (private grader unavailable)."
-    )
+    assert output == "公开测试通过。隐藏验证失败（私有评分器不可用）。"
     assert "PRIVATE_TEST_PATH" not in output
     assert "test_secret" not in output
     assert "PRIVATE_ASSERTION_BODY" not in output
@@ -779,7 +821,7 @@ def test_concurrent_run_returns_409_then_lock_releases_after_completion(
 
     assert first.status_code == 200, first.text
     assert concurrent.status_code == 409, concurrent.text
-    assert "busy" in concurrent.text.lower()
+    assert "正在处理另一个评分请求" in concurrent.text
 
     after_completion = runtime.client.post(
         "/api/run", json={**runtime.request, "mode": "public"}

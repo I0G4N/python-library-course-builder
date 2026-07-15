@@ -30,8 +30,8 @@ test("knowledge checks use learner-safe APIs and accessible, retryable controls"
   assert.match(knowledge, /choice_id: selectedChoice/);
   assert.match(knowledge, /feedback\.explanation/);
   assert.match(knowledge, /question\.kind === "execution_trace"/);
-  assert.match(knowledge, /执行推演/);
-  assert.match(knowledge, /诊断分析/);
+  assert.match(knowledge, /t\.executionTrace/);
+  assert.match(knowledge, /t\.diagnosticAnalysis/);
   assert.match(knowledge, /knowledge\.available/);
   assert.match(knowledge, /knowledge\.completed/);
   assert.match(knowledge, /knowledge\.mastered/);
@@ -41,7 +41,7 @@ test("knowledge checks use learner-safe APIs and accessible, retryable controls"
   assert.match(knowledge, /knowledgeRefreshLifecycleRef/);
   assert.match(
     knowledge,
-    /\[\s*labId,\s*onProgressChange,\s*queuedRefreshVersion,\s*refreshVersion,\s*retryVersion,?\s*\]/,
+    /\[\s*labId,\s*language,\s*onProgressChange,\s*queuedRefreshVersion,\s*refreshVersion,\s*retryVersion,?\s*\]/,
   );
   assert.doesNotMatch(
     knowledge,
@@ -56,14 +56,14 @@ test("knowledge checks use learner-safe APIs and accessible, retryable controls"
   assert.match(knowledge, /retryFailedPost\(failedSubmission\)/);
   assert.match(
     knowledge,
-    /runnerRequest<KnowledgeAnswerPayload>\(\s*submission\.path,\s*\{\s*method: submission\.method,[\s\S]*?body: submission\.body/,
+    /runnerRequest<KnowledgeAnswerPayload>\(\s*submission\.path,\s*t,\s*\{\s*method: submission\.method,[\s\S]*?body: submission\.body/,
   );
   assert.match(lifecycle, /KNOWLEDGE_ANSWER_PATH = "\/api\/knowledge\/answer"/);
   assert.match(lifecycle, /path: KNOWLEDGE_ANSWER_PATH/);
   assert.match(lifecycle, /method: "POST"/);
-  assert.match(knowledge, /本地 Runner/);
-  assert.match(knowledge, />\s*重新加载\s*</);
-  assert.match(knowledge, />\s*重试提交\s*</);
+  assert.match(knowledge, /t\.runnerRequestFailed/);
+  assert.match(knowledge, /\{t\.reload\}/);
+  assert.match(knowledge, /\{t\.retrySubmit\}/);
   assert.match(knowledge, /onProgressChange/);
   assert.match(
     knowledge,
@@ -118,9 +118,9 @@ test("course navigation and coding controls fail closed around shared progressio
   assert.match(app, /graded: selectedLab\.graded/);
   assert.doesNotMatch(app, /selectedLab && selectedLab\.id !== foundationLabId/);
   assert.match(app, /disabled=\{!isUnlocked\}/);
-  assert.match(app, /未解锁/);
-  assert.match(app, /aria-label=\{isUnlocked \? lab\.title : `\$\{lab\.title\}，未解锁`\}/);
-  assert.match(app, /title=\{isUnlocked \? lab\.title : `\$\{lab\.title\} · 未解锁`\}/);
+  assert.match(app, /t\.lockedLab/);
+  assert.match(app, /aria-label=\{isUnlocked \? lab\.title : t\.lockedLab\(lab\.title\)\}/);
+  assert.match(app, /title=\{isUnlocked \? lab\.title : t\.lockedLabTitle\(lab\.title\)\}/);
   assert.match(css, /\.lab-link:disabled small\s*\{[^}]*display: block/);
   assert.match(css, /\.coding-lock-reason\s*\{[^}]*white-space: normal/);
   assert.doesNotMatch(css, /\.coding-lock-reason\s*\{[^}]*white-space: nowrap/);
@@ -171,7 +171,7 @@ test("shared state refresh is visible-only and does not replace learner workspac
 
   assert.match(acceptBody, /stateArbiterRef\.current\.accept\(state\)/);
   assert.doesNotMatch(acceptBody, /stateRefreshRequestRef\.current \+= 1/);
-  assert.match(refreshBody, /runnerRequest<CourseState>\("\/api\/state"\)/);
+  assert.match(refreshBody, /runnerRequest<CourseState>\("\/api\/state", t\)/);
   assert.match(refreshBody, /acceptCourseState\(payload\)/);
   assert.match(refreshBody, /setKnowledgeRefreshVersion/);
   assert.doesNotMatch(

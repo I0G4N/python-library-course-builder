@@ -39,6 +39,31 @@ def test_v2_specs_remain_valid_without_a_readiness_plan() -> None:
     assert validate_spec(make_spec())["schema_version"] == 2
     assert validate_spec(make_assessed_spec())["schema_version"] == 2
 
+    legacy_language = make_spec()
+    legacy_language["course"]["language"] = "legacy-custom-language"
+    assert validate_spec(legacy_language)["course"]["language"] == (
+        "legacy-custom-language"
+    )
+
+
+@pytest.mark.parametrize("language", ["zh-CN", "en"])
+def test_v3_course_language_matches_v2_readiness_plan(language: str) -> None:
+    spec, plan = make_v3_spec_and_plan(language=language)
+
+    validated = validate_spec(spec, readiness_plan=plan)
+
+    assert validated["course"]["language"] == language
+    assert plan["language"] == language
+
+
+@pytest.mark.parametrize("language", ["zh", "en-US", "fr", ""])
+def test_v3_course_language_is_closed(language: str) -> None:
+    spec, plan = make_v3_spec_and_plan()
+    spec["course"]["language"] = language
+
+    with pytest.raises(SpecValidationError, match="course.language"):
+        validate_spec(spec, readiness_plan=plan)
+
 
 def test_v3_all_mastered_has_only_lab00_and_lab01_depends_on_it() -> None:
     spec, plan = make_v3_spec_and_plan()
@@ -90,7 +115,12 @@ def test_v3_readiness_plan_must_be_complete_and_match_spec(case: str) -> None:
     elif case == "incomplete":
         plan = assess_readiness(
             make_readiness_route(),
-            {"schema_version": 1, "evidence": [], "responses": []},
+            {
+                "schema_version": 2,
+                "language": "zh-CN",
+                "evidence": [],
+                "responses": [],
+            },
         )
     elif case == "summary":
         spec["course"]["audience"]["prerequisite_profile"]["readiness_summary"] = "0" * 12
@@ -121,6 +151,23 @@ def test_mismatched_plan_fails_before_scaffolder_creates_destination(
     destination = tmp_path / "must-not-exist"
 
     with pytest.raises((SpecValidationError, TypeError), match="readiness|summary|argument"):
+        scaffold(spec_path, destination, readiness_plan=plan_path)
+
+    assert not destination.exists()
+
+
+def test_language_mismatched_plan_fails_before_scaffolder_creates_destination(
+    tmp_path: Path,
+) -> None:
+    spec, plan = make_v3_spec_and_plan(language="en")
+    spec["course"]["language"] = "zh-CN"
+    spec_path = tmp_path / "spec.json"
+    plan_path = tmp_path / "plan.json"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    destination = tmp_path / "must-not-exist"
+
+    with pytest.raises(SpecValidationError, match="course.language"):
         scaffold(spec_path, destination, readiness_plan=plan_path)
 
     assert not destination.exists()
@@ -173,6 +220,41 @@ def test_v3_split_source_compiles_independently_with_exact_parity_and_privacy(
         for path in root.rglob("*")
         if path.is_file()
     )
+
+
+def test_v3_english_split_source_compiles_with_english_framework_copy(
+    tmp_path: Path,
+) -> None:
+    spec, plan = make_v3_spec_and_plan(language="en")
+    platform = tmp_path / "platform"
+    write_canonical_source(platform, validate_spec(spec, readiness_plan=plan))
+    output = platform / "course/compiled"
+
+    compile_course(platform / "course/source", output)
+
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    lesson = (output / "starter/lab00/README.md").read_text(encoding="utf-8")
+    knowledge = json.loads((output / "knowledge.json").read_text(encoding="utf-8"))
+    assert manifest["language"] == "en"
+    assert "## Prerequisites" in lesson
+    assert "Start with this mental model" in lesson
+    assert "## 先修知识" not in lesson
+    assert knowledge["title"].endswith("knowledge check")
+
+
+def test_v3_split_source_rejects_course_manifest_language_mismatch(
+    tmp_path: Path,
+) -> None:
+    spec, plan = make_v3_spec_and_plan(language="en")
+    platform = tmp_path / "platform"
+    write_canonical_source(platform, validate_spec(spec, readiness_plan=plan))
+    course_path = platform / "course/source/course.json"
+    course = json.loads(course_path.read_text(encoding="utf-8"))
+    course["manifest"]["language"] = "zh-CN"
+    course_path.write_text(json.dumps(course) + "\n", encoding="utf-8")
+
+    with pytest.raises(SourceValidationError, match="manifest.language"):
+        load_course_source(platform / "course/source")
 
 
 def test_v3_split_source_rejects_readiness_summary_tampering(tmp_path: Path) -> None:

@@ -21,6 +21,7 @@ from .course import (
     targets_for_item,
 )
 from .execution import run_isolated_pytest
+from .locale import CourseLanguageError, copy_for_manifest, localize_detail, render
 from .source_policy import SourcePolicyError, preflight_question_source
 from .progress import (
     gate_reasons,
@@ -40,6 +41,18 @@ from .progress import (
 DEFAULT_RUNNER_URL = "http://127.0.0.1:8765"
 
 
+def _copy() -> dict[str, str]:
+    return copy_for_manifest(load_manifest())
+
+
+def _message(key: str, **values: Any) -> str:
+    return render(_copy(), key, **values)
+
+
+def _localized_reasons(reasons: list[str], copy: dict[str, str]) -> str:
+    return "\n- ".join(str(localize_detail(reason, copy)) for reason in reasons)
+
+
 def _knowledge_only(lab_id: str) -> bool:
     manifest = load_manifest()
     return manifest.get("schema_version") == 3 and is_preparatory_unit(
@@ -48,10 +61,7 @@ def _knowledge_only(lab_id: str) -> bool:
 
 
 def _reject_knowledge_only(lab_id: str) -> int:
-    print(
-        f"{lab_id} is a knowledge-only preparatory unit; use `course unlock {lab_id}`",
-        file=sys.stderr,
-    )
+    print(_message("prep_use_unlock", lab_id=lab_id), file=sys.stderr)
     return 2
 
 
@@ -96,15 +106,23 @@ def _choice_feedback(question: dict[str, Any], selected_index: int) -> str:
 
 
 def unlock(lab_id: str) -> int:
+    copy = _copy()
     lab = find_lab(lab_id)
     if lab is None:
-        print(f"unknown Lab: {lab_id}", file=sys.stderr)
+        print(render(copy, "unknown_lab", lab_id=lab_id), file=sys.stderr)
         return 2
     state = read_state()
     reasons = knowledge_gate_reasons(lab_id, state)
     if reasons:
         print(
-            f"{'; '.join(reasons)} before unlocking {lab_id}",
+            render(
+                copy,
+                "before_unlocking",
+                reasons=copy["reason_separator"].join(
+                    str(localize_detail(reason, copy)) for reason in reasons
+                ),
+                lab_id=lab_id,
+            ),
             file=sys.stderr,
         )
         return 3
@@ -114,7 +132,7 @@ def unlock(lab_id: str) -> int:
         for index, choice in enumerate(question["choices"], start=1):
             print(f"  {index}. {_choice_text(choice)}")
         try:
-            selected_index = int(input("answer> ").strip()) - 1
+            selected_index = int(input(copy["answer_prompt"]).strip()) - 1
         except (EOFError, ValueError):
             selected_index = -1
         correct = _choice_is_correct(question, selected_index)
@@ -125,9 +143,9 @@ def unlock(lab_id: str) -> int:
         print(("✓ " if correct else "✗ ") + detail)
         wrong += 0 if correct else 1
     if wrong:
-        print(f"{lab_id}: {wrong} answer(s) need another attempt")
+        print(render(copy, "answers_retry", lab_id=lab_id, count=wrong))
         return 1
-    print(f"{lab_id} knowledge unlocked")
+    print(render(copy, "knowledge_unlocked", lab_id=lab_id))
     return 0
 
 
@@ -184,7 +202,7 @@ def _run_pytest(targets: list[str], *, timeout_seconds: int) -> bool:
             timeout_seconds=timeout_seconds,
         )
     except (OSError, RuntimeError, ValueError) as error:
-        print(f"[coursekit] cannot run public tests: {error}", file=sys.stderr)
+        print(_message("cannot_run_public_tests", detail=localize_detail(str(error), _copy())), file=sys.stderr)
         return False
     if result.output:
         print(result.output.rstrip())
@@ -199,7 +217,7 @@ def _source_preflight(question: dict[str, Any]) -> bool:
             question.get("source_policy"),
         )
     except (OSError, UnicodeError, SourcePolicyError, ValueError) as error:
-        print(str(error), file=sys.stderr)
+        print(localize_detail(str(error), _copy()), file=sys.stderr)
         return False
     return True
 
@@ -210,21 +228,22 @@ def test_exercise(item_id: str) -> int:
     try:
         lab, question = select_item(item_id)
     except LookupError as error:
-        print(error, file=sys.stderr)
+        print(localize_detail(str(error), _copy()), file=sys.stderr)
         return 2
     if question is None:
-        print("test expects a coding question id such as lab01.q1", file=sys.stderr)
+        print(_message("test_requires_question"), file=sys.stderr)
         return 2
     lab_id = str(lab["id"])
     reasons = gate_reasons(lab_id)
     if reasons:
-        print("Lab is locked:\n- " + "\n- ".join(reasons), file=sys.stderr)
+        copy = _copy()
+        print(render(copy, "lab_locked", lab_id=lab_id, reasons=_localized_reasons(reasons, copy)), file=sys.stderr)
         return 4
     public = targets_for_item(lab, question)
     try:
         timeout_seconds = _question_timeout(question)
     except ValueError as error:
-        print(f"[coursekit] cannot run public tests: {error}", file=sys.stderr)
+        print(_message("cannot_run_public_tests", detail=localize_detail(str(error), _copy())), file=sys.stderr)
         return 1
     if not _source_preflight(question):
         return 1
@@ -239,16 +258,17 @@ def test_exercise(item_id: str) -> int:
 
 
 def grade_lab(lab_id: str) -> int:
+    copy = _copy()
     if _knowledge_only(lab_id):
         return _reject_knowledge_only(lab_id)
     lab = find_lab(lab_id)
     questions = lab.get("questions", []) if isinstance(lab, dict) else []
     if lab is None or not questions:
-        print(f"unknown graded Lab: {lab_id}", file=sys.stderr)
+        print(render(copy, "unknown_graded_lab", lab_id=lab_id), file=sys.stderr)
         return 2
     reasons = gate_reasons(lab_id)
     if reasons:
-        print("Lab is locked:\n- " + "\n- ".join(reasons), file=sys.stderr)
+        print(render(copy, "lab_locked", lab_id=lab_id, reasons=_localized_reasons(reasons, copy)), file=sys.stderr)
         return 4
     passed = 0
     for question in questions:
@@ -259,7 +279,7 @@ def grade_lab(lab_id: str) -> int:
         try:
             timeout_seconds = _question_timeout(question)
         except ValueError as error:
-            print(f"[coursekit] cannot run public tests: {error}", file=sys.stderr)
+            print(render(copy, "cannot_run_public_tests", detail=localize_detail(str(error), copy)), file=sys.stderr)
             success = False
         else:
             success = _source_preflight(question) and _run_pytest(
@@ -268,11 +288,12 @@ def grade_lab(lab_id: str) -> int:
         record_grade(lab_id, [question_id], verified=False, passed=success)
         passed += int(success)
     total = len([item for item in questions if isinstance(item, dict)])
-    print(f"\n{lab_id}: {passed}/{total} public exercises passed")
+    print("\n" + render(copy, "public_exercises_passed", lab_id=lab_id, passed=passed, total=total))
     return 0 if total and passed == total else 1
 
 
 def _runner_submit(lab_id: str, question_id: str) -> tuple[bool, str]:
+    copy = _copy()
     base_url = os.environ.get("COURSEKIT_RUNNER_URL", DEFAULT_RUNNER_URL).rstrip("/")
     payload = json.dumps(
         {"lab_id": lab_id, "question_id": question_id, "mode": "submit"}
@@ -291,45 +312,43 @@ def _runner_submit(lab_id: str, question_id: str) -> tuple[bool, str]:
             detail = json.loads(error.read().decode("utf-8")).get("detail")
         except (UnicodeError, json.JSONDecodeError, AttributeError):
             detail = None
-        return False, str(detail or f"Runner returned HTTP {error.code}")
+        return False, str(detail or render(copy, "runner_http", status=error.code))
     except (urllib_error.URLError, TimeoutError, OSError) as error:
-        return False, (
-            f"cannot reach the local Runner at {base_url}: {error}. "
-            "Start it with `npm run learn` and retry."
-        )
+        return False, render(copy, "runner_unreachable", base_url=base_url, detail=error)
     except (UnicodeError, json.JSONDecodeError) as error:
-        return False, f"Runner returned an invalid response: {error}"
+        return False, render(copy, "runner_invalid_response", detail=error)
     if not isinstance(value, dict) or not isinstance(value.get("passed"), bool):
-        return False, "Runner returned an invalid response contract"
+        return False, copy["runner_invalid_contract"]
     output = str(value.get("output", ""))
     return bool(value["passed"]), output
 
 
 def submit_lab(lab_id: str) -> int:
+    copy = _copy()
     if _knowledge_only(lab_id):
         return _reject_knowledge_only(lab_id)
     lab = find_lab(lab_id)
     questions = lab.get("questions", []) if isinstance(lab, dict) else []
     if lab is None or not questions:
-        print(f"unknown graded Lab: {lab_id}", file=sys.stderr)
+        print(render(copy, "unknown_graded_lab", lab_id=lab_id), file=sys.stderr)
         return 2
     reasons = gate_reasons(lab_id)
     if reasons:
-        print("Lab is locked:\n- " + "\n- ".join(reasons), file=sys.stderr)
+        print(render(copy, "lab_locked", lab_id=lab_id, reasons=_localized_reasons(reasons, copy)), file=sys.stderr)
         return 4
     passed = 0
     for question in questions:
         if not isinstance(question, dict):
             continue
         question_id = str(question["id"])
-        print(f"\n== submit {question_id} ==")
+        print(f"\n== {render(copy, 'submit_heading', question_id=question_id)} ==")
         success, output = _runner_submit(lab_id, question_id)
         if output:
             print(output.rstrip())
-        print("verified" if success else "not verified")
+        print(copy["verified"] if success else copy["not_verified"])
         passed += int(success)
     total = len([item for item in questions if isinstance(item, dict)])
-    print(f"\n{lab_id}: {passed}/{total} exercises verified by the Runner")
+    print("\n" + render(copy, "runner_exercises_verified", lab_id=lab_id, passed=passed, total=total))
     return 0 if total and passed == total else 1
 
 
@@ -355,20 +374,21 @@ def _git_value(args: list[str]) -> str | None:
 
 
 def checkpoint(lab_id: str) -> int:
+    copy = _copy()
     if _knowledge_only(lab_id):
         return _reject_knowledge_only(lab_id)
     lab = find_lab(lab_id)
     questions = lab.get("questions", []) if isinstance(lab, dict) else []
     if lab is None or not questions:
-        print(f"unknown graded Lab: {lab_id}", file=sys.stderr)
+        print(render(copy, "unknown_graded_lab", lab_id=lab_id), file=sys.stderr)
         return 2
     configured = lab.get("checkpoint", {})
     if not isinstance(configured, dict):
-        print(f"{lab_id} has an invalid checkpoint configuration", file=sys.stderr)
+        print(render(copy, "invalid_checkpoint", lab_id=lab_id), file=sys.stderr)
         return 2
     state = read_state()
     if configured.get("require_submit", True) and lab_id not in state.get("completed_labs", []):
-        print(f"submit {lab_id} successfully before checkpoint", file=sys.stderr)
+        print(render(copy, "submit_before_checkpoint", lab_id=lab_id), file=sys.stderr)
         return 4
     verified_questions = [
         str(question["id"])
@@ -386,7 +406,7 @@ def checkpoint(lab_id: str) -> int:
     if configured.get("require_submit", True) and set(verified_questions) != set(
         expected_questions
     ):
-        print(f"submit {lab_id} successfully before checkpoint", file=sys.stderr)
+        print(render(copy, "submit_before_checkpoint", lab_id=lab_id), file=sys.stderr)
         return 4
     scope = str(lab.get("git_scope") or lab.get("directory") or lab_id)
     baseline = state.get("git_baseline_commit")
@@ -396,24 +416,21 @@ def checkpoint(lab_id: str) -> int:
         inside = _git_value(["rev-parse", "--is-inside-work-tree"])
         if inside != "true":
             print(
-                "Git is unavailable or this project is not a Git repository; "
-                "initialize Git and create a baseline commit, then retry.",
+                copy["git_unavailable"],
                 file=sys.stderr,
             )
             return 5
         head = _git_value(["rev-parse", "--verify", "HEAD"])
         if not head or not isinstance(baseline, str) or not baseline:
             print(
-                "the learning state has no usable Git baseline; restore the generated "
-                "baseline or start with a fresh progress state",
+                copy["git_baseline_missing"],
                 file=sys.stderr,
             )
             return 5
         ancestry = _git(["merge-base", "--is-ancestor", baseline, head])
         if ancestry is None or ancestry.returncode:
             print(
-                "the saved Git baseline is not an ancestor of HEAD; restore the "
-                "generated history before checkpointing",
+                copy["git_baseline_not_ancestor"],
                 file=sys.stderr,
             )
             return 5
@@ -422,25 +439,24 @@ def checkpoint(lab_id: str) -> int:
             commits_after_baseline = int(count or "")
         except ValueError:
             print(
-                "the saved Git baseline is not available in this repository; "
-                "restore its history before checkpointing",
+                copy["git_baseline_unavailable"],
                 file=sys.stderr,
             )
             return 5
         minimum = int(configured.get("min_commits", 1))
         if commits_after_baseline < minimum:
             print(
-                f"commit at least {minimum} {scope} change(s) after the learning baseline",
+                render(copy, "commit_minimum", minimum=minimum, scope=scope),
                 file=sys.stderr,
             )
             return 5
         if configured.get("git_clean", True):
             status = _git(["status", "--porcelain", "--", scope])
             if status is None or status.returncode:
-                print("Git status failed; repair Git and retry", file=sys.stderr)
+                print(copy["git_status_failed"], file=sys.stderr)
                 return 5
             if status.stdout.strip():
-                print(f"commit the {scope} changes before checkpoint", file=sys.stderr)
+                print(render(copy, "commit_scope", scope=scope), file=sys.stderr)
                 return 5
     test_identity = {
         str(question["id"]): list(question.get("tests", {}).get("submit", []))
@@ -464,7 +480,14 @@ def checkpoint(lab_id: str) -> int:
         }
 
     update_state(mutation)
-    print(f"{lab_id} checkpoint accepted at {head or 'no-git checkpoint'}")
+    print(
+        render(
+            copy,
+            "checkpoint_accepted",
+            lab_id=lab_id,
+            head=head or copy["no_git_checkpoint"],
+        )
+    )
     return 0
 
 
@@ -495,6 +518,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    try:
+        _copy()
+    except CourseLanguageError as error:
+        print(error, file=sys.stderr)
+        return 2
     if args.command == "unlock":
         return unlock(args.item)
     if args.command == "test":

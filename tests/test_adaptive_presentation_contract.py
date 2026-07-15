@@ -17,6 +17,7 @@ sys.path.insert(0, str(PLATFORM_ROOT))
 
 from scaffold_course import (  # noqa: E402
     copy_template,
+    render_learning_preparation,
     render_course_route,
     replace_template_tokens,
     write_canonical_source,
@@ -31,6 +32,19 @@ def _compile_assessed(tmp_path: Path) -> tuple[dict[str, Any], Path]:
     platform = tmp_path / "platform"
     write_canonical_source(platform, spec)
     output = tmp_path / "compiled"
+    compile_course(platform / "course/source", output)
+    return spec, output
+
+
+def _compile_assessed_language(
+    tmp_path: Path, language: str
+) -> tuple[dict[str, Any], Path]:
+    raw = make_assessed_spec()
+    raw["course"]["language"] = language
+    spec = validate_spec(raw)
+    platform = tmp_path / language / "platform"
+    write_canonical_source(platform, spec)
+    output = tmp_path / language / "compiled"
     compile_course(platform / "course/source", output)
     return spec, output
 
@@ -254,3 +268,70 @@ def test_legacy_root_readme_keeps_basic_python_copy_and_two_column_route(
     assert "预计用时" not in route
     assert "课程路线只假设学员掌握 Python 基础" in readme
     assert "## 学习准备" not in readme
+
+
+def test_english_course_localizes_generated_readme_route_and_preparation(
+    tmp_path: Path,
+) -> None:
+    raw = make_assessed_spec()
+    raw["course"]["language"] = "en"
+    spec = validate_spec(raw)
+    copy_template(tmp_path)
+    replace_template_tokens(tmp_path, spec)
+
+    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
+    route = render_course_route(spec)
+    preparation = render_learning_preparation(spec)
+    assert route.startswith("| Order | Unit | Estimated time |")
+    assert "minutes" in route
+    assert "## Learning readiness" in preparation
+    assert "The course will use these capabilities directly" in preparation
+    assert "## Prerequisites" in readme
+    assert "## Course route" in readme
+    assert "## Start learning" in readme
+    assert route in readme
+    assert preparation in readme
+    assert not (tmp_path / "README.en.md").exists()
+
+
+def test_legacy_custom_language_uses_zh_cn_runtime_fallback(tmp_path: Path) -> None:
+    raw = make_spec()
+    raw["course"]["language"] = "legacy-custom"
+    spec = validate_spec(raw)
+    copy_template(tmp_path)
+    replace_template_tokens(tmp_path, spec)
+
+    web_locale = (tmp_path / "platform/app/courseLocale.mjs").read_text(
+        encoding="utf-8"
+    )
+    assert 'const GENERATED_COURSE_LANGUAGE = "zh-CN";' in web_locale
+    assert "__COURSEKIT_LANGUAGE__" not in web_locale
+
+
+def test_english_assessed_markdown_uses_english_framework_labels(
+    tmp_path: Path,
+) -> None:
+    spec, output = _compile_assessed_language(tmp_path, "en")
+    content = _read_json(output / "content.json")
+    units = [
+        (spec["foundation"], content["foundations"]),
+        *zip(spec["labs"], content["labs"], strict=True),
+    ]
+    for authored, compiled in units:
+        markdown = compiled["lesson"]
+        study = authored["study_minutes"]
+        assert f"{study['min']}–{study['max']} minutes" in markdown
+        markers = (
+            "## Prerequisites",
+            "## Problem",
+            "## Learning outcomes",
+            "Start with this mental model",
+            "What are the inputs and outputs?",
+            "Walk one concrete input through the flow",
+            "## Capstone connection",
+            "## Summary",
+        )
+        positions = [markdown.index(marker) for marker in markers]
+        assert positions == sorted(positions)
+        assert "预计学习时间" not in markdown
+        assert "先这样理解" not in markdown

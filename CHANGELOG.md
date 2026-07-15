@@ -2,6 +2,19 @@
 
 All notable changes to Python Library Course Builder are documented in this file.
 
+## [0.2.0] - 2026-07-15
+
+### Added
+
+- Added a mandatory first-question language choice on every fresh Skill invocation, with exactly `zh-CN` and `en` supported even when the original request already names a language.
+- Made readiness questions, lessons, quizzes, feedback, generated documentation, CLI output, and Web presentation language-selectable without translating code, commands, identifiers, API names, or official source titles and URLs.
+- Added complete, locale-specific positive teaching examples and fail-closed language parity from the readiness route through the generated course and handoff.
+- Made the root README English-first and added a complete Simplified Chinese translation with reciprocal language navigation.
+
+### Changed
+
+- Repositioned plugin discovery metadata from Chinese-first to language-selectable while preserving Chinese and English as the only supported course locales.
+
 ## [0.1.1] - 2026-07-15
 
 ### Fixed

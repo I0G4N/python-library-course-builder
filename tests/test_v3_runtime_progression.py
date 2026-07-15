@@ -68,6 +68,7 @@ def _formal_question(lab_id: str, points: int) -> dict[str, Any]:
 def _v3_manifest(curriculum_id: str = "runtime-course-v3-aaaaaaaaaaaa") -> dict[str, Any]:
     return {
         "schema_version": 3,
+        "language": "en",
         "course_id": "runtime-course",
         "curriculum_id": curriculum_id,
         "compatible_curriculum_ids": [],
@@ -118,6 +119,7 @@ def _v3_manifest(curriculum_id: str = "runtime-course-v3-aaaaaaaaaaaa") -> dict[
 def _v2_manifest() -> dict[str, Any]:
     return {
         "schema_version": 2,
+        "language": "en",
         "course_id": "runtime-course",
         "curriculum_id": "runtime-course-v2",
         "compatible_curriculum_ids": [],

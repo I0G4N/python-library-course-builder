@@ -1,8 +1,8 @@
 # Teaching depth contract
 
-Use this positive recipe after the readiness sequence and before route, specification, or lesson design. The goal is natural Simplified-Chinese teaching material whose depth is visible in concrete values, contracts, traces, and aligned practice.
+Use this positive recipe after the readiness sequence and before route, specification, or lesson design. The goal is natural teaching material in the selected `zh-CN` or `en` locale whose depth is visible in concrete values, contracts, traces, and aligned practice.
 
-Read the [complete teaching example](complete-teaching-example.md) before writing learner-facing prose. It demonstrates the recipe as connected teaching rather than as a field inventory.
+Use the [complete teaching example index](complete-teaching-example.md) to open exactly one locale-specific example before writing learner-facing prose: [Simplified Chinese](complete-teaching-example.zh-CN.md) for `zh-CN` or [English](complete-teaching-example.en.md) for `en`. Each demonstrates the same recipe as connected teaching rather than as a field inventory.
 
 ## Contents
 
@@ -13,7 +13,7 @@ Read the [complete teaching example](complete-teaching-example.md) before writin
 - [Close the operational contract](#close-the-operational-contract)
 - [Carry one value through the trace](#carry-one-value-through-the-trace)
 - [Prove every declared boundary end to end](#prove-every-declared-boundary-end-to-end)
-- [Write natural learner-facing Chinese](#write-natural-learner-facing-chinese)
+- [Write natural learner-facing prose](#write-natural-learner-facing-prose)
 - [Adapt the recipe to the concept kind](#adapt-the-recipe-to-the-concept-kind)
 - [Align every activity](#align-every-activity)
 - [Choose time from the work](#choose-time-from-the-work)
@@ -130,17 +130,19 @@ For each declared `failure_modes` entry and each independently stated boundary, 
 
 Reject delivery when a declared failure or boundary is merely listed but its counterexample and recovery are not implemented and exercised on every applicable activity and test surface.
 
-## Write natural learner-facing Chinese
+## Write natural learner-facing prose
 
-Render the open learning path with these learner-safe labels:
+Use exactly the labels for the selected locale:
 
-- `先这样理解`
-- `输入和输出是什么`
-- `拿一个具体输入走一遍`
+| Meaning | `zh-CN` | `en` |
+|---|---|---|
+| predictive mental model | `先这样理解` | `Start with this mental model` |
+| operational contract | `输入和输出是什么` | `What are the inputs and outputs?` |
+| concrete trace | `拿一个具体输入走一遍` | `Walk one concrete input through the flow` |
 
-Write the connected explanation in natural Simplified Chinese. Define the term in one clear sentence. In the very next sentence, connect it to the current task. Add a natural transition into a concrete value, then explain what changes and why before naming the next structure. Never turn `definition -> purpose -> mechanism -> boundaries -> pitfalls` into a learner-facing author-field inventory; those authoring fields must read as one connected explanation, not stacked labels.
+Write the connected explanation naturally in the selected language. Define the term in one clear sentence. In the very next sentence, connect it to the current task. Add a natural transition into a concrete value, then explain what changes and why before naming the next structure. Never turn `definition -> purpose -> mechanism -> boundaries -> pitfalls` into a learner-facing author-field inventory; those authoring fields must read as one connected explanation, not stacked labels.
 
-Define a term at first use, then immediately connect it to the current capstone problem. Use short transitions such as “先看输入”, “现在走一步”, and “这在这里重要，因为…”. Alternate explanation with concrete values instead of presenting a schema-field dump. Prefer connected sentences over a stiff glossary, and explain jargon before using it in a prediction or exercise.
+Define a term at first use, then immediately connect it to the current capstone problem. Use short natural transitions appropriate to the selected locale. Alternate explanation with concrete values instead of presenting a schema-field dump. Prefer connected sentences over a stiff glossary, and explain jargon before using it in a prediction or exercise.
 
 Keep implementation details, design tradeoffs, and source notes available after the open core. Do not expose internal mapping IDs or author-facing enum labels as learner prose.
 
@@ -183,4 +185,4 @@ Do not pad a Lab to fit a tier. Narrow the mainline when the planned explanation
 
 ## Review semantically
 
-Review the learner-visible contract, concrete trace, mapped activities, source/version discipline, and natural Chinese as connected teaching. A prose **word count** is not the primary quality gate. Reject a chapter that is long but generic, or structurally complete but internally inconsistent.
+Review the learner-visible contract, concrete trace, mapped activities, source/version discipline, and natural selected-language prose as connected teaching. A prose **word count** is not the primary quality gate. Reject a chapter that is long but generic, structurally complete but internally inconsistent, mixed-locale, or silently translated through a fallback.

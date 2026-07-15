@@ -20,6 +20,56 @@ from validate_course import TOKEN_PATTERN, SpecValidationError, load_and_validat
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_ROOT = SKILL_ROOT / "assets" / "course-template"
+SUPPORTED_COURSE_LANGUAGES = {"zh-CN", "en"}
+SCAFFOLD_MESSAGES: dict[str, dict[str, str]] = {
+    "zh-CN": {
+        "route_order": "顺序",
+        "route_unit": "本章主题",
+        "route_time": "预计用时",
+        "minutes": "{min}–{max} 分钟",
+        "basic_preparation": (
+            "课程路线只假设学员掌握 Python 基础。每个计分 Lab 预计用时 30-45 分钟，"
+            "并从先修知识、具体问题、可追踪目标和完整可运行示例开始。更深入的机制、"
+            "设计权衡和错误代码诊断放在可展开区域中，避免干扰首次阅读。"
+        ),
+        "readiness_heading": "## 学习准备",
+        "evidence_intro": "这条路线已通过证据式短问答确定先修状态。课程会直接使用这些已掌握能力：",
+        "prep_time": "正式 Lab 前的准备总用时为 {min}–{max} 分钟，按知识依赖依次完成：",
+        "assumed_intro": "课程会直接使用这些能力：",
+        "foundation_intro": "Lab 00 会先带你补齐：",
+        "orientation_description": "环境检查、学习流程和官方来源导览。",
+        "foundation_description": "心智模型、环境检查和官方来源导览。",
+        "knowledge_title": "{title} 知识检查",
+        "checkpoint_title": "完成 {lab_id}",
+        "workspace_title": "# {title} 学员工作区",
+        "workspace_intro": "从 `lab00/README.md` 开始，然后按编号顺序完成各个 Lab。只编辑 `labNN/` 下的文件；`_course/` 包含共享的 CLI 和进度支持。",
+        "workspace_tests": "公开测试位于起始代码旁边。完整实现和验证测试保留在 `../platform/course/` 中，不会出现在正常的学员工作流程里。",
+    },
+    "en": {
+        "route_order": "Order",
+        "route_unit": "Unit",
+        "route_time": "Estimated time",
+        "minutes": "{min}–{max} minutes",
+        "basic_preparation": (
+            "This route assumes only core Python knowledge. Each graded Lab takes about "
+            "30-45 minutes and starts from prerequisites, a concrete problem, traceable "
+            "outcomes, and a complete runnable example. Deeper mechanisms, design tradeoffs, "
+            "and faulty-code diagnosis stay in expandable sections."
+        ),
+        "readiness_heading": "## Learning readiness",
+        "evidence_intro": "An evidence-based diagnostic dialogue established this route's prerequisite state. The course will use these demonstrated capabilities directly:",
+        "prep_time": "Preparation before the formal Labs takes {min}–{max} minutes in dependency order:",
+        "assumed_intro": "The course will use these capabilities directly:",
+        "foundation_intro": "Lab 00 will first refresh:",
+        "orientation_description": "Environment checks, learning workflow, and official-source orientation.",
+        "foundation_description": "Mental models, environment checks, and official-source orientation.",
+        "knowledge_title": "{title} knowledge check",
+        "checkpoint_title": "Finish {lab_id}",
+        "workspace_title": "# {title} learner workspace",
+        "workspace_intro": "Start with `lab00/README.md`, then follow the units in order. Edit only files under formal `labNN/` directories; `_course/` contains the shared CLI and progression support.",
+        "workspace_tests": "Public tests sit beside the starter code. Complete implementations and verified tests remain under `../platform/course/` and stay outside the normal learner workflow.",
+    },
+}
 TEXT_SUFFIXES = {
     "",
     ".css",
@@ -63,6 +113,19 @@ TEMPLATE_IGNORE = shutil.ignore_patterns(
 
 class ScaffoldError(RuntimeError):
     """The standalone project could not be created safely."""
+
+
+def _language(spec: dict[str, Any]) -> str:
+    value = str(spec["course"].get("language", "zh-CN"))
+    if value in SUPPORTED_COURSE_LANGUAGES:
+        return value
+    if spec.get("schema_version") == 2:
+        return "zh-CN"
+    raise ScaffoldError(f"unsupported course language: {value}")
+
+
+def _messages(spec: dict[str, Any]) -> dict[str, str]:
+    return SCAFFOLD_MESSAGES[_language(spec)]
 
 
 def json_write(path: Path, value: Any) -> None:
@@ -124,6 +187,7 @@ def render_course_route(spec: dict[str, Any]) -> str:
             "\r\n", "\n"
         ).replace("\r", "\n").replace("\n", "<br>")
 
+    messages = _messages(spec)
     assessed = spec["course"]["audience"].get("level") == "assessed"
     units = (
         [spec["foundation"], *spec["labs"]]
@@ -132,17 +196,25 @@ def render_course_route(spec: dict[str, Any]) -> str:
     )
     rows = [(str(unit["id"]), str(unit["title"])) for unit in units]
     if assessed:
-        lines = ["| 顺序 | 本章主题 | 预计用时 |", "| --- | --- | --- |"]
+        lines = [
+            f"| {messages['route_order']} | {messages['route_unit']} | {messages['route_time']} |",
+            "| --- | --- | --- |",
+        ]
         for unit, (lab_id, title) in zip(units, rows, strict=True):
             study = unit["study_minutes"]
-            time = table_cell(f"{study['min']}–{study['max']} 分钟")
+            time = table_cell(
+                messages["minutes"].format(min=study["min"], max=study["max"])
+            )
             if study.get("reason"):
                 time += f"<br>{table_cell(study['reason'])}"
             lines.append(
                 f"| `{table_cell(lab_id)}` | {table_cell(title)} | {time} |"
             )
         return "\n".join(lines)
-    lines = ["| 顺序 | 本章主题 |", "| --- | --- |"]
+    lines = [
+        f"| {messages['route_order']} | {messages['route_unit']} |",
+        "| --- | --- |",
+    ]
     lines.extend(
         f"| `{table_cell(lab_id)}` | {table_cell(title)} |" for lab_id, title in rows
     )
@@ -150,13 +222,10 @@ def render_course_route(spec: dict[str, Any]) -> str:
 
 
 def render_learning_preparation(spec: dict[str, Any]) -> str:
+    messages = _messages(spec)
     audience = spec["course"]["audience"]
     if audience.get("level") != "assessed":
-        return (
-            "课程路线只假设学员掌握 Python 基础。每个计分 Lab 预计用时 30-45 分钟，"
-            "并从先修知识、具体问题、可追踪目标和完整可运行示例开始。更深入的机制、"
-            "设计权衡和错误代码诊断放在可展开区域中，避免干扰首次阅读。"
-        )
+        return messages["basic_preparation"]
 
     profile = audience["prerequisite_profile"]
     capabilities = profile["capabilities"]
@@ -168,36 +237,46 @@ def render_learning_preparation(spec: dict[str, Any]) -> str:
             "max": sum(int(unit["study_minutes"]["max"]) for unit in units),
         }
         lines = [
-            "## 学习准备",
+            messages["readiness_heading"],
             "",
-            "这条路线已通过证据式短问答确定先修状态。课程会直接使用这些已掌握能力：",
+            messages["evidence_intro"],
             "",
         ]
         lines.extend(f"- {title}" for title in assumed)
         lines.extend(
             [
                 "",
-                f"正式 Lab 前的准备总用时为 {time['min']}–{time['max']} 分钟，按知识依赖依次完成：",
+                messages["prep_time"].format(min=time["min"], max=time["max"]),
                 "",
             ]
         )
-        lines.extend(f"- `{unit['id']}`：{unit['title']}" for unit in units)
+        separator = ": " if _language(spec) == "en" else "："
+        lines.extend(f"- `{unit['id']}`{separator}{unit['title']}" for unit in units)
         return "\n".join(lines)
     foundation = [
         item["title"] for item in capabilities if item["decision"] == "foundation"
     ]
-    lines = ["## 学习准备", "", "课程会直接使用这些能力：", ""]
+    lines = [messages["readiness_heading"], "", messages["assumed_intro"], ""]
     lines.extend(f"- {title}" for title in assumed)
-    lines.extend(["", "Lab 00 会先带你补齐：", ""])
+    lines.extend(["", messages["foundation_intro"], ""])
     lines.extend(f"- {title}" for title in foundation)
     return "\n".join(lines)
 
 
 def replace_template_tokens(root: Path, spec: dict[str, Any]) -> None:
+    english_template = root / "README.en.md"
+    if _language(spec) == "en":
+        if not english_template.is_file():
+            raise ScaffoldError("English course README template is missing")
+        (root / "README.md").write_text(
+            english_template.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    english_template.unlink(missing_ok=True)
     course = spec["course"]
     target = spec["target"]
     replacements = {
         "__COURSEKIT_SLUG__": course["id"],
+        "__COURSEKIT_LANGUAGE__": _language(spec),
         "__COURSEKIT_TITLE__": course["title"],
         "__COURSEKIT_DESCRIPTION__": course["description"],
         "__COURSEKIT_TARGET__": target["name"],
@@ -280,7 +359,7 @@ def _write_v3_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
                 "order": order,
                 "title": unit["title"],
                 "description": (
-                    "环境检查、学习流程和官方来源导览。"
+                    _messages(spec)["orientation_description"]
                     if unit_id == "lab00"
                     else unit["lesson"]["capstone_bridge"]["increment"]
                 ),
@@ -317,7 +396,9 @@ def _write_v3_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
         "preparatory_units": unit_payloads,
         "lab_order": lab_order,
         "extensions": [],
-        "knowledge_title": f"{course['title']} 知识检查",
+        "knowledge_title": _messages(spec)["knowledge_title"].format(
+            title=course["title"]
+        ),
         "manifest": {
             "schema_version": 3,
             "layout_version": 3,
@@ -373,7 +454,9 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
         "capstone": course["capstone"],
         "lab_order": lab_order,
         "extensions": [],
-        "knowledge_title": f"{course['title']} 知识检查",
+        "knowledge_title": _messages(spec)["knowledge_title"].format(
+            title=course["title"]
+        ),
         "manifest": {
             "schema_version": 2,
             "layout_version": 3,
@@ -408,7 +491,7 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
                 "id": "lab00",
                 "order": 0,
                 "title": foundation["title"],
-                "description": "心智模型、环境检查和官方来源导览。",
+                "description": _messages(spec)["foundation_description"],
                 "graded": False,
                 "directory": "lab00",
                 "readme": "lab00/README.md",
@@ -488,7 +571,9 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
                     "min_commits": 1,
                 },
                 "git_checkpoint": {
-                    "title": f"完成 {lab_id}",
+                    "title": _messages(spec)["checkpoint_title"].format(
+                        lab_id=lab_id
+                    ),
                     "commands": [
                         f"git status --short -- {lab_id}",
                         f"git add -- {lab_id}",
@@ -632,9 +717,9 @@ pythonpath = [".", "_course"]
     text_write(labs / "pyproject.toml", labs_pyproject)
     text_write(
         labs / "README.md",
-        f'''# {course['title']} 学员工作区
+        f'''{_messages(spec)['workspace_title'].format(title=course['title'])}
 
-从 `lab00/README.md` 开始，然后按编号顺序完成各个 Lab。只编辑 `labNN/` 下的文件；`_course/` 包含共享的 CLI 和进度支持。
+{_messages(spec)['workspace_intro']}
 
 ```bash
 uv run course status
@@ -643,7 +728,7 @@ uv run course unlock {next_unit_id}
 uv run course test {first_question_id}
 ```
 
-公开测试位于起始代码旁边。完整实现和验证测试保留在 `../platform/course/` 中，不会出现在正常的学员工作流程里。
+{_messages(spec)['workspace_tests']}
 ''',
     )
 

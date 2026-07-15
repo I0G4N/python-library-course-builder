@@ -1059,6 +1059,12 @@ def _validate_course_manifest(
         raise SourceValidationError(
             "course.manifest.audience must match course.audience"
         )
+    if _text(manifest, "language", label=label) != _text(
+        course, "language", label="course"
+    ):
+        raise SourceValidationError(
+            "course.manifest.language must match course.language"
+        )
 
 
 def _validate_foundation_manifest_shape(
@@ -1833,42 +1839,110 @@ def _markdown_list(title: str, values: Iterable[str]) -> list[str]:
     return [f"#### {title}", "", *(f"- {value}" for value in values), ""]
 
 
+SUPPORTED_COURSE_LANGUAGES = {"zh-CN", "en"}
+LESSON_MESSAGES: dict[str, dict[str, str]] = {
+    "zh-CN": {
+        "prerequisites": "先修知识", "why_important": "为什么重要", "refresh": "复习提示",
+        "problem": "问题", "context": "背景", "project_context": "项目背景",
+        "naive": "朴素方案", "direct": "看似直接的做法", "failure": "失败表现",
+        "how_failure": "它会怎样失败", "outcomes": "学习目标", "concepts": "核心概念",
+        "definition": "定义", "purpose": "用途", "mechanism": "机制", "mental_model": "心智模型",
+        "design_reasons": "设计理由", "benefits": "收益", "tradeoffs": "权衡",
+        "invariants": "不变量", "boundaries": "边界", "pitfalls": "常见陷阱",
+        "source_claims": "官方来源声明", "examples": "示例", "run": "运行",
+        "expected": "预期输出", "wrong_code": "错误代码", "symptom": "现象", "cause": "原因",
+        "fix": "修复", "related_concepts": "相关概念", "mapped_outcomes": "对应目标",
+        "capstone": "结课项目衔接", "input": "输入", "output": "输出", "increment": "增量",
+        "next": "下一步", "summary": "总结", "estimated": "预计学习时间",
+        "minutes": "{min}–{max} 分钟", "time_reason": "为什么需要这些时间",
+        "start_model": "先这样理解", "io_heading": "输入和输出是什么", "view": "理解角度",
+        "forms": "可用形式", "form": "形式", "example": "具体例子", "constraints": "约束",
+        "effects": "可观察影响", "failures": "失败时会发生什么", "condition": "条件",
+        "observable": "可观察结果", "recovery": "恢复方式", "runnable": "可运行示例",
+        "trace": "拿一个具体输入走一遍", "input_state": "输入状态", "operation": "执行动作",
+        "output_state": "输出状态", "why": "为什么", "practice": "接下来练什么",
+        "knowledge_practice": "进入本章知识检查。", "details": "运行细节",
+        "how_runs": "{name} 如何运行", "run_command": "运行命令",
+        "conditions": "需要保持的条件", "must_hold": "必须保持", "applicability": "适用边界",
+        "easy_pitfalls": "容易踩坑", "sources_more": "依据与延伸", "design": "设计考虑",
+        "official_basis": "官方依据", "api": "API 调用", "data-model": "数据模型",
+        "mechanism_kind": "运行机制", "formula": "计算关系", "lifecycle": "生命周期",
+        "documented": "公开契约", "implementation": "实现细节",
+    },
+    "en": {
+        "prerequisites": "Prerequisites", "why_important": "Why it matters", "refresh": "Quick refresh",
+        "problem": "Problem", "context": "Context", "project_context": "Project context",
+        "naive": "Naive approach", "direct": "Seemingly direct approach", "failure": "Failure",
+        "how_failure": "How it fails", "outcomes": "Learning outcomes", "concepts": "Core concepts",
+        "definition": "Definition", "purpose": "Purpose", "mechanism": "Mechanism", "mental_model": "Mental model",
+        "design_reasons": "Design reasons", "benefits": "Benefits", "tradeoffs": "Tradeoffs",
+        "invariants": "Invariants", "boundaries": "Boundaries", "pitfalls": "Common pitfalls",
+        "source_claims": "Official-source claims", "examples": "Examples", "run": "Run",
+        "expected": "Expected output", "wrong_code": "Faulty code", "symptom": "Symptom", "cause": "Cause",
+        "fix": "Fix", "related_concepts": "Related concepts", "mapped_outcomes": "Mapped outcomes",
+        "capstone": "Capstone connection", "input": "Input", "output": "Output", "increment": "Increment",
+        "next": "Next", "summary": "Summary", "estimated": "Estimated study time",
+        "minutes": "{min}–{max} minutes", "time_reason": "Why this time is needed",
+        "start_model": "Start with this mental model", "io_heading": "What are the inputs and outputs?", "view": "Contract view",
+        "forms": "Supported forms", "form": "Form", "example": "Concrete example", "constraints": "Constraints",
+        "effects": "Observable effects", "failures": "What happens on failure", "condition": "Condition",
+        "observable": "Observable result", "recovery": "Recovery", "runnable": "Runnable examples",
+        "trace": "Walk one concrete input through the flow", "input_state": "Input state", "operation": "Operation",
+        "output_state": "Output state", "why": "Why", "practice": "What to practice next",
+        "knowledge_practice": "Open this unit's knowledge check.", "details": "Runtime details",
+        "how_runs": "How {name} runs", "run_command": "Run command",
+        "conditions": "Conditions to preserve", "must_hold": "Must hold", "applicability": "Applicability boundaries",
+        "easy_pitfalls": "Easy mistakes", "sources_more": "Sources and extensions", "design": "Design considerations",
+        "official_basis": "Official basis", "api": "API call", "data-model": "Data model",
+        "mechanism_kind": "Runtime mechanism", "formula": "Computation", "lifecycle": "Lifecycle",
+        "documented": "Public contract", "implementation": "Implementation detail",
+    },
+}
+
+
+def _lesson_messages(language: str) -> dict[str, str]:
+    return LESSON_MESSAGES["en" if language == "en" else "zh-CN"]
+
+
 def _render_legacy_lesson(
     title: str,
     lesson: dict[str, Any],
     *,
     sources: dict[str, SourceReference],
+    language: str = "zh-CN",
 ) -> str:
     """Render every structured field as deterministic, portable Markdown."""
 
-    lines = [f"# {title}", "", "## 先修知识", ""]
+    t = _lesson_messages(language)
+    field = "：" if language != "en" else ":"
+    lines = [f"# {title}", "", f"## {t['prerequisites']}", ""]
     for item in lesson["prerequisites"]:
         lines.extend(
             [
                 f"### {item['title']}",
                 "",
-                f"**为什么重要：** {item['why']}",
+                f"**{t['why_important']}{field}** {item['why']}",
                 "",
-                f"**复习提示：** {item['refresh']}",
+                f"**{t['refresh']}{field}** {item['refresh']}",
                 "",
             ]
         )
     problem = lesson["problem"]
     lines.extend(
         [
-            "## 问题",
+            f"## {t['problem']}",
             "",
-            f"**背景：** {problem['context']}",
+            f"**{t['context']}{field}** {problem['context']}",
             "",
-            f"**朴素方案：** {problem['naive_approach']}",
+            f"**{t['naive']}{field}** {problem['naive_approach']}",
             "",
-            f"**失败表现：** {problem['failure']}",
+            f"**{t['failure']}{field}** {problem['failure']}",
             "",
-            "## 学习目标",
+            f"## {t['outcomes']}",
             "",
             *(f"- {item['text']} (`{item['id']}`)" for item in lesson["outcomes"]),
             "",
-            "## 核心概念",
+            f"## {t['concepts']}",
             "",
         ]
     )
@@ -1877,28 +1951,21 @@ def _render_legacy_lesson(
             [
                 f"### {concept['name']}",
                 "",
-                f"**定义：** {concept['definition']}",
+                f"**{t['definition']}{field}** {concept['definition']}",
                 "",
-                f"**用途：** {concept['purpose']}",
+                f"**{t['purpose']}{field}** {concept['purpose']}",
                 "",
-                "#### 机制",
+                f"#### {t['mechanism']}",
                 "",
                 *(f"{index}. {step}" for index, step in enumerate(concept["mechanism"], 1)),
                 "",
-                f"**心智模型：** {concept['mental_model']}",
+                f"**{t['mental_model']}{field}** {concept['mental_model']}",
                 "",
             ]
         )
-        for heading, key in (
-            ("设计理由", "design_reasons"),
-            ("收益", "benefits"),
-            ("权衡", "tradeoffs"),
-            ("不变量", "invariants"),
-            ("边界", "boundaries"),
-            ("常见陷阱", "pitfalls"),
-        ):
-            lines.extend(_markdown_list(heading, concept[key]))
-        lines.extend(["#### 官方来源声明", ""])
+        for key in ("design_reasons", "benefits", "tradeoffs", "invariants", "boundaries", "pitfalls"):
+            lines.extend(_markdown_list(t[key], concept[key]))
+        lines.extend([f"#### {t['source_claims']}", ""])
         for claim in concept["source_claims"]:
             source = sources[claim["source_id"]]
             lines.append(
@@ -1906,7 +1973,7 @@ def _render_legacy_lesson(
             )
         lines.append("")
 
-    lines.extend(["## 示例", ""])
+    lines.extend([f"## {t['examples']}", ""])
     for example in lesson["examples"]:
         lines.extend([f"### {example['title']}", ""])
         if example["kind"] == "runnable":
@@ -1916,9 +1983,9 @@ def _render_legacy_lesson(
                     str(example["code"]).rstrip("\n"),
                     "```",
                     "",
-                    f"**运行：** `{example['command']}`",
+                    f"**{t['run']}{field}** `{example['command']}`",
                     "",
-                    "**预期输出：**",
+                    f"**{t['expected']}{field}**",
                     "",
                     "```text",
                     str(example["expected_output"]).rstrip("\n"),
@@ -1929,17 +1996,17 @@ def _render_legacy_lesson(
         else:
             lines.extend(
                 [
-                    "**错误代码：**",
+                    f"**{t['wrong_code']}{field}**",
                     "",
                     "```python",
                     str(example["wrong_code"]).rstrip("\n"),
                     "```",
                     "",
-                    f"**现象：** {example['symptom']}",
+                    f"**{t['symptom']}{field}** {example['symptom']}",
                     "",
-                    f"**原因：** {example['cause']}",
+                    f"**{t['cause']}{field}** {example['cause']}",
                     "",
-                    "**修复：**",
+                    f"**{t['fix']}{field}**",
                     "",
                     "```python",
                     str(example["fix_code"]).rstrip("\n"),
@@ -1951,10 +2018,10 @@ def _render_legacy_lesson(
             [
                 str(example["explanation"]),
                 "",
-                "**相关概念：** "
+                f"**{t['related_concepts']}{field}** "
                 + ", ".join(f"`{value}`" for value in example["concept_ids"]),
                 "",
-                "**对应目标：** "
+                f"**{t['mapped_outcomes']}{field}** "
                 + ", ".join(f"`{value}`" for value in example["outcome_ids"]),
                 "",
             ]
@@ -1963,17 +2030,17 @@ def _render_legacy_lesson(
     bridge = lesson["capstone_bridge"]
     lines.extend(
         [
-            "## 结课项目衔接",
+            f"## {t['capstone']}",
             "",
-            f"**输入：** {bridge['input']}",
+            f"**{t['input']}{field}** {bridge['input']}",
             "",
-            f"**输出：** {bridge['output']}",
+            f"**{t['output']}{field}** {bridge['output']}",
             "",
-            f"**增量：** {bridge['increment']}",
+            f"**{t['increment']}{field}** {bridge['increment']}",
             "",
-            f"**下一步：** {bridge['next']}",
+            f"**{t['next']}{field}** {bridge['next']}",
             "",
-            "## 总结",
+            f"## {t['summary']}",
             "",
             *(f"- {item}" for item in lesson["summary"]),
             "",
@@ -2027,54 +2094,59 @@ def _render_assessed_lesson(
     sources: dict[str, SourceReference],
     study_minutes: dict[str, Any],
     practice_links: Iterable[dict[str, str]],
+    language: str = "zh-CN",
 ) -> str:
     """Render the assessed learner path before optional implementation detail."""
 
+    t = _lesson_messages(language)
+    field = "：" if language != "en" else ":"
     contract_kind_labels = {
-        "api": "API 调用",
-        "data-model": "数据模型",
-        "mechanism": "运行机制",
-        "formula": "计算关系",
-        "lifecycle": "生命周期",
+        "api": t["api"],
+        "data-model": t["data-model"],
+        "mechanism": t["mechanism_kind"],
+        "formula": t["formula"],
+        "lifecycle": t["lifecycle"],
     }
     claim_status_labels = {
-        "documented": "公开契约",
-        "implementation": "实现细节",
+        "documented": t["documented"],
+        "implementation": t["implementation"],
     }
-    study = f"{study_minutes['min']}–{study_minutes['max']} 分钟"
-    lines = [f"# {title}", "", f"**预计学习时间：** {study}", ""]
+    study = t["minutes"].format(
+        min=study_minutes["min"], max=study_minutes["max"]
+    )
+    lines = [f"# {title}", "", f"**{t['estimated']}{field}** {study}", ""]
     reason = study_minutes.get("reason")
     if reason:
-        lines.extend([f"**为什么需要这些时间：** {reason}", ""])
+        lines.extend([f"**{t['time_reason']}{field}** {reason}", ""])
 
-    lines.extend(["## 先修知识", ""])
+    lines.extend([f"## {t['prerequisites']}", ""])
     for item in lesson["prerequisites"]:
         lines.extend(
             [
                 f"### {item['title']}",
                 "",
-                f"**为什么重要：** {item['why']}",
+                f"**{t['why_important']}{field}** {item['why']}",
                 "",
-                f"**复习提示：** {item['refresh']}",
+                f"**{t['refresh']}{field}** {item['refresh']}",
                 "",
             ]
         )
     problem = lesson["problem"]
     lines.extend(
         [
-            "## 问题",
+            f"## {t['problem']}",
             "",
-            f"**项目背景：** {problem['context']}",
+            f"**{t['project_context']}{field}** {problem['context']}",
             "",
-            f"**看似直接的做法：** {problem['naive_approach']}",
+            f"**{t['direct']}{field}** {problem['naive_approach']}",
             "",
-            f"**它会怎样失败：** {problem['failure']}",
+            f"**{t['how_failure']}{field}** {problem['failure']}",
             "",
-            "## 学习目标",
+            f"## {t['outcomes']}",
             "",
             *(f"- {item['text']}" for item in lesson["outcomes"]),
             "",
-            "## 核心概念",
+            f"## {t['concepts']}",
             "",
         ]
     )
@@ -2085,53 +2157,56 @@ def _render_assessed_lesson(
             [
                 f"### {concept['name']}",
                 "",
-                f"**定义：** {concept['definition']}",
+                f"**{t['definition']}{field}** {concept['definition']}",
                 "",
-                f"**用途：** {concept['purpose']}",
+                f"**{t['purpose']}{field}** {concept['purpose']}",
                 "",
-                "#### 先这样理解",
+                f"#### {t['start_model']}",
                 "",
                 str(concept["mental_model"]),
                 "",
-                "#### 输入和输出是什么",
+                f"#### {t['io_heading']}",
                 "",
-                f"**理解角度：** {contract_kind_labels[str(contract['kind'])]}",
+                f"**{t['view']}{field}** {contract_kind_labels[str(contract['kind'])]}",
                 "",
-                "**可用形式：**",
+                f"**{t['forms']}{field}**",
                 "",
                 *(f"- `{form}`" for form in contract["forms"]),
                 "",
-                "**输入：**",
+                f"**{t['input']}{field}**",
                 "",
             ]
         )
         for item in contract["inputs"]:
             lines.extend(
                 [
-                    f"- **{item['name']}**：{item['meaning']}",
-                    f"  - 形式：`{item['form']}`",
-                    f"  - 具体例子：`{item['example']}`",
-                    "  - 约束：" + "；".join(str(value) for value in item["constraints"]),
+                    f"- **{item['name']}**{field}{item['meaning']}",
+                    f"  - {t['form']}{field}`{item['form']}`",
+                    f"  - {t['example']}{field}`{item['example']}`",
+                    f"  - {t['constraints']}{field}"
+                    + ("；" if language != "en" else "; ").join(
+                        str(value) for value in item["constraints"]
+                    ),
                 ]
             )
-        lines.extend(["", "**输出：**", ""])
+        lines.extend(["", f"**{t['output']}{field}**", ""])
         for item in contract["outputs"]:
             lines.extend(
                 [
-                    f"- **{item['name']}**：{item['meaning']}",
-                    f"  - 形式：`{item['form']}`",
-                    f"  - 具体例子：`{item['example']}`",
+                    f"- **{item['name']}**{field}{item['meaning']}",
+                    f"  - {t['form']}{field}`{item['form']}`",
+                    f"  - {t['example']}{field}`{item['example']}`",
                 ]
             )
-        lines.extend(["", "**可观察影响：**", ""])
+        lines.extend(["", f"**{t['effects']}{field}**", ""])
         lines.extend(f"- {value}" for value in contract["effects"])
-        lines.extend(["", "**失败时会发生什么：**", ""])
+        lines.extend(["", f"**{t['failures']}{field}**", ""])
         for failure in contract["failure_modes"]:
             lines.extend(
                 [
-                    f"- 条件：{failure['condition']}",
-                    f"  - 可观察结果：{failure['observable']}",
-                    f"  - 恢复方式：{failure['recovery']}",
+                    f"- {t['condition']}{field}{failure['condition']}",
+                    f"  - {t['observable']}{field}{failure['observable']}",
+                    f"  - {t['recovery']}{field}{failure['recovery']}",
                 ]
             )
         lines.append("")
@@ -2139,7 +2214,7 @@ def _render_assessed_lesson(
     runnable_examples = [
         example for example in lesson["examples"] if example["kind"] == "runnable"
     ]
-    lines.extend(["## 可运行示例", ""])
+    lines.extend([f"## {t['runnable']}", ""])
     for example in runnable_examples:
         lines.extend(
             [
@@ -2151,56 +2226,56 @@ def _render_assessed_lesson(
                 str(example["code"]).rstrip("\n"),
                 "```",
                 "",
-                "#### 拿一个具体输入走一遍",
+                f"#### {t['trace']}",
                 "",
             ]
         )
         for index, step in enumerate(example["trace"], 1):
             lines.extend(
                 [
-                    f"{index}. **输入状态：** {step['input_state']}",
-                    f"   - **执行动作：** {step['operation']}",
-                    f"   - **输出状态：** {step['output_state']}",
-                    f"   - **为什么：** {step['explanation']}",
+                    f"{index}. **{t['input_state']}{field}** {step['input_state']}",
+                    f"   - **{t['operation']}{field}** {step['operation']}",
+                    f"   - **{t['output_state']}{field}** {step['output_state']}",
+                    f"   - **{t['why']}{field}** {step['explanation']}",
                 ]
             )
         lines.append("")
 
     links = list(practice_links)
-    lines.extend(["## 接下来练什么", ""])
+    lines.extend([f"## {t['practice']}", ""])
     for link in links:
         if link["kind"] == "coding-question":
             lines.append(
-                f"- **{link['title']}**：`uv run course test {link['item_id']}`"
+                f"- **{link['title']}**{field}`uv run course test {link['item_id']}`"
             )
         else:
-            lines.append(f"- **{link['title']}**：进入本章知识检查。")
+            lines.append(f"- **{link['title']}**{field}{t['knowledge_practice']}")
     lines.append("")
 
     bridge = lesson["capstone_bridge"]
     lines.extend(
         [
-            "## 结课项目衔接",
+            f"## {t['capstone']}",
             "",
-            f"**输入：** {bridge['input']}",
+            f"**{t['input']}{field}** {bridge['input']}",
             "",
-            f"**输出：** {bridge['output']}",
+            f"**{t['output']}{field}** {bridge['output']}",
             "",
-            f"**增量：** {bridge['increment']}",
+            f"**{t['increment']}{field}** {bridge['increment']}",
             "",
-            f"**下一步：** {bridge['next']}",
+            f"**{t['next']}{field}** {bridge['next']}",
             "",
-            "## 总结",
+            f"## {t['summary']}",
             "",
             *(f"- {item}" for item in lesson["summary"]),
             "",
             "<details>",
-            "<summary>运行细节</summary>",
+            f"<summary>{t['details']}</summary>",
             "",
         ]
     )
     for concept in lesson["concepts"]:
-        lines.extend([f"### {concept['name']} 如何运行", ""])
+        lines.extend([f"### {t['how_runs'].format(name=concept['name'])}", ""])
         lines.extend(
             f"{index}. {step}" for index, step in enumerate(concept["mechanism"], 1)
         )
@@ -2208,9 +2283,9 @@ def _render_assessed_lesson(
     for example in runnable_examples:
         lines.extend(
             [
-                f"**运行命令：** `{example['command']}`",
+                f"**{t['run_command']}{field}** `{example['command']}`",
                 "",
-                "**预期输出：**",
+                f"**{t['expected']}{field}**",
                 "",
                 "```text",
                 str(example["expected_output"]).rstrip("\n"),
@@ -2229,9 +2304,9 @@ def _render_assessed_lesson(
                 str(example["wrong_code"]).rstrip("\n"),
                 "```",
                 "",
-                f"**现象：** {example['symptom']}",
+                f"**{t['symptom']}{field}** {example['symptom']}",
                 "",
-                f"**原因：** {example['cause']}",
+                f"**{t['cause']}{field}** {example['cause']}",
                 "",
                 "```python",
                 str(example["fix_code"]).rstrip("\n"),
@@ -2241,29 +2316,33 @@ def _render_assessed_lesson(
                 "",
             ]
         )
-    lines.extend(["</details>", "", "<details>", "<summary>需要保持的条件</summary>", ""])
+    lines.extend(["</details>", "", "<details>", f"<summary>{t['conditions']}</summary>", ""])
     for concept in lesson["concepts"]:
-        lines.extend([f"### {concept['name']}", "", "**必须保持：**", ""])
+        lines.extend([f"### {concept['name']}", "", f"**{t['must_hold']}{field}**", ""])
         lines.extend(f"- {value}" for value in concept["invariants"])
-        lines.extend(["", "**适用边界：**", ""])
+        lines.extend(["", f"**{t['applicability']}{field}**", ""])
         lines.extend(f"- {value}" for value in concept["boundaries"])
-        lines.extend(["", "**容易踩坑：**", ""])
+        lines.extend(["", f"**{t['easy_pitfalls']}{field}**", ""])
         lines.extend(f"- {value}" for value in concept["pitfalls"])
         lines.append("")
-    lines.extend(["</details>", "", "<details>", "<summary>依据与延伸</summary>", ""])
+    lines.extend(["</details>", "", "<details>", f"<summary>{t['sources_more']}</summary>", ""])
     for concept in lesson["concepts"]:
-        lines.extend([f"### {concept['name']}", "", "**设计考虑：**", ""])
+        lines.extend([f"### {concept['name']}", "", f"**{t['design']}{field}**", ""])
         lines.extend(f"- {value}" for value in concept["design_reasons"])
-        lines.extend(["", "**收益：**", ""])
+        lines.extend(["", f"**{t['benefits']}{field}**", ""])
         lines.extend(f"- {value}" for value in concept["benefits"])
-        lines.extend(["", "**取舍：**", ""])
+        lines.extend(["", f"**{t['tradeoffs']}{field}**", ""])
         lines.extend(f"- {value}" for value in concept["tradeoffs"])
-        lines.extend(["", "**官方依据：**", ""])
+        lines.extend(["", f"**{t['official_basis']}{field}**", ""])
         for claim in concept["source_claims"]:
             source = sources[str(claim["source_id"])]
             lines.append(
                 f"- [{source.title}]({source.url})"
-                f"（{claim_status_labels[str(claim['status'])]}）：{claim['claim']}"
+                + (
+                    f"（{claim_status_labels[str(claim['status'])]}）：{claim['claim']}"
+                    if language != "en"
+                    else f" ({claim_status_labels[str(claim['status'])]}): {claim['claim']}"
+                )
             )
         lines.append("")
     lines.extend(["</details>", ""])
@@ -2278,9 +2357,12 @@ def _render_lesson(
     assessed: bool = False,
     study_minutes: dict[str, Any] | None = None,
     practice_links: Iterable[dict[str, str]] = (),
+    language: str = "zh-CN",
 ) -> str:
     if not assessed:
-        return _render_legacy_lesson(title, lesson, sources=sources)
+        return _render_legacy_lesson(
+            title, lesson, sources=sources, language=language
+        )
     if study_minutes is None:
         raise SourceValidationError("assessed lesson needs study_minutes")
     return _render_assessed_lesson(
@@ -2289,6 +2371,7 @@ def _render_lesson(
         sources=sources,
         study_minutes=study_minutes,
         practice_links=practice_links,
+        language=language,
     )
 
 
@@ -2564,6 +2647,10 @@ def load_course_source(source_root: Path | str) -> CourseSource:
     course_id = _text(course, "id", label="course")
     title = _text(course, "title", label="course")
     description = _text(course, "description", label="course")
+    authored_language = _text(course, "language", label="course")
+    if schema_version == 3 and authored_language not in SUPPORTED_COURSE_LANGUAGES:
+        raise SourceValidationError("schema v3 course.language must be zh-CN or en")
+    language = authored_language if authored_language == "en" else "zh-CN"
     audience = _validate_audience(course, schema_version=schema_version)
     _validate_course_manifest(
         course, audience=audience, schema_version=schema_version
@@ -2734,6 +2821,7 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             assessed=assessed_profile is not None,
             study_minutes=foundations.get("study_minutes"),
             practice_links=foundation_practice_links,
+            language=language,
         )
         initial_dependency = foundation_id
         initial_quiz_ids = {
@@ -2921,6 +3009,7 @@ def load_course_source(source_root: Path | str) -> CourseSource:
                 assessed=True,
                 study_minutes=payload["study_minutes"],
                 practice_links=practice_links,
+                language=language,
             )
             declared_source_ids = tuple(
                 dict.fromkeys(
@@ -3108,6 +3197,7 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             assessed=assessed_profile is not None,
             study_minutes=payload.get("study_minutes"),
             practice_links=practice_links,
+            language=language,
         )
 
         questions_by_id = {question.question_id: question for question in questions}
@@ -3385,7 +3475,7 @@ def load_course_source(source_root: Path | str) -> CourseSource:
         audience=audience,
         curriculum_id=curriculum_id,
         compatible_curriculum_ids=compatible,
-        language=_text(course, "language", label="course"),
+        language=language,
         python_requires=_python_requires(course),
         size=size,
         dependencies=dependencies,
@@ -3729,12 +3819,15 @@ def _knowledge(course: CourseSource) -> dict[str, Any]:
             }
             for unit in course.preparatory_units
         }
+    default_title = (
+        f"{course.title} knowledge check"
+        if course.language == "en"
+        else f"{course.title} 知识检查"
+    )
     return {
         "schema_version": course.schema_version,
         "curriculum_id": course.curriculum_id,
-        "title": course.course.get(
-            "knowledge_title", f"{course.title} 知识检查"
-        ),
+        "title": course.course.get("knowledge_title", default_title),
         "labs": {
             **preparatory,
             **{

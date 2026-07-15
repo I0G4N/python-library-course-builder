@@ -1,11 +1,17 @@
 ---
 name: building-python-library-courses
-description: Use when a user asks to build, create, author, or learn through a structured, Chinese-first hands-on course project for a Python standard-library module, PyPI package, framework, or repository instead of receiving a one-off explanation.
+description: Use when a user asks to build, create, author, or learn through a structured, language-selectable hands-on course project for a Python standard-library module, PyPI package, framework, or repository instead of receiving a one-off explanation.
 ---
 
 # Build a Python Library Course
 
 Create a standalone, source-backed course repository with cumulative Labs, learner code, pytest suites, a CLI, and a browser. Follow the seven stages in order.
+
+## Choose the course language
+
+On every fresh invocation, make the first question a course-language choice: ask the learner to choose exactly one course language before any other question or action. Ask even when the request already names a language. Support exactly `zh-CN` and `en`. Present them as Simplified Chinese (`zh-CN`) and English (`en`). Do not infer the choice from the request language, prior threads, locale, target, or destination.
+
+Ask only the language question, then wait for the answer. If the answer is unsupported or ambiguous, ask the learner to choose `zh-CN` or `en` again and do nothing else. Treat the accepted locale as immutable input to route research, readiness, specification, generation, verification, and handoff. A later language change starts a new route/readiness cycle; never relabel an existing plan or course.
 
 ## requirements
 
@@ -17,7 +23,7 @@ export SKILL_DIR="/absolute/path/to/building-python-library-courses"
 
 Run bundled scripts with uv-managed Python 3.13. Require `uv`, Node.js 22.13+ with npm, and Git. Support macOS, Linux, and WSL2; native Windows is unverified. Mandatory generation and grading need no GPU or external service.
 
-The generated **authoring repository** contains learner and teacher projections. Hidden tests are not secret from anyone who can inspect it. Version 0.1.1 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
+The generated **authoring repository** contains learner and teacher projections. Hidden tests are not secret from anyone who can inspect it. Version 0.2.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
 Run only trusted local code: Runner/pytest isolation is not a hostile-code sandbox. Keep output standalone; never link to or import from the Skill or another course.
 
@@ -25,13 +31,13 @@ Require Python 3.13 and exclude Python 3.14. Upgrade the template and lockfiles 
 
 ## Language contract
 
-Write learner-facing lessons, quiz prompts, feedback, generated documentation, and course prose in Simplified Chinese. Keep code, shell commands, identifiers, target API names, and official source titles and URLs in their original form. Version 0.1.1 has no language switch.
+Write learner-facing lessons, readiness questions, quiz prompts, feedback, generated documentation, and course prose in the selected language. Keep code, shell commands, identifiers, target API names, and official source titles and URLs in their original form. Use one locale consistently; do not mix locales or silently fall back. Language choice is not readiness evidence and raw answers remain temporary.
 
 ## Follow the seven-stage workflow
 
 ### 1. Inspect locally, then research officially
 
-If the target is absent, ask for it and stop until known. Use short behavior/evidence questions rather than beginner/intermediate labels, and reuse evidence from code and conversation already supplied by the learner. A claim such as “我会” is not mastery evidence; “不会” may directly establish a missing capability.
+If the target is absent, ask for it after the language choice is fixed and stop until known. Use short behavior/evidence questions rather than beginner/intermediate labels, and reuse evidence from code and conversation already supplied by the learner. A claim of mastery is not evidence; a direct admission of not knowing may establish a missing capability.
 
 Run the inspector before planning:
 
@@ -57,7 +63,7 @@ Read [teaching-depth-contract.md](references/teaching-depth-contract.md) before 
 
 1. Research the selected route from primary official sources as needed beyond the target-surface evidence from Stage 1.
 2. Build a learning-prerequisite DAG of learner capabilities, not package dependency metadata.
-3. Create a UTF-8 route JSON containing the selected route, fixed official sources, the capability DAG, and one prediction, code-reading, or micro-code diagnostic per capability.
+3. Create a UTF-8 route JSON containing the selected locale, selected route, fixed official sources, the capability DAG, and one prediction, code-reading, or micro-code diagnostic per capability in that locale.
 4. Create a temporary evidence JSON containing reusable code evidence and prior diagnostic responses. Conversation evidence establishes mastery only when its item carries the matching route diagnostic `question_id` and correct `answer_id`; free-form claims never do. Keep raw learner answers and code evidence in this temporary report only.
 5. Run the deterministic assessor. If it returns `needs_evidence`, ask exactly its single `next_question`, append the response to the temporary evidence JSON, and rerun. Never ask a resolved capability again.
 6. Continue only when it returns `ready`. Present the ordered preparatory units and total preparatory time before authoring.
@@ -70,7 +76,7 @@ Author new specifications only as schema v3 with `course.audience.level: assesse
 
 Make `preparatory_units[0]` the 15-30 minute `lab00` orientation. Add only necessary `prep01`, `prep02`, ... units in DAG-level and `python -> library -> domain` order. Prep takes 30-45 minutes, or 45-60 with a derivation/lifecycle reason. Invent none when all capabilities are mastered; do not impose a prep-count ceiling.
 
-Before authoring learner-facing prose, read [complete-teaching-example.md](references/complete-teaching-example.md). Each `prepNN` connects a cognitive anchor, definition, route need, concrete value flow, boundary, recovery, trace, diagnosis, and quiz, but has no code, points, submission, solution, or hidden test. Graded chapters connect problem, prediction, contract, value flow, boundaries, diagnosis, quiz, code, and capstone.
+Before authoring learner-facing prose, read only the complete example matching the selected course language: [Simplified Chinese](references/complete-teaching-example.zh-CN.md) for `zh-CN` or [English](references/complete-teaching-example.en.md) for `en`. Each `prepNN` connects a cognitive anchor, definition, route need, concrete value flow, boundary, recovery, trace, diagnosis, and quiz, but has no code, points, submission, solution, or hidden test. Graded chapters connect problem, prediction, contract, value flow, boundaries, diagnosis, quiz, code, and capstone.
 
 Give each graded Lab one new knowledge mainline and one usable increment to the same capstone. Lab 02+ may begin with the prior mechanism's graded official bridge, but that bridge does not justify a second unrelated mainline.
 
@@ -130,7 +136,7 @@ Copy setup, launch, first-Lab, test, score, and shutdown commands from the gener
 
 - Read [curriculum-contract.md](references/curriculum-contract.md) for the schema, sizing, lesson, question, source-policy, and mechanism-cycle contracts.
 - Read [teaching-depth-contract.md](references/teaching-depth-contract.md) before readiness, route, or lesson design for adaptive foundations, operational depth, concrete traces, activity alignment, and time tiers.
-- Read [complete-teaching-example.md](references/complete-teaching-example.md) before authoring learner-facing prose for a complete Lab 00 and graded-JSON positive example.
+- Read only the example matching the selected course language before authoring learner-facing prose: [complete-teaching-example.zh-CN.md](references/complete-teaching-example.zh-CN.md) for `zh-CN`, or [complete-teaching-example.en.md](references/complete-teaching-example.en.md) for `en`. Use [complete-teaching-example.md](references/complete-teaching-example.md) only as the locale index.
 - Read [authoring-rubric.md](references/authoring-rubric.md) for teaching depth, exercise quality, and grader quality.
 - Read [architecture.md](references/architecture.md) for generated-project ownership, runtime, security, progression, and UI contracts.
 - Read [forward-test-rubric.md](references/forward-test-rubric.md) for required local generated-project checks.

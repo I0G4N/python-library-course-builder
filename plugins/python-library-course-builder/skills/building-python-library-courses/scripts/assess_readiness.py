@@ -23,6 +23,7 @@ CATEGORY_ORDER = {"python": 0, "library": 1, "domain": 2}
 DIAGNOSTIC_KINDS = {"prediction", "code_reading", "micro_code"}
 EVIDENCE_KINDS = {"code", "conversation", "self_report"}
 EVIDENCE_VERDICTS = {"sufficient", "missing", "claim"}
+SUPPORTED_LANGUAGES = {"zh-CN", "en"}
 UNKNOWN_ANSWERS = {
     "不会",
     "我不会",
@@ -136,15 +137,35 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
+def _language(mapping: dict[str, Any], *, label: str) -> str:
+    language = _text(mapping, "language", label)
+    if language not in SUPPORTED_LANGUAGES:
+        raise ReadinessValidationError(
+            f"{label}.language must be one of: zh-CN, en"
+        )
+    return language
+
+
 def _validate_route(payload: Any) -> tuple[dict[str, Any], list[str], dict[str, int]]:
     route_spec = copy.deepcopy(_object(payload, "route specification"))
+    schema_version = route_spec.get("schema_version")
+    if type(schema_version) is not int or schema_version not in {1, 2}:
+        raise ReadinessValidationError(
+            "route specification.schema_version must be 1 or 2"
+        )
     _exact_fields(
         route_spec,
-        {"schema_version", "route", "official_sources", "capabilities"},
+        {
+            "schema_version",
+            "route",
+            "official_sources",
+            "capabilities",
+            *({"language"} if schema_version == 2 else set()),
+        },
         "route specification",
     )
-    if route_spec.get("schema_version") != 1:
-        raise ReadinessValidationError("route specification.schema_version must be 1")
+    if schema_version == 2:
+        _language(route_spec, label="route specification")
 
     route = _object(route_spec.get("route"), "route specification.route")
     _exact_fields(route, {"id", "title"}, "route specification.route")
@@ -326,16 +347,40 @@ def _validate_route(payload: Any) -> tuple[dict[str, Any], list[str], dict[str, 
     return route_spec, ordered, levels
 
 
-def _validate_evidence(payload: Any, *, route_id: str) -> dict[str, Any]:
+def _validate_evidence(
+    payload: Any,
+    *,
+    route_id: str,
+    route_schema_version: int,
+    route_language: str,
+) -> dict[str, Any]:
     evidence = copy.deepcopy(_object(payload, "evidence report"))
+    schema_version = evidence.get("schema_version")
+    if type(schema_version) is not int or schema_version not in {1, 2}:
+        raise ReadinessValidationError(
+            "evidence report.schema_version must be 1 or 2"
+        )
+    if schema_version != route_schema_version:
+        raise ReadinessValidationError(
+            "evidence report.schema_version must match the route specification"
+        )
     _exact_fields(
         evidence,
-        {"schema_version", "evidence", "responses"},
+        {
+            "schema_version",
+            "evidence",
+            "responses",
+            *({"language"} if schema_version == 2 else set()),
+        },
         "evidence report",
         optional={"route_id"},
     )
-    if evidence.get("schema_version") != 1:
-        raise ReadinessValidationError("evidence report.schema_version must be 1")
+    if schema_version == 2:
+        language = _language(evidence, label="evidence report")
+        if language != route_language:
+            raise ReadinessValidationError(
+                "evidence report.language does not match route specification.language"
+            )
     if "route_id" in evidence and evidence.get("route_id") != route_id:
         raise ReadinessValidationError("evidence report.route_id does not match route")
     _array(evidence.get("evidence"), "evidence report.evidence")
@@ -427,7 +472,7 @@ def _build_preparatory_units(
 
 
 def _safe_plan_projection(plan: dict[str, Any]) -> dict[str, Any]:
-    keys = (
+    keys = [
         "schema_version",
         "status",
         "route_id",
@@ -442,24 +487,27 @@ def _safe_plan_projection(plan: dict[str, Any]) -> dict[str, Any]:
         "preparatory_units",
         "preparatory_time",
         "readiness_summary",
-    )
+    ]
+    if plan.get("schema_version") == 2:
+        keys.insert(2, "language")
     return {key: copy.deepcopy(plan[key]) for key in keys}
 
 
 def _readiness_summary(plan: dict[str, Any]) -> str:
     """Derive the learner-profile identity from the plan's safe decisions."""
 
-    return _digest(
-        {
-            "route_id": plan["route_id"],
-            "route_digest": plan["route_digest"],
-            "resolutions": [
-                {"id": item["id"], "status": item["status"]}
-                for item in plan["capabilities"]
-            ],
-            "preparatory_units": plan["preparatory_units"],
-        }
-    )[:12]
+    identity = {
+        "route_id": plan["route_id"],
+        "route_digest": plan["route_digest"],
+        "resolutions": [
+            {"id": item["id"], "status": item["status"]}
+            for item in plan["capabilities"]
+        ],
+        "preparatory_units": plan["preparatory_units"],
+    }
+    if plan.get("schema_version") == 2:
+        identity["language"] = plan["language"]
+    return _digest(identity)[:12]
 
 
 def _validate_plan_minutes(
@@ -501,6 +549,11 @@ def validate_ready_plan(payload: Any) -> dict[str, Any]:
     """Validate plan integrity without retaining its temporary raw evidence."""
 
     plan = copy.deepcopy(_object(payload, "readiness plan"))
+    schema_version = plan.get("schema_version")
+    if type(schema_version) is not int or schema_version not in {1, 2}:
+        raise ReadinessValidationError(
+            "readiness plan.schema_version must be 1 or 2"
+        )
     required = {
         "schema_version",
         "status",
@@ -518,13 +571,20 @@ def validate_ready_plan(payload: Any) -> dict[str, Any]:
         "readiness_summary",
         "plan_digest",
     }
+    if schema_version == 2:
+        required.add("language")
     missing = sorted(required - set(plan))
     if missing:
         raise ReadinessValidationError(
             "readiness plan is missing required field(s): " + ", ".join(missing)
         )
-    if plan.get("schema_version") != 1:
-        raise ReadinessValidationError("readiness plan.schema_version must be 1")
+    if schema_version == 1:
+        if plan.get("language", "zh-CN") != "zh-CN":
+            raise ReadinessValidationError(
+                "readiness plan schema v1 is compatible only with language zh-CN"
+            )
+    else:
+        _language(plan, label="readiness plan")
     if plan.get("status") != "ready":
         raise ReadinessValidationError("readiness plan status must be ready")
     _stable_id(plan, "route_id", "readiness plan")
@@ -820,7 +880,14 @@ def assess_readiness(route_payload: Any, evidence_payload: Any) -> dict[str, Any
 
     route, ordered_ids, levels = _validate_route(route_payload)
     route_id = str(route["route"]["id"])
-    evidence = _validate_evidence(evidence_payload, route_id=route_id)
+    route_schema_version = int(route["schema_version"])
+    route_language = str(route.get("language", "zh-CN"))
+    evidence = _validate_evidence(
+        evidence_payload,
+        route_id=route_id,
+        route_schema_version=route_schema_version,
+        route_language=route_language,
+    )
     capabilities_by_id = {
         str(capability["id"]): capability for capability in route["capabilities"]
     }
@@ -961,7 +1028,7 @@ def assess_readiness(route_payload: Any, evidence_payload: Any) -> dict[str, Any
         if str(capabilities_by_id[capability_id]["diagnostic"]["id"]) in asked_ids
     ]
     common: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": route_schema_version,
         "status": "needs_evidence" if needs_evidence_ids else "ready",
         "route_id": route_id,
         "route_digest": _digest(route),
@@ -995,6 +1062,8 @@ def assess_readiness(route_payload: Any, evidence_payload: Any) -> dict[str, Any
         "asked_question_ids": asked_question_ids,
         "temporary_evidence": evidence,
     }
+    if route_schema_version == 2:
+        common["language"] = route_language
     if needs_evidence_ids:
         capability_id = needs_evidence_ids[0]
         diagnostic = copy.deepcopy(capabilities_by_id[capability_id]["diagnostic"])

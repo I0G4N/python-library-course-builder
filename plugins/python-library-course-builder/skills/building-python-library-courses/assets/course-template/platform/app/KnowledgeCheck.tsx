@@ -9,6 +9,11 @@ import {
   retryFailedPost,
   type KnowledgeAnswerPost,
 } from "./progressionLifecycle.mjs";
+import {
+  courseCopy,
+  type CourseCopy,
+  type CourseLanguage,
+} from "./courseLocale.mjs";
 
 const RUNNER_URL = "http://127.0.0.1:8765";
 
@@ -78,6 +83,7 @@ function detailFromPayload(payload: unknown): string | null {
 
 async function runnerRequest<T>(
   path: string,
+  t: CourseCopy,
   init?: RequestInit,
   timeoutMs = 8_000,
 ): Promise<T> {
@@ -99,7 +105,7 @@ async function runnerRequest<T>(
     if (!response.ok) {
       throw new Error(
         detailFromPayload(payload) ??
-          `Runner request failed (${response.status} ${response.statusText})`,
+          t.runnerRequestStatus(response.status, response.statusText),
       );
     }
     return payload as T;
@@ -109,25 +115,28 @@ async function runnerRequest<T>(
   }
 }
 
-function runnerError(error: unknown): string {
+function runnerError(error: unknown, t: CourseCopy): string {
   if (error instanceof DOMException && error.name === "AbortError") {
-    return "本地 Runner 响应超时。请确认学习服务仍在运行。";
+    return t.runnerTimeout;
   }
-  const detail = error instanceof Error ? error.message : "发生未知错误。";
-  return `本地 Runner 请求失败：${detail}`;
+  const detail = error instanceof Error ? error.message : t.unknownError;
+  return t.runnerRequestFailed(detail);
 }
 
 export function KnowledgeCheck({
   labId,
+  language,
   refreshVersion,
   onProgressChange,
   onStateChange,
 }: {
   labId: string;
+  language: CourseLanguage;
   refreshVersion: number;
   onProgressChange: (labId: string, progress: KnowledgeProgress) => void;
   onStateChange: (state: SharedCourseState) => boolean;
 }) {
+  const t = courseCopy(language);
   const groupPrefix = useId();
   const requestGenerationRef = useRef(0);
   const fetchRequestRef = useRef(0);
@@ -166,6 +175,7 @@ export function KnowledgeCheck({
     const controller = new AbortController();
     void runnerRequest<KnowledgeView>(
       `/api/knowledge/${encodeURIComponent(labId)}`,
+      t,
       { signal: controller.signal },
     )
       .then((payload) => {
@@ -187,7 +197,7 @@ export function KnowledgeCheck({
           generation !== requestGenerationRef.current ||
           requestId !== fetchRequestRef.current
         ) return;
-        setLoadError(runnerError(requestError));
+        setLoadError(runnerError(requestError, t));
       })
       .finally(() => {
         if (
@@ -200,6 +210,7 @@ export function KnowledgeCheck({
     };
   }, [
     labId,
+    language,
     onProgressChange,
     queuedRefreshVersion,
     refreshVersion,
@@ -225,6 +236,7 @@ export function KnowledgeCheck({
     try {
       const payload = await runnerRequest<KnowledgeAnswerPayload>(
         submission.path,
+        t,
         {
           method: submission.method,
           signal: controller.signal,
@@ -254,7 +266,7 @@ export function KnowledgeCheck({
         generation !== requestGenerationRef.current
       ) return;
       setFailedSubmission(submission);
-      setSubmitError(runnerError(requestError));
+      setSubmitError(runnerError(requestError, t));
     } finally {
       if (submitControllerRef.current === controller) {
         const shouldReplayRefresh =
@@ -295,17 +307,17 @@ export function KnowledgeCheck({
     >
       <header className="knowledge-heading">
         <div>
-          <p className="eyebrow">CHECK</p>
-          <h3 id={`knowledge-title-${groupPrefix}`}>知识检查</h3>
+          <p className="eyebrow">{t.checkLabel}</p>
+          <h3 id={`knowledge-title-${groupPrefix}`}>{t.knowledgeCheck}</h3>
         </div>
         <span className="knowledge-status">
           {knowledge
             ? knowledge.completed
-              ? `已完成 · ${knowledge.mastered}/${knowledge.total}`
-              : `${knowledge.mastered}/${knowledge.total} 已掌握`
+              ? t.knowledgeCompleted(knowledge.mastered, knowledge.total)
+              : t.knowledgeMastered(knowledge.mastered, knowledge.total)
             : loading
-              ? "正在加载…"
-              : "尚未加载"}
+              ? t.loading
+              : t.notLoaded}
         </span>
       </header>
 
@@ -320,7 +332,7 @@ export function KnowledgeCheck({
               setRetryVersion((value) => value + 1);
             }}
           >
-            重新加载
+            {t.reload}
           </button>
         </div>
       ) : null}
@@ -336,14 +348,14 @@ export function KnowledgeCheck({
               if (retry) void submitAnswer(retry);
             }}
           >
-            重试提交
+            {t.retrySubmit}
           </button>
         </div>
       ) : null}
 
       {knowledge && !knowledge.available ? (
         <p className="knowledge-prerequisite">
-          当前知识检查尚不可用。请先完成前置 Lab 的知识检查与学习要求。
+          {t.knowledgeUnavailable}
         </p>
       ) : null}
 
@@ -366,11 +378,11 @@ export function KnowledgeCheck({
                 <legend>
                   {question.kind ? (
                     <small className="knowledge-kind">
-                      {question.kind === "execution_trace" ? "执行推演" : "诊断分析"}
+                      {question.kind === "execution_trace" ? t.executionTrace : t.diagnosticAnalysis}
                     </small>
                   ) : null}
                   <span>{question.prompt}</span>
-                  {question.mastered ? <small>已掌握</small> : null}
+                  {question.mastered ? <small>{t.mastered}</small> : null}
                 </legend>
                 <div className="knowledge-choices">
                   {question.choices.map((choice, choiceIndex) => {
@@ -402,7 +414,7 @@ export function KnowledgeCheck({
                     onClick={() => submitSelectedAnswer(question.id)}
                     disabled={!selectedChoice || submittingQuestionId !== null}
                   >
-                    {submittingQuestionId === question.id ? "检查中…" : "检查答案"}
+                    {submittingQuestionId === question.id ? t.checking : t.checkAnswer}
                   </button>
                   {feedback ? (
                     <p
@@ -413,7 +425,7 @@ export function KnowledgeCheck({
                       }
                       aria-live="polite"
                     >
-                      <strong>{feedback.correct ? "回答正确。" : "回答不正确。"}</strong>{" "}
+                      <strong>{feedback.correct ? t.correctAnswer : t.incorrectAnswer}</strong>{" "}
                       <span>{feedback.feedback}</span>{" "}
                       <span>{feedback.explanation}</span>
                     </p>
@@ -424,7 +436,7 @@ export function KnowledgeCheck({
           })}
         </div>
       ) : loading && !knowledge ? (
-        <p className="knowledge-loading">正在从本地 Runner 读取知识检查…</p>
+        <p className="knowledge-loading">{t.loadingKnowledge}</p>
       ) : null}
     </section>
   );

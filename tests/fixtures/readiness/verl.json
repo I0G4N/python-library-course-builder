@@ -1,5 +1,6 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "language": "zh-CN",
   "route": {"id": "verl-route", "title": "verl fixture route"},
   "official_sources": [
     {

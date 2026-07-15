@@ -8,7 +8,7 @@ Complete this checklist from a clean checkout before publishing a version.
 - [ ] `plugin.json` and `marketplace.json` use the published plugin and marketplace names.
 - [ ] Public author metadata contains no private email address or credential.
 - [ ] Root and generated-template `LICENSE` and `NOTICE` files are byte-identical.
-- [ ] README installation, invocation, platform, and security instructions match verified behavior.
+- [ ] `README.md` and `README.zh-CN.md` cross-link and publish matching installation, invocation, platform, language, and security instructions.
 
 ## Base and local validation
 
@@ -24,6 +24,7 @@ Complete this checklist from a clean checkout before publishing a version.
 
 - [ ] The release-candidate gate, `uv run python scripts/validate_release.py --codex-validators --forward`, passes.
 - [ ] A small standard-library target generates into an empty directory.
+- [ ] Fresh `zh-CN` and `en` schema-v3 courses each pass split-source parity, README/Markdown, CLI, Web, Runner, privacy, and full verification.
 - [ ] Starter tests are RED only at declared learner interfaces.
 - [ ] Reference implementations pass public and verified tests.
 - [ ] CLI, Web, Runner, progression, build, and shutdown checks pass.
@@ -37,8 +38,8 @@ Complete this checklist from a clean checkout before publishing a version.
 - [ ] Private Vulnerability Reporting is enabled, and `https://github.com/I0G4N/python-library-course-builder/security/advisories/new` opens the private security report flow.
 - [ ] The dependency graph, Dependabot alerts, and Dependabot security updates are enabled.
 - [ ] A main branch ruleset and a v* tag ruleset protect the release branch and tags.
-- [ ] The pinned public install command, `codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.1.1`, succeeds from a clean Codex environment.
-- [ ] Hosted main CI and the hosted v0.1.1 tag forward job pass for the release commit.
+- [ ] The pinned public install command, `codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.2.0`, succeeds from a clean Codex environment.
+- [ ] Hosted main CI and the hosted v0.2.0 tag forward job pass for the release commit.
 
 ## Publication
 

@@ -31,12 +31,98 @@ def _route(name: str = "numpy") -> dict[str, object]:
     return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
 
 
-def _evidence(*items: dict[str, object], responses: list[dict[str, object]] | None = None) -> dict[str, object]:
+def _evidence(
+    *items: dict[str, object],
+    responses: list[dict[str, object]] | None = None,
+    language: str = "zh-CN",
+) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "language": language,
         "evidence": list(items),
         "responses": list(responses or []),
     }
+
+
+def test_readiness_v2_requires_matching_supported_language_and_binds_identity() -> None:
+    module = _assessor()
+    route_en = _route()
+    route_en["language"] = "en"
+    responses = [
+        {"question_id": capability["diagnostic"]["id"], "answer": "不会"}
+        for capability in route_en["capabilities"]
+    ]
+
+    plan_en = module.assess_readiness(
+        route_en,
+        _evidence(responses=responses, language="en"),
+    )
+    plan_zh = module.assess_readiness(
+        _route(),
+        _evidence(responses=responses),
+    )
+
+    assert plan_en["schema_version"] == 2
+    assert plan_en["language"] == "en"
+    assert plan_en["route_digest"] != plan_zh["route_digest"]
+    assert plan_en["readiness_summary"] != plan_zh["readiness_summary"]
+    assert plan_en["plan_digest"] != plan_zh["plan_digest"]
+    validated = module.validate_ready_plan(plan_en)
+    assert validated["schema_version"] == 2
+    assert validated["language"] == "en"
+    assert validated["readiness_summary"] == plan_en["readiness_summary"]
+    assert validated["plan_digest"] == plan_en["plan_digest"]
+
+
+@pytest.mark.parametrize(
+    ("target", "mutation", "message"),
+    [
+        ("route", lambda value: value.pop("language"), "language"),
+        ("route", lambda value: value.update({"language": "fr"}), "language"),
+        ("evidence", lambda value: value.pop("language"), "language"),
+        ("evidence", lambda value: value.update({"language": "fr"}), "language"),
+        ("evidence", lambda value: value.update({"language": "en"}), "language"),
+    ],
+)
+def test_readiness_v2_rejects_missing_unsupported_or_mismatched_language(
+    target: str,
+    mutation: object,
+    message: str,
+) -> None:
+    module = _assessor()
+    route = _route()
+    evidence = _evidence()
+    mutation(route if target == "route" else evidence)
+
+    with pytest.raises(module.ReadinessValidationError, match=message):
+        module.assess_readiness(route, evidence)
+
+
+def test_readiness_v1_remains_an_implicit_zh_cn_compatibility_contract() -> None:
+    module = _assessor()
+    route = _route()
+    route["schema_version"] = 1
+    route.pop("language")
+    evidence = _evidence()
+    evidence["schema_version"] = 1
+    evidence.pop("language")
+    for capability in route["capabilities"]:
+        evidence["responses"].append(
+            {"question_id": capability["diagnostic"]["id"], "answer": "不会"}
+        )
+
+    plan = module.assess_readiness(route, evidence)
+
+    assert plan["schema_version"] == 1
+    assert "language" not in plan
+    assert module.validate_ready_plan(plan)["readiness_summary"] == plan[
+        "readiness_summary"
+    ]
+
+    forged = deepcopy(plan)
+    forged["language"] = "en"
+    with pytest.raises(module.ReadinessValidationError, match="language"):
+        module.validate_ready_plan(forged)
 
 
 @pytest.mark.parametrize("fixture_name", ["numpy", "pytorch", "verl"])

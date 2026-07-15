@@ -47,11 +47,11 @@ For a broad library, prefer one deep product track over a catalog of unrelated s
 
 ## 3. Lesson quality
 
-Use one visible sequence: concrete capstone problem -> plain-language understanding -> exact operational contract -> complete real-value execution trace -> boundary and error reasoning -> runnable and diagnostic examples -> knowledge check -> coding/capstone increment. Render the open core with the learner-safe labels `先这样理解`, `输入和输出是什么`, and `拿一个具体输入走一遍` before deeper implementation and source details.
+Use one visible sequence: concrete capstone problem -> plain-language understanding -> exact operational contract -> complete real-value execution trace -> boundary and error reasoning -> runnable and diagnostic examples -> knowledge check -> coding/capstone increment. Render the open core with the exact `zh-CN` or `en` labels defined in `teaching-depth-contract.md` before deeper implementation and source details.
 
 For every graded chapter, make the deeper teaching route inspectable as: **project problem** -> **plain-language predictive model** -> **precise inputs, outputs, effects, and failures** -> **same concrete value through the complete flow** -> **valid case and boundary case** -> **diagnosis and recovery** -> **quiz, coding question, and capstone increment**. The final three practice surfaces exercise the same concept and outcome, and the chapter retains one new knowledge mainline.
 
-Write the learner path as connected natural Simplified Chinese: define a term, connect it to the current task in the next sentence, transition into a concrete value, and explain the value's change before introducing the next structure. Reject an author-field inventory that merely stacks definition, purpose, mechanism, boundaries, and pitfalls as learner-facing labels.
+Write the learner path as connected natural prose in the selected `zh-CN` or `en` locale: define a term, connect it to the current task in the next sentence, transition into a concrete value, and explain the value's change before introducing the next structure. Reject mixed-locale prose, silent fallback, or an author-field inventory that merely stacks definition, purpose, mechanism, boundaries, and pitfalls as learner-facing labels.
 
 For every concept, check that the structured lesson answers:
 

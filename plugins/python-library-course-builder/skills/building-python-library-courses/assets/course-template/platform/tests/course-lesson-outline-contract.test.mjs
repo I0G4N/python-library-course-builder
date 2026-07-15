@@ -11,10 +11,10 @@ test("structured lessons keep a Markdown fallback and render the beginner core f
 
   assert.match(lesson, /lesson_outline\?: LessonOutline/);
   assert.match(lesson, /content\.lesson_outline/);
-  assert.match(lesson, /学习前先确认/);
-  assert.match(lesson, /本章要解决的问题/);
-  assert.match(lesson, /学完你将能够/);
-  assert.match(lesson, /content\.lesson\)/);
+  assert.match(lesson, /t\.studyPrerequisites/);
+  assert.match(lesson, /t\.chapterProblem/);
+  assert.match(lesson, /t\.outcomes/);
+  assert.match(lesson, /markdownBlocks\(content\.lesson, t\)/);
 });
 
 test("principles, design choices, and troubleshooting use accessible native disclosure", async () => {
@@ -25,8 +25,8 @@ test("principles, design choices, and troubleshooting use accessible native disc
 
   assert.match(lesson, /<details[^>]*className="lesson-deep-dive"/);
   assert.match(lesson, /<summary>/);
-  assert.match(lesson, /深入原理与设计取舍/);
-  assert.match(lesson, /错误现象、原因与修复/);
+  assert.match(lesson, /t\.deepDive/);
+  assert.match(lesson, /t\.diagnostics/);
   assert.match(lesson, /<PythonCodeBlock[\s\S]*wrong_code/);
   assert.match(lesson, /<PythonCodeBlock[\s\S]*fix_code/);
   assert.match(css, /\.lesson-deep-dive/);
@@ -39,7 +39,7 @@ test("runnable lesson examples expose commands and expected output before coding
   assert.match(lesson, /example\.kind === "runnable"/);
   assert.match(lesson, /example\.command/);
   assert.match(lesson, /example\.expected_output/);
-  assert.match(lesson, /讲义可运行示例/);
+  assert.match(lesson, /t\.runnableExamples/);
 });
 
 test("core concept definitions stay visible before the closed deep dive", async () => {
@@ -62,9 +62,9 @@ test("plain contract and concrete trace precede the closed deep dive with learne
 
   const openCore = lesson.slice(0, deepDive);
   for (const label of [
-    "先这样理解",
-    "输入和输出是什么",
-    "拿一个具体输入走一遍",
+    "t.mentalModel",
+    "t.inputOutputHeading",
+    "t.concreteTrace",
   ]) {
     const position = lesson.indexOf(label);
     assert.ok(position >= 0, `missing learner-visible label: ${label}`);
@@ -133,8 +133,8 @@ test("content types and concept cards expose study time and first-practice actio
   assert.match(lesson, /onPractice\?: \(link: PracticeLink\) => void/);
   assert.match(lesson, /practiceLinksByConcept/);
   assert.match(lesson, /type="button"[\s\S]*onClick=\{\(\) => onPractice\?\.\(practice\)\}/);
-  assert.match(lesson, /先做这个练习/);
-  assert.match(lesson, /预计学习时间/);
+  assert.match(lesson, /t\.practiceFirst/);
+  assert.match(lesson, /t\.estimatedStudyTime/);
 });
 
 test("course shell renders readiness and routes practice to stable targets", async () => {
@@ -157,7 +157,7 @@ test("course shell renders readiness and routes practice to stable targets", asy
   assert.match(app, /scrollIntoView/);
   assert.match(app, /id=\{`knowledge-check-\$\{selectedLab\.id\}`\}/);
   assert.match(app, /className="work-column"[\s\S]*id="work-column"[\s\S]*tabIndex=\{-1\}/);
-  assert.match(app, /<CourseLesson content=\{lesson\} onPractice=\{handlePractice\}/);
+  assert.match(app, /<CourseLesson content=\{lesson\} language=\{courseLanguage\} onPractice=\{handlePractice\}/);
   const practiceStart = app.indexOf("const handlePractice");
   const practiceEnd = app.indexOf("const dirty", practiceStart);
   const practiceHandler = app.slice(practiceStart, practiceEnd);

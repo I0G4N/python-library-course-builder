@@ -1280,6 +1280,10 @@ def web_progression_workflow(
     return result
 
 
+def _knowledge_only_refusal_marker(manifest: dict[str, Any]) -> str:
+    return "knowledge-only" if manifest.get("language") == "en" else "仅包含知识学习"
+
+
 def cli_learning_workflow(project: Path, learner_python: str) -> tuple[bool, str]:
     manifest = json.loads((project / "labs" / "manifest.json").read_text(encoding="utf-8"))
     labs = [item for item in manifest.get("labs", []) if isinstance(item, dict)]
@@ -1288,6 +1292,7 @@ def cli_learning_workflow(project: Path, learner_python: str) -> tuple[bool, str
     schema_version = manifest.get("schema_version", 2)
     if isinstance(schema_version, bool) or not isinstance(schema_version, int):
         return False, "learner manifest has an invalid schema_version"
+    knowledge_only_marker = _knowledge_only_refusal_marker(manifest)
     if schema_version >= 3:
         preparatory_ids = [
             str(item["id"])
@@ -1400,7 +1405,10 @@ def cli_learning_workflow(project: Path, learner_python: str) -> tuple[bool, str
                         env=environment,
                     )
                     evidence.append(f"prep-{operation}={refused.returncode}")
-                    if refused.returncode != 2 or "knowledge-only" not in refused.stderr:
+                    if (
+                        refused.returncode != 2
+                        or knowledge_only_marker not in refused.stderr
+                    ):
                         return (
                             False,
                             f"{operation} accepted knowledge-only {prep_target}; "

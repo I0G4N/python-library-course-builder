@@ -136,7 +136,9 @@ def test_inventory_scan_allows_contract_literals_under_tests(tmp_path: Path) -> 
     assert validator.scan_inventory(tmp_path, (contract,)) == []
 
 
-@pytest.mark.parametrize("filename", ("README.md", "CHANGELOG.md"))
+@pytest.mark.parametrize(
+    "filename", ("README.md", "README.zh-CN.md", "CHANGELOG.md")
+)
 @pytest.mark.parametrize("spelling", ("CS61A-style", "CS61A-Style", "cs61a-style"))
 def test_inventory_scan_allows_cs61a_style_only_in_root_marketing_docs(
     tmp_path: Path,
@@ -763,27 +765,174 @@ def test_forward_verification_writes_the_v3_course_and_readiness_fixture(
     from tests.course_v3_fixture import make_v3_spec_and_plan
 
     validator = load_validator()
-    captured: dict[str, object] = {}
+    captured: dict[str, dict[str, object]] = {}
 
     def capture_plan(**kwargs: object) -> tuple[()]:
         spec_path = kwargs["spec_path"]
         readiness_plan_path = kwargs["readiness_plan_path"]
         assert isinstance(spec_path, Path)
         assert isinstance(readiness_plan_path, Path)
-        captured["spec"] = json.loads(spec_path.read_text(encoding="utf-8"))
-        captured["readiness_plan"] = json.loads(
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        readiness_plan = json.loads(
             readiness_plan_path.read_text(encoding="utf-8")
         )
+        language = str(spec["course"]["language"])
+        captured[language] = {
+            "spec": spec,
+            "readiness_plan": readiness_plan,
+        }
         return ()
 
     monkeypatch.setattr(validator, "forward_verification_plan", capture_plan)
 
     validator.run_forward_verification(ROOT)
 
-    spec, readiness_plan = make_v3_spec_and_plan(
-        missing_ids={"json-data-model", "domain-boundary"}
+    expected: dict[str, dict[str, object]] = {}
+    for language in ("zh-CN", "en"):
+        spec, readiness_plan = make_v3_spec_and_plan(
+            missing_ids={"json-data-model", "domain-boundary"},
+            language=language,
+        )
+        expected[language] = {
+            "spec": spec,
+            "readiness_plan": readiness_plan,
+        }
+    assert captured == expected
+
+
+def test_forward_fixtures_contain_real_learner_prose_in_each_locale() -> None:
+    from tests.course_v3_fixture import make_v3_spec_and_plan
+
+    validator = load_validator()
+    for language in ("zh-CN", "en"):
+        spec, readiness_plan = make_v3_spec_and_plan(
+            missing_ids={"json-data-model", "domain-boundary"},
+            language=language,
+        )
+        assert validator.forward_fixture_locale_errors(
+            language,
+            spec,
+            readiness_plan,
+        ) == []
+
+    english_spec, english_plan = make_v3_spec_and_plan(language="en")
+    english_spec["course"]["title"] = "混合语言课程"
+    assert "English forward fixture contains Han learner-facing text" in (
+        validator.forward_fixture_locale_errors(
+            "en",
+            english_spec,
+            english_plan,
+        )
     )
-    assert captured == {"spec": spec, "readiness_plan": readiness_plan}
+
+    chinese_spec, chinese_plan = make_v3_spec_and_plan(language="zh-CN")
+    chinese_spec["course"]["description"] = "An otherwise English course description."
+    assert (
+        "zh-CN learner-facing field must contain Chinese text: "
+        "spec.course.description"
+    ) in validator.forward_fixture_locale_errors(
+        "zh-CN",
+        chinese_spec,
+        chinese_plan,
+    )
+
+
+def test_generated_forward_locale_gate_checks_prose_and_first_paint(
+    tmp_path: Path,
+) -> None:
+    validator = load_validator()
+    project = tmp_path / "generated"
+    surfaces = {
+        "README.md": "# English JSON course\n\n## Prerequisites\n",
+        "labs/README.md": "# Learner workspace\n",
+        "platform/course/content.json": '{"lesson":"English lesson"}\n',
+        "platform/course/manifest.json": '{"language":"en"}\n',
+        "platform/app/courseLocale.mjs": (
+            'const GENERATED_COURSE_LANGUAGE = "en";\n'
+        ),
+    }
+    for relative, content in surfaces.items():
+        path = project / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    assert validator.forward_generated_locale_errors(project, "en") == []
+
+    (project / "platform/course/content.json").write_text(
+        '{"lesson":"混合语言"}\n',
+        encoding="utf-8",
+    )
+    assert any(
+        "contains Han text" in error
+        for error in validator.forward_generated_locale_errors(project, "en")
+    )
+
+
+def test_zh_cn_generated_locale_gate_requires_framework_and_lesson_anchors(
+    tmp_path: Path,
+) -> None:
+    validator = load_validator()
+    project = tmp_path / "generated-zh-cn"
+    unit = {
+        "title": "Lab 00：学习导览",
+        "lesson_outline": {
+            "problem": {"context": "使用具体输入理解课程边界。"},
+            "outcomes": [{"text": "追踪输入与输出。"}],
+            "concepts": [{"definition": "课程边界是一条可观察的约定。"}],
+        },
+    }
+    surfaces = {
+        "README.md": "# 中文课程\n\n## 课程路线\n\n## 开始学习\n\n完成知识检查。\n",
+        "labs/README.md": (
+            "# 中文课程学员工作区\n\n从 `lab00/README.md` 开始。\n\n"
+            "公开测试位于起始代码旁边。\n"
+        ),
+        "platform/course/content.json": json.dumps(
+            {"preparatory_units": [unit], "labs": [unit]},
+            ensure_ascii=False,
+        ),
+        "platform/course/manifest.json": json.dumps(
+            {
+                "language": "zh-CN",
+                "title": "中文课程",
+                "preparatory_units": [{"title": "Lab 00：学习导览"}],
+                "labs": [{"title": "Lab 01：正式练习"}],
+            },
+            ensure_ascii=False,
+        ),
+        "platform/app/courseLocale.mjs": (
+            'const GENERATED_COURSE_LANGUAGE = "zh-CN";\n'
+        ),
+    }
+    for relative, content in surfaces.items():
+        path = project / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    assert validator.forward_generated_locale_errors(project, "zh-CN") == []
+
+    (project / "README.md").write_text(
+        "# 中文课程\n\n## Course route\n\n## 开始学习\n\n完成知识检查。\n",
+        encoding="utf-8",
+    )
+    errors = validator.forward_generated_locale_errors(project, "zh-CN")
+    assert any("missing anchor '## 课程路线'" in error for error in errors)
+
+    content = json.loads(
+        (project / "platform/course/content.json").read_text(encoding="utf-8")
+    )
+    content["labs"][0]["lesson_outline"]["problem"]["context"] = (
+        "An English-only lesson context."
+    )
+    (project / "platform/course/content.json").write_text(
+        json.dumps(content, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    errors = validator.forward_generated_locale_errors(project, "zh-CN")
+    assert any(
+        "generated content.labs[0].lesson_outline.problem.context" in error
+        for error in errors
+    )
 
 
 def test_forward_environment_is_a_closed_secret_free_allowlist(tmp_path: Path) -> None:

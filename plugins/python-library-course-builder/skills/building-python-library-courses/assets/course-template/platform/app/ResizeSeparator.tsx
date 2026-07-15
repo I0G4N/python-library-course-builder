@@ -3,9 +3,14 @@
 import { useRef, type KeyboardEvent, type PointerEvent } from "react";
 
 import { nextSeparatorValue } from "./courseLayout.mjs";
+import {
+  courseCopy,
+  type CourseLanguage,
+} from "./courseLocale.mjs";
 
 type ResizeSeparatorProps = {
-  label: string;
+  labelKey: "resizeNavigation" | "resizeWorkspace";
+  language: CourseLanguage;
   controls: string;
   value: number;
   min: number;
@@ -22,7 +27,8 @@ type PointerDrag = {
 };
 
 export function ResizeSeparator({
-  label,
+  labelKey,
+  language,
   controls,
   value,
   min,
@@ -31,6 +37,7 @@ export function ResizeSeparator({
   className = "",
   disabled = false,
 }: ResizeSeparatorProps) {
+  const label = courseCopy(language)[labelKey] as string;
   const dragRef = useRef<PointerDrag | null>(null);
 
   function clamp(valueToClamp: number) {
