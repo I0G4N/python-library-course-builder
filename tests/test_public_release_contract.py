@@ -257,7 +257,7 @@ def test_changelog_publishes_the_release_version_from_project_metadata() -> None
     changelog_version = release.group("version")
 
     assert changelog_version == "0.1.0"
-    assert release.group("date") == "2026-07-14"
+    assert release.group("date") == "2026-07-15"
     assert project["project"]["version"] == changelog_version
     assert manifest["version"] == changelog_version
 

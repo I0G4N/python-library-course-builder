@@ -219,6 +219,12 @@ def scan_inventory(root: Path, files: Iterable[Path]) -> list[str]:
         "CS61A" + "-style",
         "CS336" + "-style",
     )
+    legacy_marker_allowlist = {
+        ("CS61A" + "-style").casefold(): {
+            Path("README.md"),
+            Path("CHANGELOG.md"),
+        },
+    }
     for candidate in files:
         path = Path(candidate)
         label = _relative_label(base, path)
@@ -249,12 +255,16 @@ def scan_inventory(root: Path, files: Iterable[Path]) -> list[str]:
         if b"\0" in raw:
             continue
         text = raw.decode("utf-8", errors="replace")
+        folded_text = text.casefold()
         is_contract_fixture = bool(relative.parts and relative.parts[0] == "tests")
         if not is_contract_fixture and todo_marker in text:
             errors.append(f"unresolved TODO marker in {label}")
         if not is_contract_fixture:
             for marker in legacy_markers:
-                if marker in text:
+                marker_key = marker.casefold()
+                if marker_key in folded_text and relative not in legacy_marker_allowlist.get(
+                    marker_key, set()
+                ):
                     errors.append(f"legacy course branding {marker!r} in {label}")
             for token in TEMPLATE_TOKEN_RE.findall(text):
                 if token not in EXPECTED_TEMPLATE_TOKENS:

@@ -38,6 +38,9 @@ MARKETPLACE_COMMAND = (
     "codex plugin marketplace add I0G4N/python-library-course-builder "
     "--ref v0.1.0"
 )
+PLUGIN_COMMAND = (
+    "codex plugin add python-library-course-builder@python-library-course-builder"
+)
 CLONE_COMMAND = (
     "git clone --branch v0.1.0 --depth 1 "
     "https://github.com/I0G4N/python-library-course-builder.git"
@@ -59,6 +62,15 @@ CI_BADGE = (
     "[![CI](https://github.com/I0G4N/python-library-course-builder/actions/"
     "workflows/ci.yml/badge.svg?branch=main)](https://github.com/I0G4N/"
     "python-library-course-builder/actions/workflows/ci.yml)"
+)
+README_HERO = (
+    "# 像刷 CS61A 一样，系统攻下一门 Python 库\n"
+    "## Turn Any Python Library into a CS61A-Style Course"
+)
+EARLY_INDEPENDENCE_NOTICE = (
+    "No CS61A code, assignments, tests, or instructional text are included, "
+    "and this independently authored project is not affiliated with or "
+    "endorsed by UC Berkeley, the CS61A course staff, or OpenAI."
 )
 
 
@@ -273,14 +285,20 @@ def test_github_community_files_publish_structured_issue_and_pr_contracts() -> N
 
 def test_readme_publishes_badge_official_docs_boundaries_and_first_use_loop() -> None:
     readme = _text(ROOT / "README.md")
-    assert readme.startswith(f"# Python Library Course Builder\n\n{CI_BADGE}\n")
+    assert readme.startswith(f"{README_HERO}\n\n{CI_BADGE}\n")
+    assert EARLY_INDEPENDENCE_NOTICE in readme.split("## 不是", 1)[0]
 
-    installation = readme.split("## Install from GitHub", 1)[1].split(
-        "## Use the Skill", 1
+    github_installation = readme.split("### Install from GitHub", 1)[1].split(
+        "### Install from a local checkout", 1
     )[0]
-    assert OFFICIAL_CODEX_DOCS in installation
-    assert MARKETPLACE_COMMAND in installation
-    assert CLONE_COMMAND in installation
+    local_installation = readme.split("### Install from a local checkout", 1)[1].split(
+        "Start a new Codex thread", 1
+    )[0]
+    assert OFFICIAL_CODEX_DOCS in github_installation
+    assert MARKETPLACE_COMMAND in github_installation
+    assert PLUGIN_COMMAND in github_installation
+    assert CLONE_COMMAND in local_installation
+    assert PLUGIN_COMMAND in local_installation
     assert (
         "Course creation requires Codex plus network access to verify official "
         "sources and install dependencies."
@@ -293,34 +311,43 @@ def test_readme_publishes_badge_official_docs_boundaries_and_first_use_loop() ->
     )
 
 
-def test_readme_publishes_the_adaptive_depth_learning_contract() -> None:
+def test_readme_publishes_the_v3_readiness_and_course_learning_contract() -> None:
     readme = _text(ROOT / "README.md").casefold()
 
     for promise in (
-        "behavior-based readiness profile",
-        "lab 00 adapts to the prerequisite gaps",
+        "evidence-dialogue readiness preflight",
+        "`lab00` is always the environment and learning-loop orientation",
+        "`prep01`, `prep02`, ...",
+        "no code workspace, points, or submission",
+        "`lab01` unlocks only after the final prep",
+        "schema v2 courses remain compatible",
         "operational contracts",
         "concrete execution traces",
         "task-linked practice",
     ):
         assert promise in readme
+    assert "lab 00 adapts to the prerequisite gaps" not in readme
 
 
-def test_changelog_records_assessed_flow_and_detailed_learner_projections() -> None:
+def test_changelog_records_v3_readiness_and_detailed_learner_projections() -> None:
     release = _text(ROOT / "CHANGELOG.md").split(
-        "## [0.1.0] - 2026-07-14", 1
+        "## [0.1.0] - 2026-07-15", 1
     )[1].casefold()
 
     for promise in (
-        "assessed prerequisite flow",
-        "behavior evidence",
-        "adaptive lab 00",
+        "`evidence-dialogue` readiness preflight",
+        "fixed `lab00` orientation",
+        "dag-ordered `prepnn`",
+        "no code workspaces, scores, or submissions",
+        "shared cli, web, and runner progression",
+        "schema-v2 compatibility",
         "detailed learner projections",
         "operational contracts",
         "concrete execution traces",
         "task-linked practice",
     ):
         assert promise in release
+    assert "adaptive lab 00" not in release
 
 
 def test_raw_template_readme_describes_generated_sources_without_a_broken_link() -> None:

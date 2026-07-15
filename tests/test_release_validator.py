@@ -136,6 +136,44 @@ def test_inventory_scan_allows_contract_literals_under_tests(tmp_path: Path) -> 
     assert validator.scan_inventory(tmp_path, (contract,)) == []
 
 
+@pytest.mark.parametrize("filename", ("README.md", "CHANGELOG.md"))
+@pytest.mark.parametrize("spelling", ("CS61A-style", "CS61A-Style", "cs61a-style"))
+def test_inventory_scan_allows_cs61a_style_only_in_root_marketing_docs(
+    tmp_path: Path,
+    filename: str,
+    spelling: str,
+) -> None:
+    validator = load_validator()
+    document = tmp_path / filename
+    document.write_text(f"A {spelling} course builder.\n", encoding="utf-8")
+
+    assert validator.scan_inventory(tmp_path, (document,)) == []
+
+
+@pytest.mark.parametrize(
+    "relative_name",
+    (
+        "SECURITY.md",
+        "docs/README.md",
+        "plugins/example/skills/example/SKILL.md",
+    ),
+)
+@pytest.mark.parametrize("spelling", ("CS61A-style", "CS61A-Style", "cs61a-style"))
+def test_inventory_scan_rejects_cs61a_style_outside_root_marketing_docs(
+    tmp_path: Path,
+    relative_name: str,
+    spelling: str,
+) -> None:
+    validator = load_validator()
+    document = tmp_path / relative_name
+    document.parent.mkdir(parents=True, exist_ok=True)
+    document.write_text(f"A {spelling} course builder.\n", encoding="utf-8")
+
+    errors = validator.scan_inventory(tmp_path, (document,))
+
+    assert any("legacy course branding" in error for error in errors)
+
+
 def test_release_template_token_allowlist_matches_the_shipped_template() -> None:
     validator = load_validator()
     template_root = (
