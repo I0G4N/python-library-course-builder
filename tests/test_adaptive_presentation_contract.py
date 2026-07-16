@@ -225,7 +225,7 @@ def test_assessed_markdown_renders_open_learning_path_before_deep_dives(
             assert concept["id"] not in markdown
 
 
-def test_assessed_root_readme_summarizes_readiness_and_exact_route_times(
+def test_assessed_root_readme_keeps_diagnostics_private_and_exact_route_times(
     tmp_path: Path,
 ) -> None:
     spec = validate_spec(make_assessed_spec())
@@ -233,12 +233,12 @@ def test_assessed_root_readme_summarizes_readiness_and_exact_route_times(
     replace_template_tokens(tmp_path, spec)
     readme = (tmp_path / "README.md").read_text(encoding="utf-8")
 
-    assert "## 学习准备" in readme
+    assert "## 开始学习" in readme
     capabilities = spec["course"]["audience"]["prerequisite_profile"][
         "capabilities"
     ]
     for capability in capabilities:
-        assert capability["title"] in readme
+        assert capability["title"] not in readme
         assert capability["id"] not in readme
     assert "课程路线只假设学员掌握 Python 基础" not in readme
 
@@ -284,8 +284,9 @@ def test_english_course_localizes_generated_readme_route_and_preparation(
     preparation = render_learning_preparation(spec)
     assert route.startswith("| Order | Unit | Estimated time |")
     assert "minutes" in route
-    assert "## Learning readiness" in preparation
-    assert "The course will use these capabilities directly" in preparation
+    assert "## Start learning" in preparation
+    assert "working mental model" in preparation
+    assert "Learning readiness" not in preparation
     assert "## Prerequisites" in readme
     assert "## Course route" in readme
     assert "## Start learning" in readme

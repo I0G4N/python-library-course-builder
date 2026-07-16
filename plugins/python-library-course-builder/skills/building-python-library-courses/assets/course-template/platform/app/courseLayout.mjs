@@ -156,14 +156,6 @@ export function isCodingUnit({
   return graded !== false;
 }
 
-export function readinessPreparationTitles(readiness) {
-  if (!readiness || typeof readiness !== "object") return [];
-  const configured = readiness.preparatory ?? readiness.foundation ?? [];
-  return Array.isArray(configured)
-    ? configured.filter((value) => typeof value === "string")
-    : [];
-}
-
 export function completedUnitIds(state) {
   if (!state || typeof state !== "object") return [];
   const formal = Array.isArray(state.completed_labs) ? state.completed_labs : [];
@@ -185,4 +177,12 @@ export function shouldShowCodingWorkspace({
       foundationKnowledgeComplete &&
       currentKnowledgeComplete,
   );
+}
+
+export function readingLayoutMode(viewportWidth) {
+  const width = Math.max(0, finiteNumber(viewportWidth, 0));
+  if (width >= 1_280) return "wide-rail";
+  if (width >= 1_024) return "centered";
+  if (width >= 760) return "stacked";
+  return "natural";
 }

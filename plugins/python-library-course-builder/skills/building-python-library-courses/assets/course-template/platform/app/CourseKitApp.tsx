@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import {
+  ChapterGuide,
   CourseLesson,
   type CourseContentItem,
   type PracticeLink,
@@ -47,7 +48,7 @@ import {
   resolveLessonWidth,
   resolveSidebarMaximum,
   resolveSidebarWidth,
-  readinessPreparationTitles,
+  readingLayoutMode,
   serializeLayoutPreferences,
   shouldShowCodingWorkspace,
   unitBadgeLabel,
@@ -100,13 +101,6 @@ type CourseManifest = {
   project?: string;
   total_points?: number;
   capstone?: string | { title?: string; description?: string };
-  readiness?: {
-    assumed: string[];
-    foundation?: string[];
-    preparatory?: string[];
-    route_id?: string;
-    summary?: string;
-  };
   labs: CourseLab[];
 };
 
@@ -762,9 +756,22 @@ export function CourseKitApp() {
     );
   }
 
-  const readiness = manifest.readiness;
-  const preparationTitles = readinessPreparationTitles(readiness);
-  const hasAdditionalPreparation = preparationTitles.length > 0;
+  const knowledgeCheck = selectedLab ? (
+    <div
+      id={`knowledge-check-${selectedLab.id}`}
+      className="knowledge-check-target"
+      tabIndex={-1}
+    >
+      <KnowledgeCheck
+        key={selectedLab.id}
+        labId={selectedLab.id}
+        language={courseLanguage}
+        refreshVersion={knowledgeRefreshVersion}
+        onProgressChange={recordKnowledgeProgress}
+        onStateChange={acceptCourseState}
+      />
+    </div>
+  ) : null;
 
   return (
     <main
@@ -798,26 +805,6 @@ export function CourseKitApp() {
             </span>
           </button>
         </header>
-
-        {readiness ? (
-          <section className="readiness-summary" aria-labelledby="readiness-title">
-            <h2 id="readiness-title">{t.learningReadiness}</h2>
-            <h3>{t.usedDirectly}</h3>
-            <ul>{readiness.assumed.map((title, index) => <li key={`assumed-${index}-${title}`}>{title}</li>)}</ul>
-            <h3>
-              {hasAdditionalPreparation
-                ? readiness.preparatory
-                  ? t.taughtBeforeFormalLab
-                  : t.taughtInLab00
-                : t.noExtraPreparation}
-            </h3>
-            {hasAdditionalPreparation ? (
-              <ul>{preparationTitles.map((title, index) => <li key={`preparation-${index}-${title}`}>{title}</li>)}</ul>
-            ) : (
-              <p>{t.afterOrientation}</p>
-            )}
-          </section>
-        ) : null}
 
         <nav className="lab-nav" aria-label={t.courseChapters}>
           {labs.map((lab, index) => {
@@ -918,9 +905,10 @@ export function CourseKitApp() {
         </header>
 
         <div
-          className={`learning-grid${codingReady ? " coding-visible" : " lesson-only"}`}
+          className={`learning-grid${codingReady ? " coding-visible" : " lesson-only reading-focus"}`}
           ref={learningGridRef}
           style={learningGridStyle}
+          data-reading-layout={codingReady ? undefined : readingLayoutMode(viewportWidth)}
         >
           <section
             className="panel lesson-panel"
@@ -932,27 +920,33 @@ export function CourseKitApp() {
               <small>{lessonLoading ? t.loading : t.lessonSubtitle}</small>
             </div>
             <div className="panel-scroll lesson-scroll">
-              {lesson ? (
-                <CourseLesson content={lesson} language={courseLanguage} onPractice={handlePractice} />
-              ) : (
-                <p className="empty-copy">{t.missingLesson}</p>
-              )}
-              {selectedLab ? (
-                <div
-                  id={`knowledge-check-${selectedLab.id}`}
-                  className="knowledge-check-target"
-                  tabIndex={-1}
-                >
-                  <KnowledgeCheck
-                    key={selectedLab.id}
-                    labId={selectedLab.id}
-                    language={courseLanguage}
-                    refreshVersion={knowledgeRefreshVersion}
-                    onProgressChange={recordKnowledgeProgress}
-                    onStateChange={acceptCourseState}
-                  />
+              {codingReady ? (
+                <div className="coding-lesson-stack">
+                  {lesson ? (
+                    <CourseLesson content={lesson} language={courseLanguage} onPractice={handlePractice} />
+                  ) : (
+                    <p className="empty-copy">{t.missingLesson}</p>
+                  )}
+                  {knowledgeCheck}
                 </div>
-              ) : null}
+              ) : (
+                <div className="focus-reading-layout">
+                  <div className="tutorial-narrative">
+                    {lesson ? (
+                      <CourseLesson content={lesson} language={courseLanguage} onPractice={handlePractice} />
+                    ) : (
+                      <p className="empty-copy">{t.missingLesson}</p>
+                    )}
+                  </div>
+                  <aside
+                    className="chapter-rail"
+                    aria-label={courseLanguage === "zh-CN" ? "章节学习工具" : "Chapter learning tools"}
+                  >
+                    {lesson ? <ChapterGuide content={lesson} language={courseLanguage} /> : null}
+                    {knowledgeCheck}
+                  </aside>
+                </div>
+              )}
             </div>
           </section>
 

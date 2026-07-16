@@ -198,6 +198,51 @@ def _rotate_quiz_positions(quiz: list[dict[str, Any]], offset: int) -> None:
 _HAN_RE = re.compile(r"[\u3400-\u9fff]")
 
 
+def _tutorial_markdown(
+    unit_id: str,
+    title: str,
+    lesson: dict[str, Any],
+    *,
+    language: str,
+) -> str:
+    concept = lesson["concepts"][0]
+    problem = lesson["problem"]
+    example = next(
+        item for item in lesson["examples"] if item["kind"] == "runnable"
+    )
+    if language == "en":
+        return (
+            f"# {title}\n\n"
+            f"This chapter begins with a concrete problem: {problem['context']} "
+            "We will follow one value through the complete boundary before naming "
+            "the reusable idea.\n\n"
+            f"## Build the mental model\n\n"
+            f"**{concept['name']}** means {concept['definition']} "
+            f"In this course, it matters because {concept['purpose']}\n\n"
+            f"## Trace one concrete value\n\n"
+            f"{example['explanation']} Run `{example['command']}` and compare the "
+            "observable output with the contract, then explain where a malformed "
+            "input would stop the flow.\n\n"
+            f"## Connect it to the project\n\n"
+            f"{lesson['capstone_bridge']['increment']}\n\n"
+            f"<!-- fixture-unit: {unit_id} -->\n\n"
+        )
+    return (
+        f"# {title}\n\n"
+        f"本章从一个具体问题开始：{problem['context']}。我们先让一个值完整地穿过边界，"
+        "观察每一步发生了什么，再为可复用的机制命名。\n\n"
+        "## 建立心智模型\n\n"
+        f"**{concept['name']}** 指的是：{concept['definition']}。它在本课程中的作用是："
+        f"{concept['purpose']}\n\n"
+        "## 追踪一个具体值\n\n"
+        f"{example['explanation']}。运行 `{example['command']}`，将可观察输出与契约逐项对照，"
+        "然后说明格式错误的输入会在哪一步停止。\n\n"
+        "## 接入课程项目\n\n"
+        f"{lesson['capstone_bridge']['increment']}\n\n"
+        f"<!-- fixture-unit: {unit_id} -->\n\n"
+    )
+
+
 def _fixture_context(path: tuple[str | int, ...]) -> str:
     for collection, prefix in (("labs", "Lab"), ("preparatory_units", "Prep")):
         if collection in path:
@@ -305,6 +350,7 @@ def make_v3_spec(plan: dict[str, Any]) -> dict[str, Any]:
     spec = deepcopy(make_assessed_spec())
     spec["schema_version"] = 3
     spec["course"]["language"] = plan.get("language", "zh-CN")
+    spec["course"]["lesson_format"] = "tutorial-markdown-v1"
     foundation = spec.pop("foundation")
     capabilities_by_id = {
         capability["id"]: capability for capability in plan["capabilities"]
@@ -326,9 +372,9 @@ def make_v3_spec(plan: dict[str, Any]) -> dict[str, Any]:
                     )
                     if unit_id == "lab00"
                     else (
-                        f"{unit_id}: Evidence-matched preparation"
+                        f"{unit_id}: JSON conversion foundations"
                         if plan.get("language") == "en"
-                        else f"{unit_id}：证据匹配的先修讲义"
+                        else f"{unit_id}：JSON 转换基础"
                     )
                 ),
                 "lesson": lesson,
@@ -364,6 +410,14 @@ def make_v3_spec(plan: dict[str, Any]) -> dict[str, Any]:
     spec["labs"][0]["depends_on"] = units[-1]["id"]
     if plan.get("language") == "en":
         spec = _englishize_fixture_prose(spec)
+    language = str(plan.get("language", "zh-CN"))
+    for unit in [*spec["preparatory_units"], *spec["labs"]]:
+        unit["tutorial"] = _tutorial_markdown(
+            str(unit["id"]),
+            str(unit["title"]),
+            unit["lesson"],
+            language=language,
+        )
     return spec
 
 

@@ -44,7 +44,7 @@ Schema v3 follows `lab00 -> prep01 -> prep02 -> ... -> lab01`:
 
 1. Initially, only `lab00` is navigable. It is a 15–30 minute environment and learning-workflow orientation.
 2. Completing the `lab00` knowledge check unlocks the first `prepNN`; completing each prep knowledge check unlocks the next unit in dependency order.
-3. The final prep unlocks `lab01`. When readiness finds no gap, the route invents no `prepNN` and proceeds directly from `lab00` to `lab01`.
+3. The final prep unlocks `lab01`. A route with no prep chapters proceeds directly from `lab00` to `lab01`.
 4. Formal Labs enforce the chapter navigation gate, knowledge gate, and coding verification gate. The current Lab's knowledge check precedes coding, and every verified submission precedes the next formal Lab.
 
 Every `prepNN` is an independent knowledge-only lesson and quiz with no coding question, workspace, points, submission, or checkpoint. Runner file, write, and execution APIs reject prep units; only formal Labs contribute to the score.
@@ -63,7 +63,7 @@ The coding route alternates between a deliberately small teaching-equivalent and
 
 `lab00` and every `prepNN` have no code workspace. Until the preparation chain and current formal Lab knowledge check are complete, the browser does not mount Code/Result or call question-scoped file APIs. This is a workflow gate, not source secrecy: the starter files remain visible from an IDE or terminal.
 
-On desktop, two keyboard-accessible separators resize the sidebar, lesson pane, and Code/Result pane. The sidebar can collapse, minimum widths keep each region usable, and validated preferences live in per-course localStorage. Smaller screens stack regions or switch navigation and show no resize separators.
+Before the knowledge check is complete, Web uses a focus-reading layout: wide screens show the tutorial at a comfortable line length with a chapter outline, terminology index, and knowledge check in a right rail; narrower screens stack those surfaces. After a formal Lab's knowledge check, the resizable lesson and Code/Result workspace returns. On desktop, two keyboard-accessible separators resize the sidebar, lesson pane, and work pane; the sidebar can collapse and validated preferences live in per-course localStorage. Medium and small layouts show no resize separators, and the knowledge check remains available for review after unlock.
 
 Web interactions fail closed during the initial `/api/state` load. Navigation, quizzes, editing, tests, and submission stay disabled until authoritative progression arrives; a transient request failure never unlocks a Lab.
 
@@ -97,7 +97,7 @@ This separation reduces accidental hints but is not a secrecy boundary after pub
 
 ## Authoring and integrity
 
-`platform/course/source/` is the only canonical source. It owns structured lesson JSON, runnable examples, Lab metadata, code, and tests. Markdown lessons and `platform/course/authoring-spec.json` are compiler-generated views, not parallel editable sources.
+`platform/course/source/` is the only canonical source. In the new tutorial format, each chapter stores textbook-style prose in `tutorial.md` and concept, source, and activity mappings in the `lesson.json` sidecar, alongside runnable examples, Lab metadata, code, and tests. `platform/course/authoring-spec.json` is a private compiler-generated verification view, not a parallel editable source.
 
 ```bash
 npm --prefix platform run course:compile

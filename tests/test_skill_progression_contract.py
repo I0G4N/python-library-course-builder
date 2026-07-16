@@ -280,7 +280,7 @@ def test_generated_readme_explains_the_shared_cli_and_web_progression() -> None:
     assert "初始只有 `lab00` 可导航" in readme
     assert "`lab00 -> prep01 -> prep02 -> ... -> lab01`" in readme
     assert "完成当前 `prepNN` 的知识检查" in readme
-    assert "不会虚构 `prepNN`" in readme
+    assert "不包含 prep 章节的路线会从 `lab00` 直接进入 `lab01`" in readme
     assert "默认拒绝" in readme
     assert "初次 `/api/state` 加载" in readme
     assert "GET /api/knowledge/{lab_id}" in readme
@@ -362,10 +362,10 @@ def test_author_contract_requires_accessible_resizable_desktop_layout() -> None:
         assert "no resize separators" in document
 
     assert "两个可通过键盘操作的分隔条" in readme
-    assert "每门课程的 localStorage" in readme
+    assert "按课程保存在 localStorage" in readme
     assert "不显示调整大小的分隔条" in readme
 
-    assert "sidebar can collapse" in architecture
+    assert "can collapse to 64px" in architecture
     assert "minimum widths" in architecture
     assert "Arrow keys" in forward
 
@@ -503,9 +503,9 @@ def test_skill_and_curriculum_document_assessed_authoring_contract() -> None:
     assert known["preparatory_unit_id"] is None
     assert gap["decision"] == "preparatory" and gap["preparatory_concept_ids"]
 
-    assessed_section = curriculum.split("## Assessed readiness and duration", 1)[
-        1
-    ].split("## Structured `lesson`", 1)[0]
+    assessed_section = curriculum.split(
+        "## Private assessed readiness and duration", 1
+    )[1].split("## Tutorial Markdown and structured lesson sidecar", 1)[0]
     assert "`status` is the completed decision `known` or `missing`" in assessed_section
     assert "`decision` is `assume` or `preparatory`" in assessed_section
     assert "A `known` capability uses `assume`" in assessed_section
@@ -722,7 +722,7 @@ def test_teaching_depth_contract_expands_each_gap_and_graded_chapter() -> None:
     _assert_in_order(
         foundation,
         (
-            "existing cognitive anchor",
+            "curricular anchor",
             "define the term",
             "why the current route needs it now",
             "complete concrete example and value flow",
@@ -730,7 +730,7 @@ def test_teaching_depth_contract_expands_each_gap_and_graded_chapter() -> None:
             "recovery and check",
         ),
     )
-    assert "every `preparatory` capability" in foundation
+    assert "every selected preparatory subject" in foundation
     assert "one complete explanation" in foundation
 
     _assert_in_order(
@@ -758,8 +758,8 @@ def test_teaching_contract_requires_connected_natural_selected_language() -> Non
     _assert_in_order(
         natural,
         (
-            "Define the term in one clear sentence",
-            "very next sentence",
+            "Define every professional term at first use",
+            "Immediately connect it",
             "current task",
             "natural transition",
             "concrete value",
@@ -780,47 +780,55 @@ def test_teaching_contract_requires_connected_natural_selected_language() -> Non
     assert "connected explanation" in natural
 
 
-def test_complete_example_models_two_structured_lab00_layers() -> None:
+def test_complete_example_models_two_natural_preparatory_threads() -> None:
     path = SKILL_ROOT / "references/complete-teaching-example.zh-CN.md"
     assert path.is_file()
     example = path.read_text(encoding="utf-8")
 
     assert len(example.splitlines()) < 460
     top_level_sections = _markdown_section_map(example, level=2)
-    lab00 = top_level_sections["Lab 00：只补证据指向的缺口"]
-    layers = _markdown_children(lab00, level=3)
+    preparation = top_level_sections["先修章节：有名字的设置与 JSON 值"]
+    layers = _markdown_children(preparation, level=3)
     assert [title for title, _ in layers] == [
-        "第一层：通用 Python 缺口",
-        "第二层：路线专属的库与领域基础",
+        "Python 字典中的命名值",
+        "从 JSON 记号跨入 Python 值",
     ]
 
-    six_steps = (
+    child_titles = []
+    for layer_title, layer in layers:
+        sections = _markdown_children(layer, level=4)
+        titles = [title for title, _ in sections]
+        assert len(titles) >= 5, layer_title
+        assert all(body.strip() for _, body in sections), layer_title
+        child_titles.append(titles)
+
+    assert child_titles[0] != child_titles[1]
+    generic_inventory = {
         "你已经会什么",
         "先把术语说清楚",
         "为什么这条路线现在需要它",
         "拿一个完整的值走一遍",
         "常见误区与边界",
         "怎样恢复并检查",
-    )
-    for layer_title, layer in layers:
-        steps = _markdown_children(layer, level=4)
-        assert [title for title, _ in steps] == list(six_steps), layer_title
-        assert all(body.strip() for _, body in steps), layer_title
+    }
+    assert generic_inventory.isdisjoint(title for titles in child_titles for title in titles)
+    assert "学习者已经" not in preparation
+    assert "缺口" not in preparation
 
 
-def test_complete_example_executes_every_lab00_boundary_recovery(
+def test_complete_example_executes_every_preparatory_boundary_recovery(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     example = _read("references/complete-teaching-example.zh-CN.md")
-    lab00 = dict(_markdown_children(example, level=2))[
-        "Lab 00：只补证据指向的缺口"
+    preparation = dict(_markdown_children(example, level=2))[
+        "先修章节：有名字的设置与 JSON 值"
     ]
-    layers = dict(_markdown_children(lab00, level=3))
+    layers = dict(_markdown_children(preparation, level=3))
     expected = {
-        "第一层：通用 Python 缺口": {
+        "Python 字典中的命名值": {
             "缺少必填键：补键后重试": ("KeyError", True),
         },
-        "第二层：路线专属的库与领域基础": {
+        "从 JSON 记号跨入 Python 值": {
             "JSON 布尔拼写：改用 Python 值后重试": ("NameError", True),
             "顶层数组：改成 object 后重试": (
                 "TypeError: top-level JSON must be an object",
@@ -831,10 +839,7 @@ def test_complete_example_executes_every_lab00_boundary_recovery(
 
     assert set(layers) == set(expected)
     for layer_title, expected_witnesses in expected.items():
-        recovery = dict(_markdown_children(layers[layer_title], level=4))[
-            "怎样恢复并检查"
-        ]
-        witnesses = dict(_markdown_children(recovery, level=5))
+        witnesses = dict(_markdown_children(layers[layer_title], level=5))
         assert set(witnesses) == set(expected_witnesses), layer_title
 
         for witness_title, (observed, recovered) in expected_witnesses.items():
@@ -863,10 +868,10 @@ def test_complete_example_keeps_the_graded_chapter_to_one_mainline() -> None:
 
     graded_sections = _markdown_section_map(graded, level=3)
     for section_title in (
-        "先预测会发生什么",
-        "输入和输出是什么",
-        "有效案例与边界案例",
-        "诊断与恢复",
+        "把验证过程理解成两扇门",
+        "`load_settings` 作出的承诺",
+        "相邻输入揭示真正的契约",
+        "先读懂症状，再修改代码",
         "知识检查",
         "编码任务与 capstone 增量",
     ):
@@ -893,7 +898,7 @@ def test_complete_example_executes_load_settings_and_both_recoveries(
     graded_sections = _markdown_section_map(graded, level=3)
 
     load_settings = _load_markdown_function(
-        graded_sections["完整可运行例子"], "load_settings"
+        graded_sections["搭出最小而完整的边界"], "load_settings"
     )
     valid_text = '{"enabled": true, "retries": 2}'
     assert load_settings(valid_text) == {"enabled": True, "retries": 2}
@@ -908,7 +913,7 @@ def test_complete_example_executes_load_settings_and_both_recoveries(
     }
     assert load_settings('{"enabled": false}') == {"enabled": False}
 
-    diagnostic = graded_sections["诊断与恢复"]
+    diagnostic = graded_sections["先读懂症状，再修改代码"]
     boundary_sections = _markdown_section_map(diagnostic, level=4)
     expected_witnesses = {
         "JSON 语法错误：修正文本后重试": {
@@ -950,7 +955,7 @@ def test_authoring_and_curriculum_require_the_deeper_teaching_sequences() -> Non
 
     for document in (authoring, curriculum):
         for phrase in (
-            "existing cognitive anchor",
+                "curricular anchor",
             "define the term",
             "why the current route needs it now",
             "complete concrete example and value flow",
@@ -1111,7 +1116,6 @@ def test_skill_docs_reject_old_agent_evaluation_terms_and_keep_local_acceptance(
     assert "verify_learning_project.py" in forward
 
     forbidden_patterns = {
-        "fresh-agent evaluation": r"\bfresh[- ]agent\b",
         "paired output evaluation": r"\bpaired(?: skill)?[- ]output\b",
         "old/new output comparison": (
             r"\b(?:compare|evaluate|score)\b[^\n]{0,120}\bold output\b"
@@ -1162,13 +1166,13 @@ def test_skill_docs_reject_old_agent_evaluation_terms_and_keep_local_acceptance(
         "study_minutes",
         "manifest",
         "README",
-        "open core",
-        "selected locale's exact predictive-model",
-        "operational-contract",
-        "concrete-trace labels",
+        "tutorial-markdown-v1",
+        "stable heading anchors",
+        "structured concepts",
+        "diagnostic-profile narration",
         "teaching-depth-contract.md",
         "first practice link",
-        "learner-safe labels",
+        "ordinary route chapters",
     ):
         assert phrase in forward
 
@@ -1178,14 +1182,21 @@ def test_complete_english_example_uses_the_english_contract_without_chinese_fall
 
     assert re.search(r"[\u3400-\u9fff]", example) is None
     for heading in (
-        "### Predict what happens",
-        "### What are the inputs and outputs?",
-        "### Walk one concrete input through the flow",
-        "### Diagnosis and recovery",
+        "### Think of validation as two gates",
+        "### The promise made by `load_settings`",
+        "### Follow `enabled` through both gates",
+        "### Read the symptom before changing code",
         "### Knowledge check",
         "### Coding task and capstone increment",
     ):
         assert heading in example
+    for templated_heading in (
+        "### Predict what happens",
+        "### What are the inputs and outputs?",
+        "### Walk one concrete input through the flow",
+        "### Diagnosis and recovery",
+    ):
+        assert templated_heading not in example
     assert "exactly one new knowledge mainline" in example
     assert "concept_ids: [lab01.c-json-object-boundary]" in example
 

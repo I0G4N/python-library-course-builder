@@ -2,11 +2,12 @@
 
 This is a teaching-content example, not a complete course JSON fixture, and it
 does not replace the field contract in
-[`curriculum-contract.md`](curriculum-contract.md). It shows how to turn
-readiness evidence, prerequisite teaching, and one graded chapter into
-connected, concrete English prose. The phrase "Lab 00 foundation" below is a
-legacy teaching label: schema-v3 authoring keeps environment and workflow in
-`lab00` and projects these knowledge gaps into one or more `prepNN` units.
+[`curriculum-contract.md`](curriculum-contract.md). It shows how to write one
+preparatory chapter and one graded chapter as connected, concrete English
+prose. The private selection rationale is intentionally absent: generated
+teaching begins with the subject itself and does not explain the selection process.
+Schema-v3 authoring keeps environment and workflow in `lab00` and places the
+foundation taught below in a `prepNN` unit.
 
 A real course must replace this example with the actual target, pinned version,
 official sources, selected route, and capstone.
@@ -27,32 +28,28 @@ The public behavior is pinned to and cited from the Python 3.13 official
 
 ## Contents
 
-- [Existing evidence and chapter boundary](#existing-evidence-and-chapter-boundary)
-- [Lab 00: teach only evidence-backed gaps](#lab-00-teach-only-evidence-backed-gaps)
+- [Preparatory chapter: named settings and JSON values](#preparatory-chapter-named-settings-and-json-values)
 - [Graded chapter: turn JSON text into validated settings](#graded-chapter-turn-json-text-into-validated-settings)
 - [Why this example is complete](#why-this-example-is-complete)
 
-## Existing evidence and chapter boundary
+## Preparatory chapter: named settings and JSON values
 
-The learner can already define and call functions and can read `str`, `bool`,
-and a simple `if`. One behavior question revealed two concrete gaps: the
-learner cannot yet predict what happens when a dictionary key is absent, and
-they confuse JSON `true` with Python `True`.
+The settings checker needs two foundations before it can validate external
+text. First, the program must retrieve a named setting from a Python
+dictionary. Then it must distinguish JSON notation from the Python values
+created by parsing. Those ideas belong in one narrow preparatory chapter;
+loops, classes, and file I/O do not help explain this value flow.
 
-The preparatory teaching addresses only those two gaps. It does not add loops,
-classes, or file I/O just because those subjects are commonly called basics.
+### Named values in a Python dictionary
 
-## Lab 00: teach only evidence-backed gaps
+#### From one returned value to several named values
 
-### Layer one: general Python gap
+A function can receive one value and return another. The settings checker does
+the same, but its result must carry several named settings such as `enabled`
+and `retries`. A positional list would make those meanings depend on location;
+a dictionary makes each meaning explicit at the lookup site.
 
-#### What you already know
-
-You already know that a function can receive one value and return another.
-Use that knowledge as the anchor: the settings checker also receives one value,
-but its result contains several named settings such as `enabled` and `retries`.
-
-#### Define the term
+#### Keys give settings stable names
 
 A **dictionary** (`dict`) is a Python container that looks up values by key.
 Here the key `"enabled"` is the setting name, while the value `True` is the
@@ -62,14 +59,14 @@ This term matters to the current task because the checker must later read
 `settings["enabled"]` exactly. It cannot guess which list position happens to
 hold the switch.
 
-#### Why this route needs it now
+#### Why the checker needs lookup semantics
 
-The next chapter converts a JSON object into a Python dictionary. Without a
-predictive model for key lookup, the learner could recognize
-`json.loads(...)` but still could not explain why the capstone can read the
-switch or why a missing key fails.
+The next chapter converts a JSON object into a Python dictionary. A predictive
+model for key lookup explains both why the capstone can read the switch and why
+a missing required key fails; recognizing the spelling `json.loads(...)` alone
+does not explain either behavior.
 
-#### Walk one complete value through the flow
+#### Follow `enabled` from dictionary to branch
 
 ```python
 settings = {"enabled": True, "retries": 2}
@@ -89,14 +86,14 @@ that relationship. The variable `enabled` finally receives `True`.
 
 Lookup does not remove the key and does not mutate the original dictionary.
 
-#### Common misconception and boundary
+#### A missing key is not `None`
 
 A common wrong prediction is that `settings["missing"]` returns `None`.
 Bracket lookup requires the key to exist, so the observable is `KeyError` when
 the key is absent. Only an explicit `settings.get("missing")` uses `None` as
 the default result.
 
-#### Recover and check
+#### Turn `KeyError` into actionable input
 
 If `enabled` is required by this route, detect the missing key and give a
 task-specific error. The witness below does more than name `KeyError`: it runs
@@ -132,21 +129,22 @@ True
 through the same bracket lookup. The lesson did not merely write the exception
 name into prose.
 
-The knowledge check should therefore show a concrete dictionary and ask the
-learner to predict the value or missing-key exception. It should not ask for a
+The knowledge check should therefore show a concrete dictionary and ask for a
+prediction of the value or missing-key exception. It should not ask for a
 memorized definition of a dictionary.
 
-### Layer two: route-specific library and domain foundation
+### Crossing from JSON notation into Python values
 
-#### What you already know
+#### Text is still text until parsing happens
 
-You already know that a Python string is text, for example `'hello'`. Connect
-that anchor to this route: `'{}'` and `'{' + '"enabled": true' + '}'` are still
-`str` values until a parser turns the text into a Python value.
+A Python string is text, whether it contains `'hello'`, `'{}'`, or
+`'{' + '"enabled": true' + '}'`. The characters do not become a dictionary
+merely because they resemble one; a parser must interpret the notation and
+create a Python value.
 
 The complete input we use below is `'{' + '"enabled": true, "retries": 2' + '}'`.
 
-#### Define the term
+#### Parsing creates a new kind of value
 
 **JSON text** is a string that follows JSON syntax. **Parsing** is the operation
 that turns that text into a Python value. A JSON object becomes a Python `dict`,
@@ -155,14 +153,14 @@ and JSON `true` becomes Python `True`.
 This distinction matters because the capstone receives external text, while
 its branch needs a Python value whose keys can be looked up.
 
-#### Why this route needs it now
+#### The checker needs values, not notation
 
 The next chapter has exactly one new mainline: cross the parsing boundary from
 JSON text to a validated Python settings value. Without distinguishing text
-from the parsed value, a learner may try dictionary lookup on a string or copy
+from the parsed value, code may attempt dictionary lookup on a string or copy
 JSON spelling directly into a Python expression.
 
-#### Walk one complete value through the flow
+#### Watch `true` cross the language boundary
 
 ```python
 import json
@@ -186,7 +184,7 @@ and the number `2` becomes a Python `int`.
 
 After parsing, `text remains unchanged`.
 
-#### Common misconception and boundary
+#### Legal JSON is broader than this settings format
 
 Do not write `{"enabled": true}` as a Python expression. `true` is JSON
 notation, not a defined Python name.
@@ -195,7 +193,7 @@ Also, valid JSON does not imply that the top-level value is a dictionary.
 `["enabled"]` is valid JSON, but it parses to a list and violates this
 capstone's top-level-object boundary.
 
-#### Recover and check
+#### Repair two different boundary failures
 
 These are different failures, so use two witnesses. The first repairs the
 Python/JSON Boolean spelling. The second repairs the capstone's required
@@ -271,14 +269,14 @@ This chapter keeps exactly one new knowledge mainline: implement and use
 `load_settings` so that the JSON syntax boundary and the capstone's top-level
 object boundary form one observable function contract.
 
-### Project problem
+### Unchecked text cannot drive the task switch
 
 The settings checker cannot trust arbitrary text. It must parse the text into
 a Python value while rejecting syntax errors and top-level arrays. Otherwise,
 the later `settings["enabled"]` either cannot run or fails with an error that
 does not explain the project boundary.
 
-### Predict what happens
+### Think of validation as two gates
 
 Start with this mental model: `load_settings` is an entrance with two gates.
 The first gate asks whether the input is valid JSON. The second asks whether the
@@ -287,7 +285,7 @@ both gates reaches the capstone.
 
 Now carry one input through both gates instead of memorizing exception names.
 
-### What are the inputs and outputs?
+### The promise made by `load_settings`
 
 - The input is `text: str`, specifically `'{' + '"enabled": true, "retries": 2' + '}'`. The caller still owns this string.
 - The output is a newly created `dict[str, Any]`, specifically `{'enabled': True, 'retries': 2}`.
@@ -299,7 +297,7 @@ Here, **top level** means the outermost value in the complete JSON document.
 The next sentence connects the term to the task: only a top-level object lets
 the capstone read `enabled` and `retries` by name.
 
-### Complete runnable example
+### Build the smallest complete boundary
 
 ```python
 import json
@@ -332,7 +330,7 @@ Exact output:
 {"enabled": true, "retries": 2}
 ```
 
-### Walk one concrete input through the flow
+### Follow `enabled` through both gates
 
 1. `text = '{"enabled": true, "retries": 2}'`; its type is `str`, and ownership remains with the caller.
 2. `json.loads(text)` reads that same `text` and produces `value = {'enabled': True, 'retries': 2}`. The value is a new dictionary and `text remains unchanged`.
@@ -342,7 +340,7 @@ The three transitions do not swap examples or hide the intermediate shape.
 They let the learner predict type, ownership, and observable output rather than
 accepting a generic phrase such as "parse the configuration."
 
-### Valid case and boundary cases
+### Nearby inputs reveal the contract
 
 The valid case uses the same object text:
 
@@ -362,7 +360,7 @@ but execution observes `TypeError("top-level JSON must be an object")`.
 Do not merge both into "bad input." They fail at different gates and require
 different recoveries.
 
-### Diagnosis and recovery
+### Read the symptom before changing code
 
 The next two examples execute the two boundaries separately. Each records the
 actual exception, supplies a concrete recovery input, calls the same
@@ -491,10 +489,12 @@ at the settings entrance.
 
 ## Why this example is complete
 
-Each preparatory gap begins with established knowledge, defines a term,
-explains why the selected route needs it now, follows a complete value flow,
-shows a misconception or boundary, and executes a recovery check. General
-Python and JSON-route foundations are not collapsed into a generic review list.
+The preparatory chapter introduces each term where the concrete flow needs it,
+explains why the operation matters, follows the complete value transformation,
+shows a misconception or boundary, and executes a recovery check. Dictionary
+lookup and JSON parsing remain distinct ideas instead of collapsing into a
+generic review list. No sentence exposes the private reason this chapter was
+selected.
 
 The graded chapter carries one concrete text through prediction, contract,
 execution, boundaries, diagnosis, quiz, coding, and capstone increment while

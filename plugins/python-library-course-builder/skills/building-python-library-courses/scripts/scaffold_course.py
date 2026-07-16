@@ -15,7 +15,12 @@ import sys
 import tempfile
 from typing import Any
 
-from validate_course import TOKEN_PATTERN, SpecValidationError, load_and_validate
+from validate_course import (
+    TOKEN_PATTERN,
+    TUTORIAL_LESSON_FORMAT,
+    SpecValidationError,
+    load_and_validate,
+)
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +38,9 @@ SCAFFOLD_MESSAGES: dict[str, dict[str, str]] = {
             "设计权衡和错误代码诊断放在可展开区域中，避免干扰首次阅读。"
         ),
         "readiness_heading": "## 学习准备",
+        "preparation_heading": "## 开始学习",
+        "preparation_intro": "正式编码前，先按顺序阅读并完成以下章节；它们会建立后续 Lab 共用的心智模型。",
+        "legacy_preparation": "从 Lab 00 开始建立本课程需要的心智模型，再按路线表继续学习。",
         "evidence_intro": "这条路线已通过证据式短问答确定先修状态。课程会直接使用这些已掌握能力：",
         "prep_time": "正式 Lab 前的准备总用时为 {min}–{max} 分钟，按知识依赖依次完成：",
         "assumed_intro": "课程会直接使用这些能力：",
@@ -57,6 +65,9 @@ SCAFFOLD_MESSAGES: dict[str, dict[str, str]] = {
             "and faulty-code diagnosis stay in expandable sections."
         ),
         "readiness_heading": "## Learning readiness",
+        "preparation_heading": "## Start learning",
+        "preparation_intro": "Before coding, read and complete these chapters in order; they establish the working mental models used by later Labs.",
+        "legacy_preparation": "Start with Lab 00 to build the course's working mental model, then continue in route order.",
         "evidence_intro": "An evidence-based diagnostic dialogue established this route's prerequisite state. The course will use these demonstrated capabilities directly:",
         "prep_time": "Preparation before the formal Labs takes {min}–{max} minutes in dependency order:",
         "assumed_intro": "The course will use these capabilities directly:",
@@ -228,8 +239,6 @@ def render_learning_preparation(spec: dict[str, Any]) -> str:
         return messages["basic_preparation"]
 
     profile = audience["prerequisite_profile"]
-    capabilities = profile["capabilities"]
-    assumed = [item["title"] for item in capabilities if item["decision"] == "assume"]
     if profile.get("assessment") == "evidence-dialogue":
         units = spec["preparatory_units"]
         time = {
@@ -237,12 +246,10 @@ def render_learning_preparation(spec: dict[str, Any]) -> str:
             "max": sum(int(unit["study_minutes"]["max"]) for unit in units),
         }
         lines = [
-            messages["readiness_heading"],
+            messages["preparation_heading"],
             "",
-            messages["evidence_intro"],
-            "",
+            messages["preparation_intro"],
         ]
-        lines.extend(f"- {title}" for title in assumed)
         lines.extend(
             [
                 "",
@@ -253,14 +260,9 @@ def render_learning_preparation(spec: dict[str, Any]) -> str:
         separator = ": " if _language(spec) == "en" else "："
         lines.extend(f"- `{unit['id']}`{separator}{unit['title']}" for unit in units)
         return "\n".join(lines)
-    foundation = [
-        item["title"] for item in capabilities if item["decision"] == "foundation"
-    ]
-    lines = [messages["readiness_heading"], "", messages["assumed_intro"], ""]
-    lines.extend(f"- {title}" for title in assumed)
-    lines.extend(["", messages["foundation_intro"], ""])
-    lines.extend(f"- {title}" for title in foundation)
-    return "\n".join(lines)
+    return "\n".join(
+        [messages["preparation_heading"], "", messages["legacy_preparation"]]
+    )
 
 
 def replace_template_tokens(root: Path, spec: dict[str, Any]) -> None:
@@ -310,7 +312,9 @@ def _test_selector(lab_id: str, test: dict[str, Any], *, hidden: bool) -> str:
     return f"{prefix}/{test['path']}::{test['selector']}"
 
 
-def _write_lesson(root: Path, lesson: dict[str, Any]) -> None:
+def _write_lesson(
+    root: Path, lesson: dict[str, Any], *, tutorial: str | None = None
+) -> None:
     """Split runnable example code out of the structured lesson metadata."""
 
     payload = copy.deepcopy(lesson)
@@ -321,6 +325,8 @@ def _write_lesson(root: Path, lesson: dict[str, Any]) -> None:
         relative = Path(*str(example["path"]).split("/"))
         source_text_write(root / relative, code)
     json_write(root / "lesson.json", payload)
+    if tutorial is not None:
+        source_text_write(root / "tutorial.md", tutorial)
 
 
 def _write_v3_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
@@ -336,6 +342,7 @@ def _write_v3_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
     source = platform / "course" / "source"
     shutil.rmtree(source / "foundations")
     course = spec["course"]
+    tutorial_mode = course.get("lesson_format") == TUTORIAL_LESSON_FORMAT
     target = spec["target"]
     summary = course["audience"]["prerequisite_profile"]["readiness_summary"]
     curriculum_id = f"{course['id']}-v3-{summary}"
@@ -375,8 +382,16 @@ def _write_v3_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
                 },
             },
         }
+        if tutorial_mode:
+            unit_payloads[unit_id]["tutorial"] = (
+                f"preparatory_units/{unit_id}/tutorial.md"
+            )
         unit_root = source / "preparatory_units" / unit_id
-        _write_lesson(unit_root, unit["lesson"])
+        _write_lesson(
+            unit_root,
+            unit["lesson"],
+            tutorial=unit.get("tutorial") if tutorial_mode else None,
+        )
         json_write(unit_root / "quiz.json", _quiz(unit["quiz"]))
 
     course_payload = {
@@ -426,6 +441,8 @@ def _write_v3_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
         },
         "research": copy.deepcopy(spec["research"]),
     }
+    if tutorial_mode:
+        course_payload["lesson_format"] = TUTORIAL_LESSON_FORMAT
     json_write(source / "course.json", course_payload)
 
 
@@ -506,6 +523,9 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
         },
         "research": spec["research"],
     }
+    tutorial_mode = course.get("lesson_format") == TUTORIAL_LESSON_FORMAT
+    if tutorial_mode:
+        course_payload["lesson_format"] = TUTORIAL_LESSON_FORMAT
     if "study_minutes" in foundation:
         course_payload["foundations"]["study_minutes"] = copy.deepcopy(
             foundation["study_minutes"]
@@ -515,7 +535,11 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
         source / "sources.json",
         {"target": target, "sources": target["official_sources"]},
     )
-    _write_lesson(source / "foundations", foundation["lesson"])
+    _write_lesson(
+        source / "foundations",
+        foundation["lesson"],
+        tutorial=foundation.get("tutorial") if tutorial_mode else None,
+    )
     json_write(source / "foundations" / "quiz.json", _quiz(foundation["quiz"]))
 
     for order, lab in enumerate(spec["labs"], start=1):
@@ -588,12 +612,18 @@ def write_canonical_source(platform: Path, spec: dict[str, Any]) -> None:
                 },
             },
         }
+        if tutorial_mode:
+            lab_payload["tutorial"] = "tutorial.md"
         if "study_minutes" in lab:
             lab_payload["study_minutes"] = copy.deepcopy(lab["study_minutes"])
         if "official_bridge" in lab:
             lab_payload["official_bridge"] = copy.deepcopy(lab["official_bridge"])
         json_write(lab_root / "lab.json", lab_payload)
-        _write_lesson(lab_root, lab["lesson"])
+        _write_lesson(
+            lab_root,
+            lab["lesson"],
+            tutorial=lab.get("tutorial") if tutorial_mode else None,
+        )
         for file_spec in lab["files"]:
             relative = Path(*file_spec["path"].split("/"))
             source_text_write(lab_root / "starter" / relative, file_spec["starter"])

@@ -68,6 +68,7 @@ class CourseSource:
     audience: dict[str, Any]
     curriculum_id: str
     compatible_curriculum_ids: tuple[str, ...]
+    lesson_format: str | None
     language: str
     python_requires: str
     size: str

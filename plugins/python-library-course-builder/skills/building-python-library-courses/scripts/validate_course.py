@@ -67,6 +67,7 @@ AUTHOR_QUESTION_FIELDS = {
 }
 QUIZ_KINDS = {"execution_trace", "diagnostic"}
 V3_COURSE_LANGUAGES = {"zh-CN", "en"}
+TUTORIAL_LESSON_FORMAT = "tutorial-markdown-v1"
 QUIZ_QUESTION_FIELDS = {
     "id",
     "kind",
@@ -183,6 +184,7 @@ V3_PREPARATORY_UNIT_FIELDS = {
     "lesson",
     "quiz",
 }
+V3_PREPARATORY_UNIT_TUTORIAL_FIELDS = V3_PREPARATORY_UNIT_FIELDS | {"tutorial"}
 OPERATIONAL_CONTRACT_FIELDS = {
     "kind",
     "forms",
@@ -1705,6 +1707,7 @@ def _v2_structural_projection(spec: dict[str, Any]) -> dict[str, Any]:
     units = projected.pop("preparatory_units")
     lab00 = units[0]
     projected["schema_version"] = 2
+    projected["course"].pop("lesson_format", None)
     projected["course"]["audience"] = {
         "level": "basic-python",
         "assumes": ["validated evidence-dialogue prerequisites"],
@@ -1719,6 +1722,7 @@ def _v2_structural_projection(spec: dict[str, Any]) -> dict[str, Any]:
     }
     previous = "lab00"
     for lab in projected["labs"]:
+        lab.pop("tutorial", None)
         lab["depends_on"] = previous
         lab["lesson"] = _without_assessed_depth(lab["lesson"])
         previous = str(lab["id"])
@@ -1772,6 +1776,13 @@ def _validate_spec_v3(
         raise SpecValidationError("schema_version must be 3")
 
     course = _object(spec.get("course"), "course")
+    _reject_unknown_fields(
+        course,
+        AUTHOR_COURSE_FIELDS
+        | AUTHOR_COURSE_OPTIONAL_FIELDS
+        | {"lesson_format"},
+        "course",
+    )
     course_language = course.get("language")
     if course_language not in V3_COURSE_LANGUAGES:
         raise SpecValidationError("course.language must be one of: zh-CN, en")
@@ -1779,6 +1790,12 @@ def _validate_spec_v3(
     if course_language != plan_language:
         raise SpecValidationError(
             "course.language does not match readiness plan language"
+        )
+    lesson_format = course.get("lesson_format")
+    tutorial_mode = lesson_format is not None
+    if tutorial_mode and lesson_format != TUTORIAL_LESSON_FORMAT:
+        raise SpecValidationError(
+            f"course.lesson_format must be {TUTORIAL_LESSON_FORMAT!r} when present"
         )
     audience = _object(course.get("audience"), "course.audience")
     _require_exact_fields(audience, ASSESSED_AUDIENCE_FIELDS, "course.audience")
@@ -1878,7 +1895,15 @@ def _validate_spec_v3(
     for index, (raw_unit, planned_unit) in enumerate(zip(units, planned_units, strict=True)):
         label = f"preparatory_units[{index}]"
         unit = _object(raw_unit, label)
-        _require_exact_fields(unit, V3_PREPARATORY_UNIT_FIELDS, label)
+        _require_exact_fields(
+            unit,
+            (
+                V3_PREPARATORY_UNIT_TUTORIAL_FIELDS
+                if tutorial_mode
+                else V3_PREPARATORY_UNIT_FIELDS
+            ),
+            label,
+        )
         expected_id = "lab00" if index == 0 else f"prep{index:02d}"
         if unit.get("id") != expected_id:
             raise SpecValidationError(f"{label}.id must be {expected_id}")
@@ -1895,6 +1920,8 @@ def _validate_spec_v3(
                     f"{label}.{key} does not match the readiness plan"
                 )
         _text(unit, "title", label)
+        if tutorial_mode:
+            _text(unit, "tutorial", label)
         _validate_v3_minutes(
             unit.get("study_minutes"),
             label=f"{label}.study_minutes",
@@ -1980,6 +2007,14 @@ def _validate_spec_v3(
             raise SpecValidationError(
                 f"{expected_id} must depend on {previous_dependency}"
             )
+        has_tutorial = "tutorial" in lab
+        if has_tutorial != tutorial_mode:
+            requirement = "requires" if tutorial_mode else "does not allow"
+            raise SpecValidationError(
+                f"{label} {requirement} tutorial for course.lesson_format"
+            )
+        if tutorial_mode:
+            _text(lab, "tutorial", label)
         previous_dependency = expected_id
     graded_ids = {str(lab.get("id")) for lab in labs if isinstance(lab, dict)}
     for capability_id, capability in capabilities.items():

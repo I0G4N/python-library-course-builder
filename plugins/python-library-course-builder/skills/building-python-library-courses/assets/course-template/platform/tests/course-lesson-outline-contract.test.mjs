@@ -6,15 +6,57 @@ const lessonUrl = new URL("../app/CourseLesson.tsx", import.meta.url);
 const appUrl = new URL("../app/CourseKitApp.tsx", import.meta.url);
 const cssUrl = new URL("../app/globals.css", import.meta.url);
 
-test("structured lessons keep a Markdown fallback and render the beginner core first", async () => {
+test("tutorial Markdown is primary for the new format while legacy lessons keep the structured renderer", async () => {
   const lesson = await readFile(lessonUrl, "utf8");
 
+  assert.match(lesson, /lesson_format\?: "tutorial-markdown-v1"/);
   assert.match(lesson, /lesson_outline\?: LessonOutline/);
-  assert.match(lesson, /content\.lesson_outline/);
+  assert.match(lesson, /const tutorial = content\.lesson_format === "tutorial-markdown-v1"/);
+  assert.match(lesson, /!tutorial && content\.lesson_outline/);
   assert.match(lesson, /t\.studyPrerequisites/);
   assert.match(lesson, /t\.chapterProblem/);
   assert.match(lesson, /t\.outcomes/);
   assert.match(lesson, /markdownBlocks\(content\.lesson, t\)/);
+});
+
+test("tutorial renderer supports textbook blocks, safe links, and stable heading anchors", async () => {
+  const lesson = await readFile(lessonUrl, "utf8");
+
+  assert.match(lesson, /extractTutorialHeadings\(markdown\)/);
+  assert.match(lesson, /consumeMarkdownList\(lines, index\)/);
+  assert.match(lesson, /const id = headings\[headingIndex\]\?\.id/);
+  assert.match(lesson, /<h1 id=\{id\} key=\{id\}>/);
+  assert.match(lesson, /<h2 id=\{id\} key=\{id\}>/);
+  assert.match(lesson, /<h6 id=\{id\} key=\{id\}>/);
+  assert.match(lesson, /<PythonCodeBlock[\s\S]*code=\{code\}/);
+  assert.match(lesson, /<pre key=\{`code-/);
+  assert.match(lesson, /<blockquote/);
+  assert.match(lesson, /<table>/);
+  assert.match(lesson, /<ul key=\{`list-/);
+  assert.match(lesson, /<ol key=\{`list-/);
+  assert.match(lesson, /SAFE_EXTERNAL_LINK/);
+  assert.match(lesson, /SAFE_FRAGMENT_LINK/);
+  assert.match(lesson, /target="_blank" rel="noopener noreferrer"/);
+});
+
+test("chapter guide is native accessible navigation derived from headings and concepts", async () => {
+  const [lesson, css] = await Promise.all([
+    readFile(lessonUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
+  ]);
+
+  assert.match(lesson, /export function ChapterGuide/);
+  assert.match(lesson, /<nav className="chapter-guide" aria-label=\{copy\.label\}>/);
+  assert.match(lesson, /extractTutorialHeadings\(content\.lesson\)/);
+  assert.match(lesson, /extractLessonTerms\(content\.lesson_outline\)/);
+  assert.match(lesson, /href=\{`#\$\{heading\.id\}`\}/);
+  assert.match(lesson, /<dl className="chapter-term-list">/);
+  assert.match(lesson, /<dt>\{term\.name\}<\/dt>/);
+  assert.match(lesson, /<dd>\{term\.definition\}<\/dd>/);
+  assert.match(css, /\.chapter-toc-list a:focus-visible/);
+  assert.match(css, /\.chapter-toc-list a \{[\s\S]*font-size:\s*0\.86rem/);
+  assert.match(css, /\.chapter-term-list dd \{[\s\S]*font-size:\s*0\.86rem/);
+  assert.match(css, /scroll-margin-top:\s*1rem/);
 });
 
 test("principles, design choices, and troubleshooting use accessible native disclosure", async () => {
@@ -137,17 +179,14 @@ test("content types and concept cards expose study time and first-practice actio
   assert.match(lesson, /t\.estimatedStudyTime/);
 });
 
-test("course shell renders readiness and routes practice to stable targets", async () => {
+test("course shell routes practice to stable targets without exposing author diagnostics", async () => {
   const [app, css] = await Promise.all([
     readFile(appUrl, "utf8"),
     readFile(cssUrl, "utf8"),
   ]);
 
-  assert.match(app, /readiness\?: \{\s*assumed: string\[\];\s*foundation\?: string\[\];\s*preparatory\?: string\[\]/);
   assert.match(app, /study_minutes\?: StudyMinutes/);
-  assert.match(app, /manifest\.readiness/);
-  assert.match(app, /readiness\.assumed\.map/);
-  assert.match(app, /readinessPreparationTitles\(readiness\)/);
+  assert.doesNotMatch(app, /manifest\.readiness|readiness\?:|readinessPreparationTitles/);
   assert.match(app, /lab\.study_minutes/);
   assert.match(app, /selectedLab\?\.study_minutes/);
   assert.match(app, /handlePractice/);
@@ -164,9 +203,8 @@ test("course shell renders readiness and routes practice to stable targets", asy
   assert.match(practiceHandler, /setFileLoading\(codingReady\)/);
   assert.match(practiceHandler, /setFileLoadFailed\(false\)/);
   assert.match(practiceHandler, /setFileLoadRetryVersion/);
-  assert.match(app, /readiness\.assumed\.map\(\(title, index\)/);
-  assert.match(app, /preparationTitles\.map\(\(title, index\)/);
-  assert.match(css, /\.readiness-summary/);
-  assert.match(css, /\.sidebar-collapsed \.readiness-summary/);
+  assert.match(app, /<ChapterGuide content=\{lesson\} language=\{courseLanguage\}/);
+  assert.match(css, /\.chapter-guide/);
+  assert.doesNotMatch(css, /\.readiness-summary/);
   assert.match(css, /\.practice-action/);
 });

@@ -1,6 +1,6 @@
 # Curriculum contract v3
 
-Use one UTF-8 JSON specification to describe a completed readiness decision, ordered preparatory teaching, the formal Lab route, exercises, and tests. Raw learner answers and code evidence remain only in the temporary readiness report. Inside a generated project, the canonical source is the split tree under `platform/course/source/`; its compiler emits the private compiler-generated parity snapshot.
+Use one UTF-8 JSON specification to describe a completed author-side readiness decision, ordered preparatory teaching, the formal Lab route, exercises, and tests. Raw learner answers, code evidence, capability decisions, and the resulting learner profile remain private authoring inputs. They never become learner-facing course prose, README content, runtime metadata, or API data. Inside a generated project, the canonical source is the split tree under `platform/course/source/`; its compiler emits the private compiler-generated parity snapshot.
 
 Run the assessor, validator, scaffolder, and verifier through the uv-managed Python 3.13 commands in `SKILL.md`. New authoring uses schema v3 and requires a matching `ready` plan. Schema v2 remains compatibility input. Both schemas require Python 3.13 and exclude Python 3.14.
 
@@ -9,8 +9,8 @@ Run the assessor, validator, scaffolder, and verifier through the uv-managed Pyt
 - [Course language](#course-language)
 - [Top-level shape](#top-level-shape)
 - [Stable identity and evidence](#stable-identity-and-evidence)
-- [Assessed readiness and duration](#assessed-readiness-and-duration)
-- [Structured lesson](#structured-lesson)
+- [Private assessed readiness and duration](#private-assessed-readiness-and-duration)
+- [Tutorial Markdown and structured lesson sidecar](#tutorial-markdown-and-structured-lesson-sidecar)
 - [Knowledge checks](#knowledge-checks)
 - [The mechanism and official bridge cycle](#the-mechanism-and-official-bridge-cycle)
 - [Coding interfaces](#coding-interfaces)
@@ -33,6 +33,7 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
     "title": "用 pathlib 构建本地文件整理器",
     "description": "逐步构建一个可测试的本地文件整理器。",
     "language": "zh-CN",
+    "lesson_format": "tutorial-markdown-v1",
     "python_requires": ">=3.13,<3.14",
     "size": "small",
     "dependencies": [],
@@ -112,6 +113,7 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
       "depends_on": null,
       "capability_ids": [],
       "study_minutes": {"tier": "orientation", "min": 15, "max": 30},
+      "tutorial": "# 环境与学习流程导览\n\n从一次完整的学习循环开始……\n",
       "lesson": {"prerequisites": [], "problem": {}, "outcomes": [], "concepts": [], "examples": [], "capstone_bridge": {}, "summary": []},
       "quiz": []
     },
@@ -123,6 +125,7 @@ The exact field validation lives in `scripts/validate_course.py`. This abbreviat
       "depends_on": "lab00",
       "capability_ids": ["path-value-boundary"],
       "study_minutes": {"tier": "standard", "min": 30, "max": 45},
+      "tutorial": "# 路径值与文件系统效果\n\n先区分地址描述和值得观察的磁盘变化……\n",
       "lesson": {"prerequisites": [], "problem": {}, "outcomes": [], "concepts": [], "examples": [], "capstone_bridge": {}, "summary": []},
       "quiz": []
     }
@@ -139,9 +142,11 @@ Every official source is a primary HTTPS source with a title and applicable vers
 
 `target.import_roots` lists the top-level Python packages whose use is controlled by the mechanism cycle. Third-party targets require pinned or bounded PEP 508 dependencies. Standard-library courses may leave dependencies empty.
 
-## Assessed readiness and duration
+## Private assessed readiness and duration
 
 New Skill-authored specifications use `course.audience.level: assessed`. The profile contains `assessment: evidence-dialogue`, the selected `route_id`, the plan's 12-character `readiness_summary`, and a nonempty `capabilities` array. Validation also receives the complete readiness plan and rejects any mismatch before scaffolding can write.
+
+This profile is private authoring and validation state. It may be preserved in the canonical source and compiler-generated private parity snapshot, but public manifests, learner manifests, `content.json`, README files, lesson Markdown, Web/CLI/Runner course payloads, and sidebar copy omit `audience`, `readiness`, route and readiness summaries, capability IDs, status/decision/basis fields, and assumed/preparatory capability lists. Preparatory chapters are presented as ordinary chapters in the course route; their prose must teach the subject directly and must not say that a diagnostic, answer, profile, or deficiency caused the chapter to exist.
 
 Each capability contains exactly `"id"`, `"kind"`, `"subject"`, `"title"`, `"status"`, `"decision"`, `"basis"`, `"source_ids"`, `"first_used_in"`, `"preparatory_unit_id"`, and `"preparatory_concept_ids"`:
 
@@ -152,7 +157,7 @@ Each capability contains exactly `"id"`, `"kind"`, `"subject"`, `"title"`, `"sta
 
 Capability IDs are stable and unique. A `known` capability uses `assume`, a null prep ID, and no prep concepts. A `missing` capability uses `preparatory`, names exactly the prep unit allocated by the plan, and maps to at least one concept inside it. Source IDs resolve to the official registry, `first_used_in` resolves to a formal Lab, and each mapped concept cites at least one capability source.
 
-`lab00` is always the 15-30 minute environment and learning-loop orientation. Missing capabilities are grouped into the smallest necessary `prepNN` units by DAG level and then `python -> library -> domain`. Each prep follows **existing cognitive anchor -> define the term -> why the current route needs it now -> complete concrete example and value flow -> common misconception or applicability boundary -> recovery and check**. It contains lessons, runnable teaching examples, traces, diagnostics, and quizzes, but no coding questions, points, submissions, reference projection, or hidden tests.
+`lab00` is always the 15-30 minute environment and learning-loop orientation. Missing capabilities are grouped into the smallest necessary `prepNN` units by DAG level and then `python -> library -> domain`. Each prep covers **curricular anchor -> define the term -> why the current route needs it now -> complete concrete example and value flow -> common misconception or applicability boundary -> recovery and check** without turning those checks into mandatory learner-facing headings. It contains tutorials, runnable teaching examples, traces, diagnostics, and quizzes, but no coding questions, points, submissions, reference projection, or hidden tests.
 
 There is no hard prep-count ceiling. Cover only capabilities actually used by the selected route. Multiple dependency layers become multiple ordered prep units in the same course rather than forcing an artificial stop or separate prerequisite course.
 
@@ -168,7 +173,15 @@ In learner-facing estimates these are 15-30, 30-45, and 45-60 minutes respective
 
 Schema-v2 `basic-python` and `assessed/learner-self-report` specifications remain readable compatibility inputs with their original single-`foundation` behavior. They are not new authoring defaults.
 
-## Structured `lesson`
+## Tutorial Markdown and structured lesson sidecar
+
+New Skill-authored schema-v3 specifications set `course.lesson_format` to exactly `tutorial-markdown-v1`. Every `lab00`, `prepNN`, and formal Lab then owns a nonempty `tutorial` Markdown string. The tutorial is the primary learner-facing chapter: it uses a natural hierarchy chosen for that subject, defines professional terms at first use, builds ideas step by step, carries concrete values through complete examples, and explains boundaries and recovery without exposing the authoring schema as a list of fields. Do not use a universal heading inventory, repeated paragraph shell, or prose word count as a substitute for teaching quality.
+
+The structured `lesson` remains a required sidecar. It is the deterministic source for concept/outcome IDs, operational contracts, official-source claims, activity mappings, traces, and semantic validation. It supports the chapter guide and terminology index, but Web presentation must not turn it back into the primary fixed card sequence when authored tutorial Markdown is present.
+
+Schema v2 and existing schema-v3 sources that omit `course.lesson_format` and unit `tutorial` remain compatibility inputs. They use the legacy structured Markdown renderer. Do not silently relabel a legacy lesson as `tutorial-markdown-v1`.
+
+Every `lab00`, `prepNN`, and formal Lab uses the same structured `lesson` object:
 
 Every `lab00`, `prepNN`, and formal Lab uses the same `lesson` object:
 
@@ -293,7 +306,7 @@ Every `lab00`, `prepNN`, and formal Lab uses the same `lesson` object:
 }
 ```
 
-Write each new lesson from the assessed readiness evidence and its unit-specific `study_minutes`, not from a universal beginner label or duration. Each concept still defines the term, purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source claims.
+Use the private readiness result only to select the necessary unit sequence and depth. Write each resulting chapter as a self-contained tutorial from its subject and unit-specific `study_minutes`, not as a report about what the learner knows or lacks and not from a universal beginner label. Each concept still defines the term, purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source claims.
 
 Every graded lesson expands one new knowledge mainline through the existing fields in this order: **project problem**, **plain-language predictive model**, **precise inputs, outputs, effects, and failures**, **same concrete value through the complete flow**, **valid case and boundary case**, **diagnosis and recovery**, then **quiz, coding question, and capstone increment**. Those practice surfaces map to the same concept and outcome. Render them as connected natural prose in the selected language, not as an author-field inventory.
 
@@ -402,21 +415,23 @@ platform/course/source/
 ├── sources.json
 ├── preparatory_units/
 │   └── {lab00,prepNN}/
-│       ├── lesson.json
+│       ├── tutorial.md              tutorial-markdown-v1 only
+│       ├── lesson.json              structured validation sidecar
 │       ├── quiz.json
 │       └── examples/*.py
 └── labs/labNN/
     ├── lab.json
-    ├── lesson.json
+    ├── tutorial.md                  tutorial-markdown-v1 only
+    ├── lesson.json                  structured validation sidecar
     ├── examples/*.py
     ├── starter/**
     ├── reference/**
     └── tests/{public,hidden}/**
 ```
 
-There is no editable `source/authoring-spec.json`. The compiler independently validates direct split-source edits, renders a complete Markdown fallback, preserves the reconstructable `lesson_outline`, and emits `compiled/authoring-spec.json` as a private compiler-generated parity snapshot. Scaffolding then checks that snapshot is structurally equal to the validated input specification.
+There is no editable `source/authoring-spec.json`. The compiler independently validates direct split-source edits. For `tutorial-markdown-v1`, it preserves the authored `tutorial.md` bytes as the compiled lesson, records the format, and also preserves the reconstructable `lesson_outline`; for legacy inputs, it renders the existing complete Markdown fallback from the outline. It emits `compiled/authoring-spec.json` as a private compiler-generated parity snapshot. Scaffolding then checks that snapshot is structurally equal to the validated input specification.
 
-A schema-v3 curriculum ID is exactly `<course-id>-v3-<readiness_summary>`. A different readiness summary is intentionally incompatible and resets learner progress. Schema-v2 IDs keep their original `-v2` form. Do not automatically bump progress-state `version`, artifact-index `schema_version`, `engine_version`, or `layout_version`; those are separate runtime contracts.
+A schema-v3 curriculum ID is exactly `<course-id>-v3-<readiness_summary>`. Treat the suffix as an opaque progress-isolation token in learner-visible runtime data; never label or decode it as a readiness result. A different token is intentionally incompatible and resets learner progress. Schema-v2 IDs keep their original `-v2` form. Do not automatically bump progress-state `version`, artifact-index `schema_version`, `engine_version`, or `layout_version`; those are separate runtime contracts.
 
 ## Adaptive size
 

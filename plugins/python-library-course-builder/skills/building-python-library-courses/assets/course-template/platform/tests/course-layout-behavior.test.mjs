@@ -74,22 +74,9 @@ test("v3 unit metadata allows coding only in graded Labs and keeps the v2 fallba
   );
 });
 
-test("v3 readiness and prep completion projections remain compatible with v2", () => {
-  const readinessPreparationTitles = requiredExport(
-    "readinessPreparationTitles",
-  );
+test("formal and preparatory completion projections remain compatible", () => {
   const completedUnitIds = requiredExport("completedUnitIds");
 
-  assert.deepEqual(
-    readinessPreparationTitles({ preparatory: ["能力 A", "能力 B"] }),
-    ["能力 A", "能力 B"],
-  );
-  assert.deepEqual(
-    readinessPreparationTitles({ foundation: ["旧版基础"] }),
-    ["旧版基础"],
-  );
-  assert.deepEqual(readinessPreparationTitles({ preparatory: [] }), []);
-  assert.deepEqual(readinessPreparationTitles({}), []);
   assert.deepEqual(
     completedUnitIds({
       completed_labs: ["lab01"],
@@ -97,6 +84,18 @@ test("v3 readiness and prep completion projections remain compatible with v2", (
     }),
     ["lab01", "lab00", "prep01"],
   );
+});
+
+test("focus reading layout follows the four locked responsive ranges", () => {
+  const readingLayoutMode = requiredExport("readingLayoutMode");
+
+  assert.equal(readingLayoutMode(1_440), "wide-rail");
+  assert.equal(readingLayoutMode(1_280), "wide-rail");
+  assert.equal(readingLayoutMode(1_279), "centered");
+  assert.equal(readingLayoutMode(1_024), "centered");
+  assert.equal(readingLayoutMode(1_023), "stacked");
+  assert.equal(readingLayoutMode(760), "stacked");
+  assert.equal(readingLayoutMode(759), "natural");
 });
 
 test("unit navigation badges distinguish preparatory units from formal Labs", () => {

@@ -2,6 +2,13 @@ import { Fragment, type ReactNode } from "react";
 
 import { PythonCodeBlock } from "./PythonCode";
 import {
+  consumeMarkdownList,
+  extractLessonTerms,
+  extractTutorialHeadings,
+  type LessonTerm,
+  type TutorialHeading,
+} from "./lessonGuide.mjs";
+import {
   courseCopy,
   type CourseCopy,
   type CourseLanguage,
@@ -137,6 +144,7 @@ export type LessonOutline = {
 export type CourseContentItem = {
   id: string;
   title: string;
+  lesson_format?: "tutorial-markdown-v1";
   lesson: string;
   lesson_outline?: LessonOutline;
   sources?: Array<{ id: string; title: string; url: string }>;
@@ -152,7 +160,8 @@ export type CourseLessonProps = {
   onPractice?: (link: PracticeLink) => void;
 };
 
-const SAFE_LINK = /^https?:\/\//i;
+const SAFE_EXTERNAL_LINK = /^https?:\/\//i;
+const SAFE_FRAGMENT_LINK = /^#[\p{Letter}\p{Number}_:.\-]+$/u;
 const INLINE_TOKEN = /(\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*)/g;
 
 function inlineMarkdown(value: string): ReactNode[] {
@@ -166,7 +175,10 @@ function inlineMarkdown(value: string): ReactNode[] {
     const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(part);
     if (link) {
       const [, label, href] = link;
-      return SAFE_LINK.test(href) ? (
+      if (SAFE_FRAGMENT_LINK.test(href)) {
+        return <a key={index} href={href}>{label}</a>;
+      }
+      return SAFE_EXTERNAL_LINK.test(href) ? (
         <a key={index} href={href} target="_blank" rel="noopener noreferrer">
           {label}
         </a>
@@ -184,8 +196,10 @@ function tableCells(line: string): string[] {
 
 function markdownBlocks(markdown: string, t: CourseCopy): ReactNode[] {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const headings = extractTutorialHeadings(markdown);
   const blocks: ReactNode[] = [];
   let index = 0;
+  let headingIndex = 0;
   while (index < lines.length) {
     const line = lines[index];
     if (!line.trim()) {
@@ -212,14 +226,19 @@ function markdownBlocks(markdown: string, t: CourseCopy): ReactNode[] {
       );
       continue;
     }
-    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (heading) {
       const text = inlineMarkdown(heading[2]);
       const level = heading[1].length;
+      const id = headings[headingIndex]?.id ?? `section-${headingIndex + 1}`;
+      headingIndex += 1;
       blocks.push(
-        level <= 1 ? <h2 key={`heading-${blocks.length}`}>{text}</h2>
-          : level === 2 ? <h3 key={`heading-${blocks.length}`}>{text}</h3>
-            : <h4 key={`heading-${blocks.length}`}>{text}</h4>,
+        level === 1 ? <h1 id={id} key={id}>{text}</h1>
+          : level === 2 ? <h2 id={id} key={id}>{text}</h2>
+            : level === 3 ? <h3 id={id} key={id}>{text}</h3>
+              : level === 4 ? <h4 id={id} key={id}>{text}</h4>
+                : level === 5 ? <h5 id={id} key={id}>{text}</h5>
+                  : <h6 id={id} key={id}>{text}</h6>,
       );
       index += 1;
       continue;
@@ -250,22 +269,17 @@ function markdownBlocks(markdown: string, t: CourseCopy): ReactNode[] {
       );
       continue;
     }
-    if (/^[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (index < lines.length && /^[-*]\s+/.test(lines[index])) {
-        items.push(lines[index].replace(/^[-*]\s+/, ""));
-        index += 1;
-      }
-      blocks.push(<ul key={`list-${blocks.length}`}>{items.map((item, itemIndex) => <li key={itemIndex}>{inlineMarkdown(item)}</li>)}</ul>);
-      continue;
-    }
-    if (/^\d+\.\s+/.test(line)) {
-      const items: string[] = [];
-      while (index < lines.length && /^\d+\.\s+/.test(lines[index])) {
-        items.push(lines[index].replace(/^\d+\.\s+/, ""));
-        index += 1;
-      }
-      blocks.push(<ol key={`list-${blocks.length}`}>{items.map((item, itemIndex) => <li key={itemIndex}>{inlineMarkdown(item)}</li>)}</ol>);
+    const list = consumeMarkdownList(lines, index);
+    if (list) {
+      const items = list.items.map((item, itemIndex) => (
+        <li key={itemIndex}>{inlineMarkdown(item)}</li>
+      ));
+      blocks.push(
+        list.ordered
+          ? <ol key={`list-${blocks.length}`} start={list.start}>{items}</ol>
+          : <ul key={`list-${blocks.length}`}>{items}</ul>,
+      );
+      index = list.nextIndex;
       continue;
     }
     if (/^---+$/.test(line.trim())) {
@@ -277,7 +291,7 @@ function markdownBlocks(markdown: string, t: CourseCopy): ReactNode[] {
     index += 1;
     while (
       index < lines.length && lines[index].trim() &&
-      !/^(#{1,4})\s+|^```|^>\s?|^[-*]\s+|^\d+\.\s+|^---+$/.test(lines[index])
+      !/^(#{1,6})\s+|^```|^>\s?|^ {0,3}(?:[-+*]|\d+[.)])[ \t]+|^---+$/.test(lines[index])
     ) {
       paragraph.push(lines[index].trim());
       index += 1;
@@ -293,6 +307,75 @@ function BulletList({ items }: { items: string[] }) {
 
 function formatStudyMinutes(study: StudyMinutes, t: CourseCopy): string {
   return t.studyMinutes(study.min, study.max);
+}
+
+function guideCopy(language: CourseLanguage) {
+  return language === "zh-CN"
+    ? {
+        label: "章节导览",
+        contents: "本章目录",
+        terms: "术语索引",
+        emptyContents: "本章没有单独的小节。",
+      }
+    : {
+        label: "Chapter guide",
+        contents: "On this page",
+        terms: "Terminology",
+        emptyContents: "This chapter has no separate sections.",
+      };
+}
+
+function HeadingGuide({ headings }: { headings: TutorialHeading[] }) {
+  return (
+    <ol className="chapter-toc-list">
+      {headings.map((heading) => (
+        <li key={heading.id} data-level={heading.level}>
+          <a href={`#${heading.id}`}>{heading.title}</a>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function TermGuide({ terms }: { terms: LessonTerm[] }) {
+  return (
+    <dl className="chapter-term-list">
+      {terms.map((term) => (
+        <div key={term.id}>
+          <dt>{term.name}</dt>
+          <dd>{term.definition}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+export function ChapterGuide({
+  content,
+  language,
+}: {
+  content: CourseContentItem;
+  language: CourseLanguage;
+}) {
+  const copy = guideCopy(language);
+  const headings = content.lesson_format === "tutorial-markdown-v1"
+    ? extractTutorialHeadings(content.lesson)
+    : [];
+  const terms = extractLessonTerms(content.lesson_outline);
+  return (
+    <nav className="chapter-guide" aria-label={copy.label}>
+      <section className="chapter-guide-section" aria-labelledby="chapter-toc-title">
+        <h3 id="chapter-toc-title">{copy.contents}</h3>
+        {headings.length ? <HeadingGuide headings={headings} /> : <p>{copy.emptyContents}</p>}
+      </section>
+      {terms.length ? (
+        <section className="chapter-guide-section chapter-terms" aria-labelledby="chapter-terms-title">
+          <h3 id="chapter-terms-title">{copy.terms}</h3>
+          <TermGuide terms={terms} />
+        </section>
+      ) : null}
+    </nav>
+  );
 }
 
 function OperationalContractView({ concept, t }: { concept: LessonConcept; t: CourseCopy }) {
@@ -526,14 +609,18 @@ function StructuredLesson({
 
 export function CourseLesson({ content, language, onPractice }: CourseLessonProps) {
   const t = courseCopy(language);
+  const tutorial = content.lesson_format === "tutorial-markdown-v1";
   return (
-    <article className="course-lesson" aria-label={t.lessonLabel(content.title)}>
-      {content.concepts?.length ? (
+    <article
+      className={`course-lesson${tutorial ? " tutorial-lesson" : " legacy-lesson"}`}
+      aria-label={t.lessonLabel(content.title)}
+    >
+      {!tutorial && content.concepts?.length ? (
         <div className="concept-row" aria-label={t.chapterConcepts}>
           {content.concepts.map((concept) => <span key={concept}>{concept}</span>)}
         </div>
       ) : null}
-      {content.lesson_outline
+      {!tutorial && content.lesson_outline
         ? (
             <StructuredLesson
               outline={content.lesson_outline}

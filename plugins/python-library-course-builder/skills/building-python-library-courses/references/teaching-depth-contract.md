@@ -1,15 +1,16 @@
 # Teaching depth contract
 
-Use this positive recipe after the readiness sequence and before route, specification, or lesson design. The goal is natural teaching material in the selected `zh-CN` or `en` locale whose depth is visible in concrete values, contracts, traces, and aligned practice.
+Use this positive recipe after the private readiness sequence and before route, specification, or lesson design. The goal is natural teaching material in the selected `zh-CN` or `en` locale whose depth is visible in concrete values, contracts, traces, and aligned practice. Readiness chooses the route on the author side; it is never a subject of the generated lecture.
 
 Use the [complete teaching example index](complete-teaching-example.md) to open exactly one locale-specific example before writing learner-facing prose: [Simplified Chinese](complete-teaching-example.zh-CN.md) for `zh-CN` or [English](complete-teaching-example.en.md) for `en`. Each demonstrates the same recipe as connected teaching rather than as a field inventory.
 
 ## Contents
 
 - [Turn readiness evidence into ordered prep](#turn-readiness-evidence-into-ordered-prep)
+- [Keep readiness outside the tutorial](#keep-readiness-outside-the-tutorial)
 - [Teach every evidenced gap completely](#teach-every-evidenced-gap-completely)
 - [Expand every graded chapter](#expand-every-graded-chapter)
-- [Use one chapter sequence](#use-one-chapter-sequence)
+- [Use one chapter progression](#use-one-chapter-progression)
 - [Close the operational contract](#close-the-operational-contract)
 - [Carry one value through the trace](#carry-one-value-through-the-trace)
 - [Prove every declared boundary end to end](#prove-every-declared-boundary-end-to-end)
@@ -29,18 +30,24 @@ Keep `lab00` as a 15-30 minute environment and learning-loop orientation. Build 
 
 Treat unseen material as new teaching, not review. Map every `preparatory` capability to concepts in its assigned prep unit and to supporting official sources. A capability marked `assume` needs no prep concept. Never place raw learner answers or code evidence in the course repository.
 
+## Keep readiness outside the tutorial
+
+Use the readiness plan only to decide which ordinary course chapters exist. Never copy its labels or rationale into `tutorial`, the structured lesson sidecar, quiz feedback, README, sidebar text, manifests, or learner APIs. Learner-facing material must not state or imply a level, profile, capability status, evidence result, diagnostic answer, preparation decision, or phrases such as “you already know” and “your gap.”
+
+A prep chapter can begin from a curricular fact established by an earlier chapter, such as “the previous chapter returned a dictionary.” It cannot claim that a private assessment proved the learner already understands dictionaries. Teach the selected foundation fully and naturally; do not tell the learner why the authoring system selected it.
+
 ## Teach every evidenced gap completely
 
-Keep different DAG layers and `python`, `library`, and `domain` categories visibly separate. Give every `preparatory` capability one complete explanation in this order:
+Keep different DAG layers and `python`, `library`, and `domain` categories clear in the private curriculum mapping. Give every selected preparatory subject one complete explanation with this reasoning progression:
 
-1. **existing cognitive anchor** — begin with a behavior, value, or code pattern the learner's evidence shows they already understand;
+1. **curricular anchor** — begin with a behavior, value, or code pattern established in the course or introduced concretely in this chapter, without making a claim about the learner;
 2. **define the term** — introduce one precise term in plain language and distinguish it from the nearby idea most likely to be confused with it;
 3. **why the current route needs it now** — name the next Lab operation or capstone decision that would otherwise be unpredictable;
 4. **complete concrete example and value flow** — carry one real value from its starting form through each relevant intermediate form to the observable result;
 5. **common misconception or applicability boundary** — show one plausible wrong prediction or out-of-scope input and the symptom it produces;
 6. **recovery and check** — repair that exact case, run or inspect it again, and ask the learner to predict or verify the recovered result.
 
-Do not collapse several gaps into one generic prerequisite paragraph. If two capabilities share a concept, name both evidence-to-need connections while teaching the shared value flow once.
+Do not collapse several foundations into one generic prerequisite paragraph. If two private capabilities share a concept, keep both mappings in the authoring sidecar while teaching the shared value flow once in natural prose.
 
 ## Expand every graded chapter
 
@@ -56,9 +63,9 @@ Give each graded chapter one new knowledge mainline and expand it in this order:
 
 An official bridge may reinforce the preceding mechanism, but it does not replace this chapter's new mainline or justify another unrelated topic.
 
-## Use one chapter sequence
+## Use one chapter progression
 
-Use this sequence in order for every orientation, prep, and graded Lab, omitting the coding step from all preparatory units:
+Make this conceptual progression discoverable in every orientation, prep, and graded Lab, omitting the coding step from all preparatory units:
 
 1. **concrete capstone problem** — name the observable problem this increment solves;
 2. **plain-language understanding** — give the learner one predictive idea in ordinary language;
@@ -69,7 +76,7 @@ Use this sequence in order for every orientation, prep, and graded Lab, omitting
 7. **knowledge check** — ask for a trace prediction and a diagnosis;
 8. **coding or capstone increment** — make the learner apply the same concept to the cumulative product.
 
-Keep one new knowledge mainline per graded Lab. Lab 02+ may open with the previous mechanism's official bridge, but the bridge is reinforcement and replacement, not permission to add a second unrelated mainline.
+Keep one new knowledge mainline per graded Lab. Lab 02+ may open with the previous mechanism's official bridge, but the bridge is reinforcement and replacement, not permission to add a second unrelated mainline. These items are authoring coverage, not a mandatory series of identical headings. Let the subject determine section boundaries and transitions.
 
 ## Close the operational contract
 
@@ -132,7 +139,7 @@ Reject delivery when a declared failure or boundary is merely listed but its cou
 
 ## Write natural learner-facing prose
 
-Use exactly the labels for the selected locale:
+When a signpost helps, use a natural equivalent of these phrases in the selected locale; do not force every chapter to repeat them as headings:
 
 | Meaning | `zh-CN` | `en` |
 |---|---|---|
@@ -140,11 +147,13 @@ Use exactly the labels for the selected locale:
 | operational contract | `输入和输出是什么` | `What are the inputs and outputs?` |
 | concrete trace | `拿一个具体输入走一遍` | `Walk one concrete input through the flow` |
 
-Write the connected explanation naturally in the selected language. Define the term in one clear sentence. In the very next sentence, connect it to the current task. Add a natural transition into a concrete value, then explain what changes and why before naming the next structure. Never turn `definition -> purpose -> mechanism -> boundaries -> pitfalls` into a learner-facing author-field inventory; those authoring fields must read as one connected explanation, not stacked labels.
+Write the connected explanation naturally in the selected language. Define every professional term at first use in a clear sentence. Immediately connect it to the current task. Add a natural transition into a concrete value, then explain what changes and why before naming the next structure. Never turn `definition -> purpose -> mechanism -> boundaries -> pitfalls` into a learner-facing author-field inventory; those authoring fields must read as one connected explanation, not stacked labels.
 
 Define a term at first use, then immediately connect it to the current capstone problem. Use short natural transitions appropriate to the selected locale. Alternate explanation with concrete values instead of presenting a schema-field dump. Prefer connected sentences over a stiff glossary, and explain jargon before using it in a prediction or exercise.
 
-Keep implementation details, design tradeoffs, and source notes available after the open core. Do not expose internal mapping IDs or author-facing enum labels as learner prose.
+Make `tutorial` Markdown the primary learner-facing chapter and keep the structured lesson as its validation sidecar. The tutorial may interleave implementation detail, design tradeoffs, and source notes where they help the explanation. Do not expose internal mapping IDs, author-facing enum labels, readiness data, or the sidecar's field structure as learner prose.
+
+Use enough detail to make each transition predictable: show intermediate forms, explain why the operation changes them, define nearby terms before relying on them, and connect symptoms to causes. Do not set a fixed word count. Expand because the mechanism needs explanation, not because a template needs another paragraph.
 
 ## Adapt the recipe to the concept kind
 

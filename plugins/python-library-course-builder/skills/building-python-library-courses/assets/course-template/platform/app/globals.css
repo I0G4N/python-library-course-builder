@@ -154,31 +154,6 @@ summary:focus-visible,
   -webkit-line-clamp: 2;
 }
 
-.readiness-summary {
-  margin: 0 0.55rem;
-  padding: 0.55rem 0.62rem;
-  overflow-y: auto;
-  border: 1px solid #d3e2dc;
-  border-radius: 0.5rem;
-  background: #f6faf8;
-  font-size: 0.67rem;
-}
-
-.readiness-summary h2,
-.readiness-summary h3 {
-  margin: 0 0 0.25rem;
-  font-size: 0.72rem;
-}
-
-.readiness-summary h3:not(:first-child) {
-  margin-top: 0.45rem;
-}
-
-.readiness-summary ul {
-  margin: 0;
-  padding-left: 1rem;
-}
-
 .lab-nav {
   display: flex;
   min-height: 0;
@@ -437,6 +412,126 @@ summary:focus-visible,
   padding: 0.9rem 1rem 2rem;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.focus-reading-layout {
+  display: grid;
+  width: 100%;
+  max-width: 80ch;
+  gap: 1.5rem;
+  margin: 0 auto;
+}
+
+.tutorial-narrative,
+.chapter-rail,
+.coding-lesson-stack {
+  min-width: 0;
+}
+
+.chapter-rail {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.chapter-guide {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #d3e2dc;
+  border-radius: 0.65rem;
+  background: #f6faf8;
+}
+
+.chapter-guide-section h3 {
+  margin: 0 0 0.65rem;
+  color: var(--ink);
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+}
+
+.chapter-guide-section > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.chapter-toc-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chapter-toc-list li[data-level="2"] {
+  padding-left: 0.65rem;
+}
+
+.chapter-toc-list li[data-level="3"],
+.chapter-toc-list li[data-level="4"] {
+  padding-left: 1.2rem;
+}
+
+.chapter-toc-list li[data-level="5"],
+.chapter-toc-list li[data-level="6"] {
+  padding-left: 1.65rem;
+}
+
+.chapter-toc-list a {
+  display: flex;
+  min-height: 2rem;
+  align-items: center;
+  padding: 0.18rem 0.12rem;
+  color: #40514a;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+.chapter-toc-list a:hover,
+.chapter-toc-list a:focus-visible {
+  color: var(--accent-deep);
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+.chapter-terms {
+  padding-top: 1rem;
+  border-top: 1px solid #dbe6e1;
+}
+
+.chapter-term-list {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.chapter-term-list div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.chapter-term-list dt {
+  color: var(--accent-deep);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.chapter-term-list dd {
+  margin: 0;
+  color: #506159;
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.chapter-rail .knowledge-check {
+  margin-top: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--panel);
 }
 
 .knowledge-check {
@@ -970,45 +1065,64 @@ summary:focus-visible,
 
 .course-lesson {
   color: #26332e;
-  font-size: 0.79rem;
-  line-height: 1.68;
+  font-size: 15.5px;
+  line-height: 1.75;
 }
 
+.course-lesson h1,
 .course-lesson h2,
 .course-lesson h3,
-.course-lesson h4 {
+.course-lesson h4,
+.course-lesson h5,
+.course-lesson h6 {
   color: var(--ink);
   line-height: 1.35;
+  scroll-margin-top: 1rem;
+}
+
+.course-lesson h1 {
+  margin: 0.2rem 0 1rem;
+  font-size: 1.7rem;
 }
 
 .course-lesson h2 {
-  margin: 0.2rem 0 0.7rem;
-  font-size: 1.08rem;
+  margin: 0.35rem 0 0.85rem;
+  font-size: 1.48rem;
 }
 
 .course-lesson h3 {
-  margin: 1.35rem 0 0.45rem;
+  margin: 2rem 0 0.65rem;
   padding-top: 0.1rem;
-  font-size: 0.9rem;
+  font-size: 1.18rem;
 }
 
 .course-lesson h4 {
-  margin: 1rem 0 0.35rem;
-  font-size: 0.8rem;
+  margin: 1.55rem 0 0.5rem;
+  font-size: 1rem;
+}
+
+.course-lesson h5 {
+  margin: 1.3rem 0 0.4rem;
+  font-size: 0.92rem;
+}
+
+.course-lesson h6 {
+  margin: 1.15rem 0 0.35rem;
+  font-size: 0.84rem;
 }
 
 .course-lesson p {
-  margin: 0.48rem 0;
+  margin: 0.72rem 0;
 }
 
 .course-lesson ul,
 .course-lesson ol {
-  margin: 0.45rem 0;
-  padding-left: 1.35rem;
+  margin: 0.7rem 0;
+  padding-left: 1.55rem;
 }
 
 .course-lesson li + li {
-  margin-top: 0.22rem;
+  margin-top: 0.38rem;
 }
 
 .course-lesson a {
@@ -1028,8 +1142,8 @@ summary:focus-visible,
 }
 
 .course-lesson blockquote {
-  margin: 0.75rem 0;
-  padding: 0.55rem 0.7rem;
+  margin: 1rem 0;
+  padding: 0.72rem 0.9rem;
   border-left: 3px solid #6db399;
   background: #eff7f3;
   color: #42534c;
@@ -1272,7 +1386,7 @@ summary:focus-visible,
   background: var(--code);
   color: #dbe6e1;
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: 13px;
   line-height: 1.62;
   tab-size: 4;
   font-variant-ligatures: none;
@@ -1289,7 +1403,7 @@ summary:focus-visible,
 .course-lesson table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.71rem;
+  font-size: 0.9em;
 }
 
 .course-lesson th,
@@ -1430,7 +1544,6 @@ summary:focus-visible,
   }
 
   .sidebar-collapsed .brand-copy,
-  .sidebar-collapsed .readiness-summary,
   .sidebar-collapsed .lab-link > span:last-child,
   .sidebar-collapsed .sidebar-footer {
     display: none;
@@ -1448,6 +1561,33 @@ summary:focus-visible,
 
   .sidebar-collapsed .lab-index {
     margin: 0 auto;
+  }
+}
+
+@media (min-width: 1280px) {
+  .learning-grid.reading-focus {
+    padding: 1rem 1.25rem;
+  }
+
+  .reading-focus .lesson-scroll {
+    padding: 1.35rem 1.5rem 3rem;
+  }
+
+  .focus-reading-layout {
+    grid-template-columns: minmax(0, 80ch) minmax(300px, 360px);
+    max-width: calc(80ch + 360px + 2rem);
+    gap: 2rem;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .reading-focus .lesson-scroll {
+    padding: 1.25rem 1.35rem 3rem;
+  }
+
+  .focus-reading-layout {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 80ch;
   }
 }
 
@@ -1492,9 +1632,7 @@ summary:focus-visible,
     z-index: 10;
     display: grid;
     grid-template-columns: minmax(160px, 0.7fr) minmax(0, 1.3fr);
-    grid-template-areas:
-      "brand nav"
-      "readiness readiness";
+    grid-template-areas: "brand nav";
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
@@ -1509,13 +1647,6 @@ summary:focus-visible,
 
   .brand-block h1 {
     -webkit-line-clamp: 1;
-  }
-
-  .readiness-summary {
-    grid-area: readiness;
-    max-height: none;
-    margin: 0.45rem 0.55rem 0.55rem;
-    overflow: visible;
   }
 
   .lab-nav {
@@ -1581,6 +1712,25 @@ summary:focus-visible,
     max-height: none;
     overflow: visible;
     overscroll-behavior: auto;
+  }
+
+  .focus-reading-layout {
+    display: block;
+    max-width: none;
+  }
+
+  .chapter-rail {
+    margin-top: 1.25rem;
+  }
+
+  .chapter-toc-list a {
+    min-height: 2.75rem;
+    font-size: 0.9rem;
+  }
+
+  .chapter-term-list dt,
+  .chapter-term-list dd {
+    font-size: 0.9rem;
   }
 
   .work-column {

@@ -83,8 +83,8 @@ def test_v3_english_scaffold_localizes_generated_learning_surfaces(
     assert "## Course route" in root_readme
     assert "learner workspace" in labs_readme
     assert "Start with `lab00/README.md`" in labs_readme
-    assert "## Prerequisites" in lesson
-    assert "Start with this mental model" in lesson
+    assert "## Build the mental model" in lesson
+    assert "## Trace one concrete value" in lesson
     assert not (target / "README.en.md").exists()
 
 

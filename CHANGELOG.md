@@ -2,6 +2,19 @@
 
 All notable changes to Python Library Course Builder are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Added clean-context chapter authoring: every orientation, preparation, and graded Lab is written by a distinct non-reused subagent from a sanitized packet, assembled deterministically, and reviewed in a separate clean context.
+- Added schema-v3 `tutorial-markdown-v1`, canonical `tutorial.md` chapter sources, exact Markdown compilation, stable heading navigation, and terminology guides while retaining structured lesson sidecars and legacy v2/v3 rendering.
+- Added a focus-reading Web layout with a rich chapter/check rail on wide screens and responsive single-column reading before the coding workspace unlocks.
+
+### Changed
+
+- Kept readiness diagnostics entirely author-side. Generated learner README files, manifests, content, sidebar copy, and public APIs no longer expose profiles, capability decisions, diagnostic summaries, or readiness-derived lists.
+- Made tutorial quality depend on progressive explanation, first-use term definitions, concrete value flow, boundary recovery, and aligned practice instead of a rigid learner-facing field template or word-count target.
+
 ## [0.2.0] - 2026-07-15
 
 ### Added

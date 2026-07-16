@@ -25,10 +25,13 @@ Complete this checklist from a clean checkout before publishing a version.
 - [ ] The release-candidate gate, `uv run python scripts/validate_release.py --codex-validators --forward`, passes.
 - [ ] A small standard-library target generates into an empty directory.
 - [ ] Fresh `zh-CN` and `en` schema-v3 courses each pass split-source parity, README/Markdown, CLI, Web, Runner, privacy, and full verification.
+- [ ] A real authoring trace shows exactly one non-reused `fork_turns="none"` writer per chapter, deterministic fragment assembly, and one separate clean-context whole-course review.
+- [ ] Every new-format chapter has canonical `tutorial.md`, an intact structured `lesson.json` sidecar, byte-stable compiled Markdown, stable heading anchors, and a derived terminology guide; legacy v2/v3 lessons still render.
 - [ ] Starter tests are RED only at declared learner interfaces.
 - [ ] Reference implementations pass public and verified tests.
 - [ ] CLI, Web, Runner, progression, build, and shutdown checks pass.
-- [ ] Learner-visible output excludes reference code and verified-test bodies.
+- [ ] Learner-visible output excludes reference code, verified-test bodies, readiness/profile metadata, diagnostic IDs, capability decisions, and readiness-derived lists.
+- [ ] Browser checks at 1440x900, 1024x700, 900x700, and 390x844 confirm focus reading before the knowledge gate, no Code/Result or file request while locked, and the resizable workspace after unlock.
 - [ ] A broad target stops at the track-selection gate before writing files.
 
 ## Hosted GitHub settings and public verification

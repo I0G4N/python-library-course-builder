@@ -52,17 +52,19 @@ project/
 official sources
       |
       v
-course specification + canonical source tree
+private readiness plan -> course specification + canonical source tree
       |
       v
 CourseKit validation and deterministic compilation
       |
-      +--> manifest/content/knowledge --> Web + CLI + Runner
+      +--> sanitized manifest/content/knowledge --> Web + CLI + Runner
       +--> starter projection ---------> labs/
       +--> reference + hidden tests ---> private verification/grader
 ```
 
-There is one split authoring source of truth. Schema-v3 prep lessons live under `course/source/preparatory_units/`; formal Lab metadata, code, and tests stay under `course/source/labs/`. Schema-v2 `foundations/` remains compatibility input. Do not keep an editable source `authoring-spec.json`. Consumers traverse the compiled manifest; unit order, titles, dependencies, score totals, questions, and lesson paths are data.
+There is one split authoring source of truth. New schema-v3 chapters store primary tutorial prose in `tutorial.md` and deterministic concept/activity metadata in `lesson.json`. Prep lessons live under `course/source/preparatory_units/`; formal Lab metadata, code, and tests stay under `course/source/labs/`. Schema-v2 `foundations/` and schema-v3 sources without tutorial Markdown remain compatibility inputs. Do not keep an editable source `authoring-spec.json`. Consumers traverse the sanitized compiled manifest; unit order, titles, dependencies, score totals, questions, and lesson paths are data.
+
+The readiness plan, audience prerequisite profile, capability mappings, and readiness summary are author-side inputs. Validation and the private parity snapshot may inspect them; learner/runtime manifests, content payloads, generated README files, sidebar copy, and public APIs do not contain them. The curriculum ID may retain the readiness-derived suffix only as an opaque progress-isolation token.
 
 Each coding question carries normalized `timeout_seconds` metadata in both internal and learner manifests. It must be an integer from 1 through 90 and defaults to 30 when omitted.
 
@@ -82,15 +84,17 @@ The Web must fail closed while initial state is unavailable. Every orientation/p
 
 ## Responsive workspace layout
 
-At desktop widths of 1024px and above, the Web uses sidebar, lesson, and code/result columns with two keyboard-accessible separators. The sidebar defaults to 208px, remains between 160px and 320px while expanded, and the sidebar can collapse to 64px. The lesson and work areas preserve minimum widths of 320px and 440px. Pointer drag adjusts widths; a focused separator supports Arrow keys in 16px steps plus Home and End, exposes `role="separator"` and current/min/max values, and keeps a usable focus target. The desktop shell is clamped to the dynamic viewport with no fixed minimum height; the lesson and code/result columns scroll vertically and independently so a short or resized browser window cannot hide their lower content. The toolbar keeps its summary and study-time metadata in one grid cell so this viewport budget is stable.
+Before `codingReady`, use a focus-reading layout and never mount a disabled or empty editor. At widths of 1280px and above, the learning area contains a roughly 80-character narrative column plus a 300-360px rail. The rail derives stable heading links and a terminology index from the tutorial and structured concepts, then contains the still-reviewable knowledge check. Body prose is 15-16px with approximately 1.75 line height. From 1024px through 1279px, center the narrative as one column and place the rail after it. From 760px through 1023px, use the existing stacked learning surface. Below 760px, use natural document scrolling with no sticky or capped nested lesson surface.
 
-Validated, clamped preferences live in per-course localStorage under `coursekit.layout.v1.<course_id>` so unrelated courses never share layout state. Invalid or stale values fall back safely. From 760px through 1023px the lesson and work areas stack inside the learning surface, and the inner lesson scroller permits scroll chaining to the outer stacked surface so a newly unlocked workspace remains reachable. Below 760px the compact chapter navigation and readiness summary use explicit grid areas, and the page returns to natural document scrolling without a capped lesson pane or sticky nested surface. Both medium and small layouts have no resize separators.
+After a graded chapter reaches `codingReady`, restore the IDE workspace at widths of 1024px and above: sidebar, lesson, and code/result columns with two keyboard-accessible separators. The sidebar defaults to 208px, remains between 160px and 320px while expanded, and can collapse to 64px. The lesson and work areas preserve minimum widths of 320px and 440px. Pointer drag adjusts widths; a focused separator supports Arrow keys in 16px steps plus Home and End, exposes `role="separator"` and current/min/max values, and keeps a usable focus target. The desktop shell is clamped to the dynamic viewport with no fixed minimum height; the lesson and code/result columns scroll vertically and independently so a short or resized browser window cannot hide their lower content. The knowledge check remains reachable for review rather than disappearing after unlock.
+
+Validated, clamped preferences live in per-course localStorage under `coursekit.layout.v1.<course_id>` so unrelated courses never share layout state. Invalid or stale values fall back safely. From 760px through 1023px the unlocked lesson and work areas stack inside the learning surface, and the inner lesson scroller permits scroll chaining to the outer stacked surface so a newly unlocked workspace remains reachable. Below 760px the compact chapter navigation uses explicit grid areas and the page returns to natural document scrolling. Medium and small layouts have no resize separators.
 
 ## Course language ownership
 
 Every fresh Skill invocation asks for exactly one course locale before target discovery or readiness. The supported set is closed to `zh-CN` and `en`; an already worded language preference does not skip this first question. The accepted locale is immutable input to the route, readiness plan, schema-v3 source, compiled manifest, generated README and Markdown, Web catalog, CLI output, and handoff. Unknown, missing, mixed, or mismatched locale state fails closed instead of falling back.
 
-Learner-facing prose, readiness diagnostics, labels, feedback, and generated documentation use the selected locale. Code, shell commands, identifiers, target API names, and official source titles and URLs retain their original spelling. Locale selection is not capability evidence, and raw language answers are not copied into the generated repository.
+Author-side readiness questions and all learner-facing prose, labels, feedback, and generated documentation use the selected locale. Code, shell commands, identifiers, target API names, and official source titles and URLs retain their original spelling. Locale selection is not capability evidence. Raw answers and completed diagnostic/profile metadata are not copied into learner-facing projections or prose.
 
 ## Runtime boundaries
 
@@ -117,7 +121,7 @@ Optional library-specific capabilities are declared extensions. A course without
 
 Compilation is deterministic: the same canonical input yields byte-identical declared artifacts. Check mode performs no writes and reports drift. Compile mode updates only artifacts recorded by its artifact index, preserves unrelated files, and rolls back on replacement failure.
 
-Curriculum schema is independent from runtime schemas. Schema v3 uses `<course-id>-v3-<readiness_summary>` and declares no compatibility across different summaries. This does not itself bump progress-state, artifact-index, engine, or layout versions. The compiled authoring snapshot is private verification material and never appears in the learner starter projection.
+Curriculum schema is independent from runtime schemas. Schema v3 uses `<course-id>-v3-<readiness_summary>` and declares no compatibility across different summaries; public consumers treat the suffix as opaque. This does not itself bump progress-state, artifact-index, engine, or layout versions. The compiled authoring snapshot is private verification material and never appears in the learner starter projection or public APIs.
 
 Workspace initialization is empty-target-only and transactional. Reject files, symlinks, and non-empty destinations before the first write. Generated projects contain copied files, never symlinks or imports back to the Skill, template, or originating repository.
 
@@ -125,7 +129,7 @@ Only allowlisted template tokens may be substituted. After rendering, scan every
 
 ## Privacy model
 
-Learner-visible `labs/` includes starter code, lessons or links to lessons, and public tests. It excludes reference implementations, hidden-test source, hidden selectors, and private artifact paths. Public API responses must not disclose them either.
+Learner-visible `labs/` includes starter code, tutorials or links to tutorials, and public tests. It excludes reference implementations, hidden-test source, hidden selectors, private artifact paths, readiness/profile objects, capability decisions, and author-side diagnostic metadata. Generated README, manifest, content, Web, CLI, Runner, sidebar, and public API responses must not disclose them either.
 
 This separation prevents accidental hints during local study; it is not a secrecy guarantee when the full repository is published. State that limitation in the README and handoff.
 

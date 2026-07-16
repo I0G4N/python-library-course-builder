@@ -5,6 +5,7 @@ This rubric is the required acceptance gate for a **local generated project**. G
 ## Contents
 
 - [Required fail-closed negative tests](#required-fail-closed-negative-tests)
+- [Required authoring workflow evidence](#required-authoring-workflow-evidence)
 - [Required generated-project acceptance matrix](#required-generated-project-acceptance-matrix)
 - [Repository quality](#repository-quality)
 
@@ -20,6 +21,19 @@ Verify all of these separately:
 - check/validation mode does not mutate source or output;
 - an induced replacement failure leaves the prior generated output byte-for-byte intact.
 
+## Required authoring workflow evidence
+
+For a real Skill-authored course, retain an author-side orchestration trace until acceptance and verify it without copying that trace into the generated learner course:
+
+- the expected unit set is exactly `lab00`, every selected `prepNN`, and every formal `labNN`;
+- each unit is written by one distinct clean-context writer launched with `fork_turns="none"`, and no writer is reused for another chapter;
+- every writer receives only its sanitized chapter packet and locked cross-course contracts, never readiness answers, profile fields, capability status/decision/basis, or another chapter's prose;
+- deterministic assembly rejects missing, duplicate, unexpected, or unit-ID-mismatched fragments and rejects mutation of parent-owned route, code, tests, module-cycle, bridge, and source contracts;
+- one separate clean-context reviewer checks the assembled whole course; a rejected chapter is replaced by a newly launched writer rather than repaired by reusing the original writer; and
+- if clean subagents cannot be launched, authoring stops instead of silently composing all chapters in the parent context.
+
+This is an observed workflow contract, not comparative scoring between agents or outputs. Generated-project tests validate the assembled artifacts; they cannot prove which context authored them.
+
 ## Required generated-project acceptance matrix
 
 Run every check from fresh output.
@@ -27,10 +41,11 @@ Run every check from fresh output.
 ### Source and structure
 
 - canonical source validates and compiled artifacts have no drift;
-- new Skill-authored output uses a schema v3 `evidence-dialogue` prerequisite profile; capability titles, evidence class, source IDs, first graded use, and each gap decision (`assume`/`preparatory`) exactly match the ready plan;
+- new Skill-authored output uses a private schema v3 `evidence-dialogue` prerequisite profile; capability titles, evidence class, source IDs, first graded use, and each gap decision (`assume`/`preparatory`) exactly match the ready plan in canonical authoring data and the private parity snapshot;
+- learner/runtime manifests, `content.json`, generated README files, sidebar copy, Web/CLI/Runner payloads, and public APIs contain no `audience`, `prerequisite_profile`, `readiness`, route/readiness summary, assumed/preparatory capability list, capability status/decision/basis, diagnostic question/answer IDs, or prep `capability_ids`; the curriculum suffix remains opaque;
 - zero gaps produce only lab00; multi-layer gaps produce the minimum ordered prep chain without a hard count ceiling;
 - lab00, every prep, and every graded Lab preserve exact per-unit `study_minutes` through split source, parity snapshot, content, manifest, README, and learner projections;
-- schema v3 split source has `preparatory_units/{lab00,prepNN}` plus formal `labs/`, no editable source snapshot, and emits a parity snapshot equal to the validated input; schema v2 remains compatible;
+- new tutorial-format schema v3 split source has `tutorial.md` plus `lesson.json` for every `preparatory_units/{lab00,prepNN}` and formal Lab, no editable source snapshot, preserves authored tutorial Markdown byte-for-byte through `content.json`, and emits a parity snapshot equal to the validated input; schema v2 and schema v3 without `lesson_format` remain compatible through the legacy renderer;
 - Lab IDs are contiguous and the count matches the adaptive range;
 - all declared files, symbols, selectors, source IDs, and points resolve;
 - no generated file is a symlink;
@@ -40,7 +55,7 @@ Run every check from fresh output.
 - every lesson defines purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source-backed claims for every concept;
 - every assessed concept has a closed operational contract; every runnable example has a complete concrete-value trace of at least two steps; concept/outcome activity coverage satisfies the assessed Lab 00 versus graded-Lab surfaces;
 - every prep gap connects an existing cognitive anchor, term definition, current-route need, complete value flow, misconception or boundary, and recovery check;
-- every graded chapter keeps one new knowledge mainline and connects its project problem, plain-language predictive model, precise contract, one same-value complete flow, valid/boundary cases, diagnosis/recovery, quiz, coding question, and capstone increment in the selected `zh-CN` or `en` locale, with no mixed-language or fallback text;
+- every graded chapter satisfies `teaching-depth-contract.md` as a naturally structured tutorial rather than a repeated author-field inventory; it defines jargon at first use, keeps one new knowledge mainline, and connects its project problem, plain-language predictive model, precise contract, one same-value complete flow, valid/boundary cases, diagnosis/recovery, quiz, coding question, and capstone increment in the selected `zh-CN` or `en` locale, with no mixed-language, diagnostic-profile narration, or fallback text;
 - a boundary witness for every declared failure and every independently stated boundary must execute one representative counterexample, apply its recovery, re-execute the corrected path, record the recovered observable, and prove its prose contract, runnable or diagnostic code, expected output, diagnostic quiz and, for graded concepts, coding prompt plus public and hidden tests agree on the condition, observable, and recovery;
 - every lesson has at least two examples: a CPU/offline runnable example with exact command/output and a diagnostic wrong -> symptom -> cause -> fix example;
 - every runnable command is exactly `python {path}` for its declared lesson-relative file;
@@ -80,13 +95,14 @@ Run every check from fresh output.
 - The **chapter navigation gate**, **knowledge gate**, and **coding verification gate** use the same manifest order and persisted knowledge state across CLI, Web, and Runner.
 - production Web build and TypeScript checks pass;
 - the rendered course uses manifest Lab titles/counts and compiled Markdown lessons;
-- structured `lesson_outline` renders the assessed **open core** with exact time/reason, the selected locale's exact predictive-model, operational-contract, and concrete-trace labels from `teaching-depth-contract.md`, the concrete trace, and first practice link before accessible disclosures for principles, design choices, sources, and diagnostics; the full Markdown fallback remains usable;
-- manifest and README readiness projections show assumed capabilities plus ordered prep without raw evidence or internal author data; Web/Markdown use learner-safe labels;
+- `tutorial-markdown-v1` renders authored Markdown as the primary lesson with stable heading anchors, accessible semantic markup, syntax-highlighted code, and a chapter guide derived from headings plus structured concepts; `lesson_outline` remains a non-primary semantic sidecar, while legacy inputs retain the complete structured Markdown fallback;
+- generated course prose presents prep as ordinary route chapters and never explains that a profile, answer, status, or assessed deficiency selected them;
 - Python lesson fences and the editor have syntax highlighting and monospace alignment;
 - no orientation/prep unit has a code workspace; in short, prep has no code workspace. Each graded Lab hides code/results and makes no file request until the prep chain and current knowledge are complete;
-- at widths of 1024px and above, the desktop shell exposes two keyboard-accessible separators, respects declared minimum widths, lets the sidebar collapse, supports pointer drag plus Arrow keys/Home/End, and restores validated per-course localStorage preferences;
+- before coding unlock, widths of at least 1280px use a roughly 80-character tutorial column plus a 300-360px rail containing the heading guide, terminology index, and knowledge check; widths from 1024px through 1279px use a centered single column with the rail after it; body text is 15-16px at about 1.75 line height;
+- after coding unlock, widths of 1024px and above restore the desktop shell with two keyboard-accessible separators, declared minimum widths, sidebar collapse, pointer drag plus Arrow keys/Home/End, validated per-course localStorage preferences, and a reviewable knowledge check;
 - a short or resized desktop viewport keeps the complete interface reachable through independent lesson and code/result vertical scrolling, with no fixed shell minimum height or implicit toolbar row clipping the learning surface;
-- widths from 760px through 1023px stack lesson and work without blocking scroll chaining to a newly unlocked workspace; widths below 760px keep chapter navigation and readiness in explicit grid areas plus natural document scrolling without a capped or sticky lesson surface; both ranges have no resize separators;
+- widths from 760px through 1023px stack lesson, guide/check rail, and unlocked work without blocking scroll chaining; widths below 760px keep chapter navigation in explicit grid areas plus natural document scrolling without a capped or sticky lesson surface; both ranges have no resize separators;
 - schema v3 initially enables only Lab 00, unlocks one prep at a time by knowledge mastery, then Lab 01; schema v2 preserves its original initial pair;
 - the knowledge gate renders a generic quiz from redacted `GET /api/knowledge/{lab_id}` data and persists correct answers through `POST /api/knowledge/answer` without disclosing answer keys;
 - the Runner rejects prep file/write/run APIs explicitly; formal `POST /api/run` stays locked until prep and current knowledge are mastered;

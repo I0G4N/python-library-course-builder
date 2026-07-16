@@ -194,14 +194,21 @@ def test_v3_split_source_compiles_independently_with_exact_parity_and_privacy(
     learner_manifest = json.loads(
         (output / "starter/manifest.json").read_text(encoding="utf-8")
     )
+    author_manifest = json.loads(
+        (output / "manifest.json").read_text(encoding="utf-8")
+    )
+    content = json.loads((output / "content.json").read_text(encoding="utf-8"))
     assert snapshot == validated
     assert course.schema_version == 3
-    assert set(learner_manifest["readiness"]) == {
-        "route_id",
-        "summary",
-        "assumed",
-        "preparatory",
-    }
+    assert course.lesson_format == "tutorial-markdown-v1"
+    assert "readiness" not in learner_manifest
+    assert "audience" not in learner_manifest
+    assert "audience" not in author_manifest
+    assert content["lesson_format"] == "tutorial-markdown-v1"
+    assert all(
+        item["lesson_format"] == "tutorial-markdown-v1"
+        for item in [*content["preparatory_units"], *content["labs"]]
+    )
     assert [
         (unit["id"], unit["unit_type"], unit["graded"])
         for unit in learner_manifest["preparatory_units"]
@@ -213,6 +220,13 @@ def test_v3_split_source_compiles_independently_with_exact_parity_and_privacy(
     assert all(
         lab["unit_type"] == "lab" and lab["graded"] is True
         for lab in learner_manifest["labs"]
+    )
+    assert all(
+        "capability_ids" not in unit
+        for unit in learner_manifest["preparatory_units"]
+    )
+    assert all(
+        "capability_ids" not in unit for unit in content["preparatory_units"]
     )
     assert sentinel not in "\n".join(
         path.read_text(encoding="utf-8")
@@ -236,10 +250,100 @@ def test_v3_english_split_source_compiles_with_english_framework_copy(
     lesson = (output / "starter/lab00/README.md").read_text(encoding="utf-8")
     knowledge = json.loads((output / "knowledge.json").read_text(encoding="utf-8"))
     assert manifest["language"] == "en"
-    assert "## Prerequisites" in lesson
-    assert "Start with this mental model" in lesson
+    assert "## Build the mental model" in lesson
+    assert "## Trace one concrete value" in lesson
     assert "## 先修知识" not in lesson
     assert knowledge["title"].endswith("knowledge check")
+
+
+def test_v3_tutorial_format_requires_markdown_for_every_unit() -> None:
+    spec, plan = make_v3_spec_and_plan(missing_ids={"json-data-model"})
+    spec["preparatory_units"][1].pop("tutorial")
+
+    with pytest.raises(SpecValidationError, match="tutorial"):
+        validate_spec(spec, readiness_plan=plan)
+
+    spec, plan = make_v3_spec_and_plan()
+    spec["labs"][0]["tutorial"] = "   \n"
+    with pytest.raises(SpecValidationError, match="tutorial"):
+        validate_spec(spec, readiness_plan=plan)
+
+
+def test_v3_without_lesson_format_keeps_legacy_renderer(tmp_path: Path) -> None:
+    spec, plan = make_v3_spec_and_plan(language="en")
+    spec["course"].pop("lesson_format")
+    for unit in [*spec["preparatory_units"], *spec["labs"]]:
+        unit.pop("tutorial")
+    platform = tmp_path / "platform"
+    write_canonical_source(platform, validate_spec(spec, readiness_plan=plan))
+    output = platform / "course/compiled"
+
+    compile_course(platform / "course/source", output)
+
+    source = load_course_source(platform / "course/source")
+    content = json.loads((output / "content.json").read_text(encoding="utf-8"))
+    lesson = (output / "starter/lab00/README.md").read_text(encoding="utf-8")
+    assert source.lesson_format is None
+    assert "lesson_format" not in content
+    assert "## Prerequisites" in lesson
+
+
+def test_v3_tutorial_markdown_is_byte_stable_across_split_and_compile(
+    tmp_path: Path,
+) -> None:
+    spec, plan = make_v3_spec_and_plan()
+    tutorial = "# Exact bytes\n\nParagraph with  two spaces.  \n\n"
+    spec["preparatory_units"][0]["tutorial"] = tutorial
+    validated = validate_spec(spec, readiness_plan=plan)
+    platform = tmp_path / "platform"
+    write_canonical_source(platform, validated)
+    source = platform / "course/source"
+    output = platform / "course/compiled"
+
+    loaded = load_course_source(source)
+    compile_course(source, output)
+
+    split = source / "preparatory_units/lab00/tutorial.md"
+    content = json.loads((output / "content.json").read_text(encoding="utf-8"))
+    snapshot = json.loads(
+        (output / "authoring-spec.json").read_text(encoding="utf-8")
+    )
+    assert split.read_bytes() == tutorial.encode("utf-8")
+    assert loaded.preparatory_units[0].lesson == tutorial
+    assert content["preparatory_units"][0]["lesson"] == tutorial
+    assert (output / "starter/lab00/README.md").read_bytes() == tutorial.encode(
+        "utf-8"
+    )
+    assert snapshot["preparatory_units"][0]["tutorial"] == tutorial
+
+
+def test_v3_runtime_projections_do_not_publish_readiness_metadata(
+    tmp_path: Path,
+) -> None:
+    spec, plan = make_v3_spec_and_plan(missing_ids={"json-data-model"})
+    platform = tmp_path / "platform"
+    write_canonical_source(platform, validate_spec(spec, readiness_plan=plan))
+    output = platform / "course/compiled"
+    compile_course(platform / "course/source", output)
+
+    public_paths = [
+        output / "manifest.json",
+        output / "content.json",
+        output / "starter/manifest.json",
+        output / "starter/_course/content.json",
+    ]
+    public_text = "\n".join(path.read_text(encoding="utf-8") for path in public_paths)
+    for private_key in (
+        '"readiness"',
+        '"audience"',
+        '"route_id"',
+        '"readiness_summary"',
+        '"prerequisite_profile"',
+        '"capability_ids"',
+        '"decision"',
+        '"basis"',
+    ):
+        assert private_key not in public_text
 
 
 def test_v3_split_source_rejects_course_manifest_language_mismatch(

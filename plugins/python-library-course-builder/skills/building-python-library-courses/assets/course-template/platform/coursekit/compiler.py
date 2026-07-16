@@ -47,6 +47,7 @@ ARTIFACT_INDEX = Path(".coursekit-artifacts.json")
 IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 PREPARATORY_PATTERN = re.compile(r"^prep(?:0[1-9]|[1-9]\d+)$")
 READINESS_SUMMARY_PATTERN = re.compile(r"^[0-9a-f]{12}$")
+TUTORIAL_LESSON_FORMAT = "tutorial-markdown-v1"
 REQUIREMENT_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9._,-]+\])?"
     r"(?:(?:===|~=|==|!=|<=|>=|<|>)[A-Za-z0-9][A-Za-z0-9.*+!_-]*"
@@ -302,7 +303,7 @@ COURSE_SOURCE_COMMON_FIELDS = {
     "manifest",
     "research",
 }
-COURSE_SOURCE_OPTIONAL_FIELDS = {"knowledge_title"}
+COURSE_SOURCE_OPTIONAL_FIELDS = {"knowledge_title", "lesson_format"}
 COURSE_SOURCE_V2_FIELDS = COURSE_SOURCE_COMMON_FIELDS | {"foundations"}
 COURSE_SOURCE_V3_FIELDS = COURSE_SOURCE_COMMON_FIELDS | {
     "preparatory_order",
@@ -467,7 +468,7 @@ def _read_json(path: Path, *, label: str) -> dict[str, Any]:
 
 def _read_text(path: Path, *, label: str) -> str:
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except FileNotFoundError as error:
         raise SourceValidationError(f"missing {label}: {path}") from error
     tokens = unresolved_tokens(text)
@@ -1464,7 +1465,7 @@ def _validate_source_tree(root: Path) -> None:
             raise SourceValidationError(f"course source cannot contain symlink: {path}")
         if path.is_file():
             try:
-                tokens = unresolved_tokens(path.read_text())
+                tokens = unresolved_tokens(path.read_text(encoding="utf-8"))
             except UnicodeDecodeError:
                 continue
             if tokens:
@@ -2644,6 +2645,25 @@ def load_course_source(source_root: Path | str) -> CourseSource:
         COURSE_SOURCE_OPTIONAL_FIELDS,
         label="course.json",
     )
+    raw_lesson_format = course.get("lesson_format")
+    if schema_version == 2 and raw_lesson_format is not None:
+        raise SourceValidationError("schema v2 does not support course.lesson_format")
+    if raw_lesson_format is None:
+        lesson_format: str | None = None
+    elif raw_lesson_format == TUTORIAL_LESSON_FORMAT:
+        lesson_format = TUTORIAL_LESSON_FORMAT
+    else:
+        raise SourceValidationError(
+            f"course.lesson_format must be {TUTORIAL_LESSON_FORMAT!r} when present"
+        )
+    tutorial_mode = lesson_format == TUTORIAL_LESSON_FORMAT
+    if not tutorial_mode:
+        unexpected_tutorials = sorted(root.rglob("tutorial.md"))
+        if unexpected_tutorials:
+            raise SourceValidationError(
+                "legacy lesson sources cannot contain tutorial.md: "
+                f"{unexpected_tutorials[0]}"
+            )
     course_id = _text(course, "id", label="course")
     title = _text(course, "title", label="course")
     description = _text(course, "description", label="course")
@@ -2888,7 +2908,10 @@ def load_course_source(source_root: Path | str) -> CourseSource:
                 )
             payload = preparatory_registry[unit_id]
             _require_exact_fields(
-                payload, PREPARATORY_SOURCE_FIELDS, label=f"preparatory_units.{unit_id}"
+                payload,
+                PREPARATORY_SOURCE_FIELDS
+                | ({"tutorial"} if tutorial_mode else set()),
+                label=f"preparatory_units.{unit_id}",
             )
             if _text(payload, "id", label=unit_id) != unit_id:
                 raise SourceValidationError(
@@ -2969,6 +2992,24 @@ def load_course_source(source_root: Path | str) -> CourseSource:
                 source_ids=source_ids,
                 assessed=True,
             )
+            tutorial: str | None = None
+            if tutorial_mode:
+                tutorial_relative = _relative(
+                    _text(payload, "tutorial", label=unit_id),
+                    label=f"{unit_id} tutorial",
+                )
+                tutorial_path = root / tutorial_relative
+                if tutorial_path.parent != unit_root or tutorial_path.name != "tutorial.md":
+                    raise SourceValidationError(
+                        f"{unit_id} tutorial must be preparatory_units/{unit_id}/tutorial.md"
+                    )
+                tutorial = _read_text(
+                    tutorial_path, label=f"{unit_id} tutorial"
+                )
+                if not tutorial.strip():
+                    raise SourceValidationError(
+                        f"{unit_id} tutorial must be non-empty Markdown"
+                    )
             quiz_relative = _relative(
                 _text(payload, "quiz", label=unit_id),
                 label=f"{unit_id} quiz",
@@ -3002,14 +3043,18 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             practice_links = _derive_practice_links(
                 lesson_outline, quiz, kind="knowledge-check"
             )
-            lesson = _render_lesson(
-                title_value,
-                lesson_outline,
-                sources=source_map,
-                assessed=True,
-                study_minutes=payload["study_minutes"],
-                practice_links=practice_links,
-                language=language,
+            lesson = (
+                tutorial
+                if tutorial is not None
+                else _render_lesson(
+                    title_value,
+                    lesson_outline,
+                    sources=source_map,
+                    assessed=True,
+                    study_minutes=payload["study_minutes"],
+                    practice_links=practice_links,
+                    language=language,
+                )
             )
             declared_source_ids = tuple(
                 dict.fromkeys(
@@ -3070,6 +3115,11 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             raise SourceValidationError(f"labs must be ordered linearly as {expected_id}")
         lab_root = root / "labs" / _relative(lab_id, label="lab id")
         payload = _read_json(lab_root / "lab.json", label=f"{lab_id}/lab.json")
+        if ("tutorial" in payload) != tutorial_mode:
+            requirement = "requires" if tutorial_mode else "does not allow"
+            raise SourceValidationError(
+                f"{lab_id} {requirement} tutorial for course.lesson_format"
+            )
         _validate_lab_manifest(payload, label=lab_id)
         declared_id = _text(payload, "id", label=f"{lab_id}/lab.json")
         if declared_id != lab_id:
@@ -3111,6 +3161,22 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             source_ids=source_ids,
             assessed=assessed_profile is not None,
         )
+        tutorial: str | None = None
+        if tutorial_mode:
+            tutorial_relative = _relative(
+                _text(payload, "tutorial", label=lab_id),
+                label=f"{lab_id} tutorial",
+            )
+            tutorial_path = lab_root / tutorial_relative
+            if tutorial_path.parent != lab_root or tutorial_path.name != "tutorial.md":
+                raise SourceValidationError(
+                    f"{lab_id} tutorial must be {lab_id}/tutorial.md"
+                )
+            tutorial = _read_text(tutorial_path, label=f"{lab_id} tutorial")
+            if not tutorial.strip():
+                raise SourceValidationError(
+                    f"{lab_id} tutorial must be non-empty Markdown"
+                )
         declared_files: dict[str, tuple[ast.Module, ast.Module]] = {}
         declared_file_order: list[str] = []
         for file_index, raw_file in enumerate(
@@ -3190,14 +3256,20 @@ def load_course_source(source_root: Path | str) -> CourseSource:
             questions,
             kind="coding-question",
         )
-        lesson = _render_lesson(
-            _lab_lesson_title(lab_id, _text(payload, "title", label=lab_id)),
-            lesson_outline,
-            sources=source_map,
-            assessed=assessed_profile is not None,
-            study_minutes=payload.get("study_minutes"),
-            practice_links=practice_links,
-            language=language,
+        lesson = (
+            tutorial
+            if tutorial is not None
+            else _render_lesson(
+                _lab_lesson_title(
+                    lab_id, _text(payload, "title", label=lab_id)
+                ),
+                lesson_outline,
+                sources=source_map,
+                assessed=assessed_profile is not None,
+                study_minutes=payload.get("study_minutes"),
+                practice_links=practice_links,
+                language=language,
+            )
         )
 
         questions_by_id = {question.question_id: question for question in questions}
@@ -3475,6 +3547,7 @@ def load_course_source(source_root: Path | str) -> CourseSource:
         audience=audience,
         curriculum_id=curriculum_id,
         compatible_curriculum_ids=compatible,
+        lesson_format=lesson_format,
         language=language,
         python_requires=_python_requires(course),
         size=size,
@@ -3643,37 +3716,23 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
             "curriculum_id": course.curriculum_id,
             "compatible_curriculum_ids": list(course.compatible_curriculum_ids),
             "language": course.language,
-            "audience": (
-                _project_audience(course.audience)
-                if learner
-                else copy.deepcopy(course.audience)
-            ),
             "content": "content.json" if not learner else "_course/content.json",
             "extensions": list(course.extensions),
             "total_points": course.total_points,
             "labs": labs,
         }
     )
-    profile = course.audience.get("prerequisite_profile")
-    if course.audience.get("level") == "assessed" and isinstance(profile, dict):
-        capabilities = profile.get("capabilities", [])
-        if course.schema_version == 3:
-            base["readiness"] = {
-                "route_id": str(profile["route_id"]),
-                "summary": str(profile["readiness_summary"]),
-                "assumed": [
-                    str(item["title"])
-                    for item in capabilities
-                    if isinstance(item, dict) and item.get("decision") == "assume"
-                ],
-                "preparatory": [
-                    str(item["title"])
-                    for item in capabilities
-                    if isinstance(item, dict)
-                    and item.get("decision") == "preparatory"
-                ],
-            }
-        else:
+    if course.schema_version == 2:
+        base["audience"] = (
+            _project_audience(course.audience)
+            if learner
+            else copy.deepcopy(course.audience)
+        )
+        profile = course.audience.get("prerequisite_profile")
+        if course.audience.get("level") == "assessed" and isinstance(
+            profile, dict
+        ):
+            capabilities = profile.get("capabilities", [])
             base["readiness"] = {
                 "assumed": [
                     str(item["title"])
@@ -3683,9 +3742,12 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
                 "foundation": [
                     str(item["title"])
                     for item in capabilities
-                    if isinstance(item, dict) and item.get("decision") == "foundation"
+                    if isinstance(item, dict)
+                    and item.get("decision") == "foundation"
                 ],
             }
+    else:
+        base.pop("audience", None)
     if "python" not in base:
         base["python_requires"] = course.python_requires
     if "capstone" not in base:
@@ -3767,7 +3829,6 @@ def _manifest(course: CourseSource, *, learner: bool = False) -> dict[str, Any]:
                     "category": unit.category,
                     "dag_level": unit.dag_level,
                     "depends_on": unit.depends_on,
-                    "capability_ids": list(unit.capability_ids),
                     "graded": False,
                     "directory": unit.unit_id,
                     "readme": f"{unit.unit_id}/README.md",
@@ -3928,7 +3989,8 @@ def _project_course_manifest(
         **{key: manifest[key] for key in COURSE_MANIFEST_TEXT_FIELDS},
         **{key: manifest[key] for key in COURSE_MANIFEST_PATH_FIELDS},
     }
-    projected["audience"] = _project_audience(manifest["audience"])
+    if schema_version == 2:
+        projected["audience"] = _project_audience(manifest["audience"])
     projected["capstone"] = {
         "name": manifest["capstone"]["name"],
         "description": manifest["capstone"]["description"],
@@ -4131,7 +4193,6 @@ def _content(course: CourseSource) -> dict[str, Any]:
                 "category": unit.category,
                 "dag_level": unit.dag_level,
                 "depends_on": unit.depends_on,
-                "capability_ids": list(unit.capability_ids),
                 "lesson": unit.lesson,
                 "lesson_outline": _project_lesson_outline(
                     unit.lesson_outline, assessed=True
@@ -4143,6 +4204,8 @@ def _content(course: CourseSource) -> dict[str, Any]:
                     unit.raw["study_minutes"]
                 ),
             }
+            if course.lesson_format is not None:
+                payload["lesson_format"] = course.lesson_format
             links = _derive_practice_links(
                 unit.lesson_outline, unit.quiz, kind="knowledge-check"
             )
@@ -4163,6 +4226,8 @@ def _content(course: CourseSource) -> dict[str, Any]:
             "concepts": list(lab.concepts),
             "capstone_increment": lab.capstone_increment,
         }
+        if course.lesson_format is not None:
+            payload["lesson_format"] = course.lesson_format
         if "study_minutes" in lab.raw:
             payload["study_minutes"] = _project_study_minutes(
                 lab.raw["study_minutes"]
@@ -4181,6 +4246,8 @@ def _content(course: CourseSource) -> dict[str, Any]:
         "course_id": course.course_id,
         "labs": labs,
     }
+    if course.lesson_format is not None:
+        result["lesson_format"] = course.lesson_format
     if foundation is not None:
         result["foundations"] = foundation
     else:
@@ -4225,6 +4292,8 @@ def _authoring_spec(course: CourseSource) -> dict[str, Any]:
             "audience",
         )
     }
+    if course.lesson_format is not None:
+        course_payload["lesson_format"] = course.lesson_format
     labs: list[dict[str, Any]] = []
     for lab in course.labs:
         files = []
@@ -4273,6 +4342,8 @@ def _authoring_spec(course: CourseSource) -> dict[str, Any]:
             "quiz": [copy.deepcopy(question) for question in lab.quiz],
             "module_cycle": copy.deepcopy(lab.raw["module_cycle"]),
         }
+        if course.lesson_format is not None:
+            payload["tutorial"] = lab.lesson
         if "study_minutes" in lab.raw:
             payload["study_minutes"] = copy.deepcopy(lab.raw["study_minutes"])
         if "official_bridge" in lab.raw:
@@ -4309,6 +4380,11 @@ def _authoring_spec(course: CourseSource) -> dict[str, Any]:
                 "study_minutes": copy.deepcopy(unit.raw["study_minutes"]),
                 "title": unit.title,
                 "lesson": copy.deepcopy(unit.lesson_outline),
+                **(
+                    {"tutorial": unit.lesson}
+                    if course.lesson_format is not None
+                    else {}
+                ),
                 "quiz": [copy.deepcopy(question) for question in unit.quiz],
             }
             for unit in course.preparatory_units
@@ -4364,7 +4440,9 @@ def _build_tree(course: CourseSource, root: Path) -> None:
         foundation_id = str(course.foundations["id"])
         foundation = root / "starter" / foundation_id
         foundation.mkdir(parents=True)
-        (foundation / "README.md").write_text(course.foundation_lesson)
+        (foundation / "README.md").write_bytes(
+            course.foundation_lesson.encode("utf-8")
+        )
         _copy_lesson_examples(
             course.root / "foundations",
             course.foundation_lesson_outline,
@@ -4374,7 +4452,7 @@ def _build_tree(course: CourseSource, root: Path) -> None:
         for unit in course.preparatory_units:
             destination = root / "starter" / unit.unit_id
             destination.mkdir(parents=True)
-            (destination / "README.md").write_text(unit.lesson)
+            (destination / "README.md").write_bytes(unit.lesson.encode("utf-8"))
             _copy_lesson_examples(
                 unit.root, unit.lesson_outline, destination
             )
@@ -4388,7 +4466,7 @@ def _build_tree(course: CourseSource, root: Path) -> None:
         _copy_tree_contents(lab.root / "tests/hidden", root / "tests/hidden")
         readme = root / "starter" / lab.lab_id / "README.md"
         readme.parent.mkdir(parents=True, exist_ok=True)
-        readme.write_text(lab.lesson)
+        readme.write_bytes(lab.lesson.encode("utf-8"))
         _copy_lesson_examples(lab.root, lab.lesson_outline, root / "starter" / lab.lab_id)
 
     (root / "starter/manifest.json").write_bytes(
