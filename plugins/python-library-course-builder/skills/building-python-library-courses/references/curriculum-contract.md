@@ -179,6 +179,8 @@ New Skill-authored schema-v3 specifications set `course.lesson_format` to exactl
 
 The structured `lesson` remains a required sidecar. It is the deterministic source for concept/outcome IDs, operational contracts, official-source claims, activity mappings, traces, and semantic validation. It supports the chapter guide and terminology index, but Web presentation must not turn it back into the primary fixed card sequence when authored tutorial Markdown is present.
 
+Except `lab00`, every `prepNN` and graded `labNN` tutorial also explains the existing concept through an architecture and design lens after trace/boundary diagnosis and before practice. Using only existing lesson fields, cover the component responsibility and dependency direction, caller/implementer boundary, the same value's data or control flow, one credible alternative, the selected design's benefits and tradeoffs, its applicability boundary, and a concrete revisit condition. Keep this on the same knowledge mainline in subject-driven prose; add no schema fields, concept IDs, outcomes, activities, or points.
+
 Schema v2 and existing schema-v3 sources that omit `course.lesson_format` and unit `tutorial` remain compatibility inputs. They use the legacy structured Markdown renderer. Do not silently relabel a legacy lesson as `tutorial-markdown-v1`.
 
 Every `lab00`, `prepNN`, and formal Lab uses the same structured `lesson` object:

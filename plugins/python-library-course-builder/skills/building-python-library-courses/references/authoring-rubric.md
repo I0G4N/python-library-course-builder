@@ -54,6 +54,8 @@ For every graded chapter, make the deeper teaching route inspectable as: **proje
 
 Write `tutorial` as connected, textbook-style Markdown in the selected `zh-CN` or `en` locale. Define every professional term at first use, immediately connect it to the current task, transition into a concrete value, and explain why the value changes before introducing the next structure. Reject mixed-locale prose, silent fallback, a rigid author-field inventory, repeated boilerplate headings, or thin prose padded to meet a word count. Keep the structured `lesson` as a validation sidecar whose facts and mappings agree with the tutorial; do not make its schema the learner-facing presentation.
 
+Except `lab00`, every `prepNN` and graded `labNN` tutorial adds a subject-driven architecture and design lens after trace/boundary diagnosis and before practice. It must explain component responsibility and dependency direction, the caller/implementer boundary, the same value's data or control flow, one credible alternative, the chosen design's benefits and tradeoffs, its applicability boundary, and a concrete revisit condition. Keep it on the same knowledge mainline and reuse existing sidecar fields; reject new design-only schema fields, IDs, outcomes, activities, or points.
+
 For every concept, check that the structured lesson answers:
 
 - What is the object or operation, in precise plain language?

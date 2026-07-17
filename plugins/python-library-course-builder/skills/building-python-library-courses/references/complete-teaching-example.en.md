@@ -263,6 +263,24 @@ uses a valid Boolean value, and the JSON input now parses to a top-level
 dictionary. Neither witness stops immediately after replacing the bad input;
 both inspect the `enabled` value the route actually needs.
 
+#### From external text to the settings consumer: who owns what
+
+Here, an **interface** is the observable input, output, and failure boundary
+between two components, not a new class or protocol. The caller's
+responsibility is to retain the original JSON text and decide when to retry.
+The parsing boundary creates a Python value, the object check admits only a
+dictionary, and the dictionary consumer only reads named settings that have
+passed that check. The dependency direction stays one-way: the consumer uses a
+validated dictionary and does not interpret JSON notation itself.
+
+The graded chapter will centralize parsing plus the top-level-object check in
+`load_settings`. A credible alternative is to call `json.loads` and check
+`dict` inline in a one-call-site script. Centralization has the benefit of one
+output and failure contract for multiple callers; its cost is one project
+function and an extra hop. It is applicable while consumers share the same
+top-level-shape rule. Revisit the boundary if different entrances accept
+different shapes or field-level validation becomes the primary responsibility.
+
 ## Graded chapter: turn JSON text into validated settings
 
 This chapter keeps exactly one new knowledge mainline: implement and use
@@ -451,6 +469,37 @@ TypeError: top-level JSON must be an object
 The recovered observable is `{'enabled': False}`. It preserves the intended
 disabled state and changes only the top-level shape that violated the project
 contract.
+
+### Why centralize the boundary in `load_settings`
+
+`load_settings(text: str) -> dict[str, Any]` is the caller/implementer
+interface. The caller promises JSON text; the implementation promises either a
+dictionary that passed the top-level-object check or one of the already
+observed exceptions. The component data flow is:
+
+```text
+caller -> load_settings: JSON text
+load_settings -> json.loads: the same text
+json.loads -> load_settings: parsed Python value
+load_settings -> dict consumer: dictionary that passed the object check
+```
+
+That direction separates responsibility. The caller retains the text and
+chooses recovery or retry. `json.loads` owns JSON syntax only.
+`load_settings` owns this project's top-level-object rule. The dictionary
+consumer reads keys such as `enabled` and never reparses text. The credible
+alternative is for every call site to perform its own `json.loads` call and
+type check. It is direct in a single short script, but multiple call sites can
+drift into different accepted shapes and exceptions.
+
+The benefit of the centralized boundary is one dependency direction, an
+independently testable contract, and shared recovery semantics. The cost is an
+extra call layer, and the interface guarantees only a dictionary—not required
+keys or field types. It is applicable to this capstone's shared object
+boundary. Revisit the choice when the project gains multiple configuration
+shapes, defaults, or migrations; a schema validator or separate entrances may
+then be clearer. That future decision does not add a second knowledge mainline
+to this chapter.
 
 ### Knowledge check
 

@@ -6,6 +6,7 @@ This rubric is the required acceptance gate for a **local generated project**. G
 
 - [Required fail-closed negative tests](#required-fail-closed-negative-tests)
 - [Required authoring workflow evidence](#required-authoring-workflow-evidence)
+- [Required existing-course update matrix](#required-existing-course-update-matrix)
 - [Required generated-project acceptance matrix](#required-generated-project-acceptance-matrix)
 - [Repository quality](#repository-quality)
 
@@ -20,6 +21,11 @@ Verify all of these separately:
 - an unselected large-target specification is rejected before destination creation;
 - check/validation mode does not mutate source or output;
 - an induced replacement failure leaves the prior generated output byte-for-byte intact.
+- generated-course `check` changes no course byte, Git ref, or progress state;
+- version/hash drift without an unapplied `course_impacting` migration is a no-op;
+- a tampered plan digest or any managed, learner, unknown, source, or state change after `check` blocks `apply`;
+- a missing/forged legacy baseline, managed hash collision, unsafe path, symlink, missing stop confirmation, unresolved merge, or shadow verification failure blocks all course writes; and
+- an identity-changing update without explicit reset acceptance leaves active progress and its course byte-for-byte intact.
 
 ## Required authoring workflow evidence
 
@@ -33,6 +39,23 @@ For a real Skill-authored course, retain an author-side orchestration trace unti
 - if clean subagents cannot be launched, authoring stops instead of silently composing all chapters in the parent context.
 
 This is an observed workflow contract, not comparative scoring between agents or outputs. Generated-project tests validate the assembled artifacts; they cannot prove which context authored them.
+
+## Required existing-course update matrix
+
+Exercise the updater against copied fixtures; never use a learner's only course artifact.
+
+- fresh scaffolding records closed, deterministic `platform/coursekit-generation.json` before its generated Git baseline, with correct plugin/Skill/course identity, applied migration IDs, managed roles, and hashes;
+- an explicit existing-course path reads and locks its canonical language and pinned target without asking the fresh-course language question;
+- provenance-backed courses and real v0.1.0, v0.1.1, and v0.2.0 generated-root fixtures select only applicable unapplied registry IDs; unverifiable origins stop;
+- `check` reports managed `template`, `compiled`, and `workspace-runtime` operations plus `protected`, `author-source`, `unknown`, and `state` preservation without mutating the course;
+- apply rebinds the reviewed digest, rebuilds the candidate in a sibling shadow, passes compiler/provenance integrity plus the complete `scripts/verify_learning_project.py` acceptance flow on a pristine prepared snapshot, and only then starts the transaction;
+- unchanged managed files advance, clean three-way text merges retain compatible local edits, and unresolved conflicts produce zero target writes;
+- learner-editable code, canonical source unless explicitly supplied, unknown files, unchanged progress, Git HEAD, and every ref remain byte-for-byte unchanged;
+- content migrations supply reviewed canonical source; legacy structured v3 lessons gain `tutorial-markdown-v1` and the architecture/interface lens without changing locale, target, or formal identity;
+- v2-to-v3 uses current evidence readiness, retains formal Lab code/IDs where possible, reports identity change, archives exact state before reset, and requires `--accept-progress-reset`;
+- an injected failure after a real replacement restores the entire pre-apply tree, including empty-directory shape, while leaving Git refs untouched;
+- successful provenance lists the applied IDs, and repeated `check` plus `apply` returns `up_to_date` with no writes; and
+- no step scans for other courses, changes the empty-only scaffolder, commits/tags Git, or installs/upgrades a Skill, plugin, target, or course locale.
 
 ## Required generated-project acceptance matrix
 

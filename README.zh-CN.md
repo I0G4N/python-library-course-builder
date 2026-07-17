@@ -59,6 +59,8 @@
 
 最终的 Markdown 会根据本章内容自然组织，像教程或教科书一样循序渐进；结构化 lesson sidecar 继续保存来源声明、操作契约、trace 和活动映射，以支持确定性校验。质量门槛看的是解释是否连贯、具体值是否走完整、术语是否首次定义、边界和练习是否对齐，而不是固定标题模板或机械字数。
 
+在不改变这套内容模型的前提下，未来生成的每个 `prepNN` 和正式 `labNN` 讲义还会解释本章主线中已有的架构：组件职责、依赖方向与数据/控制流、调用者/实现者接口、所选设计与可信备选方案、优缺点，以及该选择何时适用、何时应重新评估。`lab00` 仍只负责学习流程导览；这层设计讲解不会新增 schema 字段、活动或分值。
+
 ## 从 Lab 00 到 capstone，一路只造一个东西
 
 路线在机制的小型教学等价实现和目标库官方 API 的计分 bridge 之间交替。后续 Labs 对已学能力使用官方 API，因此课程最终形成一个集成项目，而不是一组孤立练习。
@@ -131,6 +133,32 @@ cd /path/to/generated-course
 npm run setup
 npm run learn
 ```
+
+## 更新早期版本生成的课程
+
+向 Skill 明确提供一个现有课程路径，即可进入更新模式：
+
+```text
+使用 $building-python-library-courses 更新 /path/to/course 中现有的生成课程。
+```
+
+现有 canonical source 决定课程语言和已固定的目标库版本，因此这条路线不会再次询问新建课程的语言，也不会静默更改这两个值；它更不会扫描其他目录。只有闭合 migration registry 中尚未应用且 `course_impacting` 为 true 的条目会触发更新，plugin、Skill、template、bundle 或版本摘要本身的变化不会触发。
+
+工作流先在课程目录外生成一份只读检查计划：
+
+```bash
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/update_course.py" check /path/to/course --json /tmp/course-update-plan.json
+```
+
+若包含内容迁移，Skill 会遵守与新建课程相同的 readiness、clean-writer、assembly 和 review 契约，研究并生成临时 canonical-source candidate，再带上 `--candidate-source /tmp/course-source` 重新运行 `check`。审阅计划并停止课程服务后，应用同一个 candidate：
+
+```bash
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/update_course.py" apply /path/to/course --plan /tmp/course-update-plan.json --candidate-source /tmp/course-source --confirm-stopped --json /tmp/course-update-result.json
+```
+
+更新器支持带 provenance 的课程，以及能验证生成 Git baseline 的 v0.1.0 及以后课程。它会暂存并验证当前格式的 shadow，保留学习者文件、未知 helper、兼容的本地修改、进度和 Git 历史，并最后发布新 provenance。冲突、过期计划、无效 baseline、symlink 或替换故障都会让课程保持不变。schema v2 到 v3 必须提供重新完成 evidence readiness 后的 candidate，并显式加入 `--accept-progress-reset`；active progress 重置前会先逐字节归档原状态。
+
+这个流程修改现有课程，而不是重新 scaffold 一份替代品；它不会自动 commit，不会改变目标依赖版本，也不会安装或升级 plugin/Skill。
 
 ## 仓库结构
 

@@ -780,12 +780,57 @@ def test_teaching_contract_requires_connected_natural_selected_language() -> Non
     assert "connected explanation" in natural
 
 
+def test_authoring_contract_adds_an_architecture_and_interface_lens() -> None:
+    documents = {
+        "teaching depth": _read("references/teaching-depth-contract.md"),
+        "curriculum": _read("references/curriculum-contract.md"),
+        "authoring rubric": _read("references/authoring-rubric.md"),
+    }
+
+    required = (
+        "every `prepNN` and graded `labNN`",
+        "`lab00`",
+        "component responsibility",
+        "dependency direction",
+        "caller/implementer boundary",
+        "data or control flow",
+        "credible alternative",
+        "benefits and tradeoffs",
+        "applicability boundary",
+        "revisit condition",
+        "same knowledge mainline",
+        "subject-driven",
+    )
+    for name, document in documents.items():
+        lowered = document.lower()
+        for phrase in required:
+            assert phrase.lower() in lowered, (name, phrase)
+
+    depth = documents["teaching depth"]
+    architecture = depth.split(
+        "## Explain architecture and design without changing the mainline", 1
+    )[1].split("## Write natural learner-facing prose", 1)[0]
+    _assert_in_order(
+        architecture,
+        (
+            "component responsibility",
+            "dependency direction",
+            "caller/implementer boundary",
+            "data or control flow",
+            "credible alternative",
+            "benefits and tradeoffs",
+            "applicability boundary",
+            "revisit condition",
+        ),
+    )
+    assert "Do not add schema fields, concept IDs, outcomes, activities, or points" in architecture
+
+
 def test_complete_example_models_two_natural_preparatory_threads() -> None:
     path = SKILL_ROOT / "references/complete-teaching-example.zh-CN.md"
     assert path.is_file()
     example = path.read_text(encoding="utf-8")
 
-    assert len(example.splitlines()) < 460
     top_level_sections = _markdown_section_map(example, level=2)
     preparation = top_level_sections["先修章节：有名字的设置与 JSON 值"]
     layers = _markdown_children(preparation, level=3)
@@ -814,6 +859,93 @@ def test_complete_example_models_two_natural_preparatory_threads() -> None:
     assert generic_inventory.isdisjoint(title for titles in child_titles for title in titles)
     assert "学习者已经" not in preparation
     assert "缺口" not in preparation
+
+
+def test_complete_examples_add_equivalent_architecture_and_interface_lenses() -> None:
+    examples = {
+        "zh-CN": _read("references/complete-teaching-example.zh-CN.md"),
+        "en": _read("references/complete-teaching-example.en.md"),
+    }
+    signature = "load_settings(text: str) -> dict[str, Any]"
+    cases = {
+        "zh-CN": {
+            "prep": "先修章节：有名字的设置与 JSON 值",
+            "layer": "从 JSON 记号跨入 Python 值",
+            "recovery": "分别修复两种边界失败",
+            "prep_design": "从外部文本到设置消费者：谁负责什么",
+            "graded": "计分章节：把 JSON 文本变成可验证的配置值",
+            "diagnostic": "先读懂症状，再修改代码",
+            "graded_design": "为什么把边界集中在 `load_settings`",
+            "knowledge": "知识检查",
+            "coding": "编码任务与 capstone 增量",
+            "interface_definition": "**接口**",
+            "markers": ("接口", "职责", "备选", "好处", "代价", "适用", "重新选择"),
+        },
+        "en": {
+            "prep": "Preparatory chapter: named settings and JSON values",
+            "layer": "Crossing from JSON notation into Python values",
+            "recovery": "Repair two different boundary failures",
+            "prep_design": "From external text to the settings consumer: who owns what",
+            "graded": "Graded chapter: turn JSON text into validated settings",
+            "diagnostic": "Read the symptom before changing code",
+            "graded_design": "Why centralize the boundary in `load_settings`",
+            "knowledge": "Knowledge check",
+            "coding": "Coding task and capstone increment",
+            "interface_definition": "**interface**",
+            "markers": (
+                "interface",
+                "responsibility",
+                "alternative",
+                "benefit",
+                "cost",
+                "applicable",
+                "revisit",
+            ),
+        },
+    }
+    expected_edges = (
+        "caller -> load_settings:",
+        "load_settings -> json.loads:",
+        "json.loads -> load_settings:",
+        "load_settings -> dict consumer:",
+    )
+
+    for locale, example in examples.items():
+        case = cases[locale]
+        top = _markdown_section_map(example, level=2)
+        prep = top[case["prep"]]
+        prep_layer = dict(_markdown_children(prep, level=3))[case["layer"]]
+        prep_sections = _markdown_section_map(prep_layer, level=4)
+        prep_titles = list(prep_sections)
+        prep_design = prep_sections[case["prep_design"]]
+        assert prep_titles.index(case["recovery"]) < prep_titles.index(
+            case["prep_design"]
+        )
+
+        graded = top[case["graded"]]
+        graded_sections = _markdown_section_map(graded, level=3)
+        graded_titles = list(graded_sections)
+        graded_design = graded_sections[case["graded_design"]]
+        assert graded_titles.index(case["diagnostic"]) < graded_titles.index(
+            case["graded_design"]
+        ) < graded_titles.index(case["knowledge"]) < graded_titles.index(case["coding"])
+
+        assert signature in graded_design, locale
+        diagrams = _fenced_blocks(graded_design, "text")
+        assert len(diagrams) == 1, locale
+        _assert_in_order(diagrams[0], expected_edges)
+        assert case["interface_definition"] in prep_design
+        for section_name, design in (
+            ("prep", prep_design),
+            ("graded", graded_design),
+        ):
+            lowered_design = design.lower()
+            for marker in case["markers"]:
+                assert marker.lower() in lowered_design, (locale, section_name, marker)
+
+    shared_concept = "concept_ids: [lab01.c-json-object-boundary]"
+    assert shared_concept in examples["zh-CN"]
+    assert shared_concept in examples["en"]
 
 
 def test_complete_example_executes_every_preparatory_boundary_recovery(

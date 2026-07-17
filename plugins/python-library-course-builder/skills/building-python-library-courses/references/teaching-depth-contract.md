@@ -14,6 +14,7 @@ Use the [complete teaching example index](complete-teaching-example.md) to open 
 - [Close the operational contract](#close-the-operational-contract)
 - [Carry one value through the trace](#carry-one-value-through-the-trace)
 - [Prove every declared boundary end to end](#prove-every-declared-boundary-end-to-end)
+- [Explain architecture and design without changing the mainline](#explain-architecture-and-design-without-changing-the-mainline)
 - [Write natural learner-facing prose](#write-natural-learner-facing-prose)
 - [Adapt the recipe to the concept kind](#adapt-the-recipe-to-the-concept-kind)
 - [Align every activity](#align-every-activity)
@@ -73,8 +74,9 @@ Make this conceptual progression discoverable in every orientation, prep, and gr
 4. **complete real-value execution trace** — carry one input or state through the mechanism;
 5. **boundary and error reasoning** — connect an invalid case to its symptom, cause, and recovery;
 6. **runnable and diagnostic examples** — make both paths executable or directly inspectable;
-7. **knowledge check** — ask for a trace prediction and a diagnosis;
-8. **coding or capstone increment** — make the learner apply the same concept to the cumulative product.
+7. **architecture and design lens** — for `prepNN` and graded `labNN`, explain where the same mechanism sits, which interface it owns, and why this design was selected;
+8. **knowledge check** — ask for a trace prediction and a diagnosis;
+9. **coding or capstone increment** — make the learner apply the same concept to the cumulative product.
 
 Keep one new knowledge mainline per graded Lab. Lab 02+ may open with the previous mechanism's official bridge, but the bridge is reinforcement and replacement, not permission to add a second unrelated mainline. These items are authoring coverage, not a mandatory series of identical headings. Let the subject determine section boundaries and transitions.
 
@@ -136,6 +138,21 @@ For each declared `failure_modes` entry and each independently stated boundary, 
 5. Keep that condition, observable, and recovery identical across the prose contract, runnable or diagnostic code, expected output, diagnostic quiz and, for graded concepts, the coding prompt plus public and hidden tests.
 
 Reject delivery when a declared failure or boundary is merely listed but its counterexample and recovery are not implemented and exercised on every applicable activity and test surface.
+
+## Explain architecture and design without changing the mainline
+
+Except `lab00`, every `prepNN` and graded `labNN` tutorial adds a design lens after the concrete trace and boundary diagnosis but before the knowledge check or coding task. Keep it on the **same knowledge mainline** and express it through subject-driven prose rather than a fixed heading inventory.
+
+Use the existing concept, `operational_contract`, trace, and `capstone_bridge` facts to explain, in this order:
+
+1. the **component responsibility** in the cumulative product and the **dependency direction** to the upstream producer and downstream consumer;
+2. the **caller/implementer boundary**: visible call or state form, inputs, outputs, ownership, effects, failures, and version/source boundary;
+3. the same concrete value's **data or control flow** across those responsibilities;
+4. one **credible alternative**, what it would move or combine, and why the selected design fits this route better;
+5. the selected design's **benefits and tradeoffs**, including the important invariant or cost;
+6. its **applicability boundary** and one concrete **revisit condition** that would make the alternative preferable.
+
+Do not add schema fields, concept IDs, outcomes, activities, or points for this lens. Do not speculate about undocumented internals or introduce a second capstone feature. The architecture explanation must clarify the already tested behavior and cite public guarantees or version-pinned implementation observations through the existing source claims.
 
 ## Write natural learner-facing prose
 

@@ -59,6 +59,8 @@ Each writer returns an isolated tutorial fragment. A deterministic assembler req
 
 The result is authored Markdown whose structure follows the subject like a tutorial or textbook, while a structured lesson sidecar continues to carry source claims, operational contracts, traces, and activity mappings for deterministic validation. Quality is judged by explanatory continuity, concrete values, term definitions, boundary reasoning, and aligned practice—not by a rigid heading template or word-count quota.
 
+Without changing that content model, every future `prepNN` and graded `labNN` tutorial also explains the architecture already present in its mainline: component responsibilities, dependency and data/control flow, the caller/implementer interface, the chosen design versus a credible alternative, benefits and tradeoffs, and when the choice applies or should be revisited. `lab00` remains a workflow orientation, and this added design lens introduces no new schema fields, activities, or points.
+
 ## From Lab 00 to capstone, build one thing
 
 The route alternates between a small teaching-equivalent of a mechanism and a graded bridge to the target library's official API. Later Labs use the official API for capabilities already learned, so the course becomes one integrated project rather than a collection of isolated exercises.
@@ -131,6 +133,32 @@ cd /path/to/generated-course
 npm run setup
 npm run learn
 ```
+
+## Update an earlier generated course
+
+Give the Skill one explicit existing-course path to enter update mode:
+
+```text
+Use $building-python-library-courses to update the existing generated course at /path/to/course.
+```
+
+The existing canonical source fixes the course language and pinned target version, so this route does not ask the fresh-course language question or silently change either value. It never scans for other courses. Only an unapplied entry in the closed migration registry whose `course_impacting` field is true triggers an update; plugin, Skill, template, bundle, or version drift by itself does not.
+
+The workflow first creates a read-only plan outside the course:
+
+```bash
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/update_course.py" check /path/to/course --json /tmp/course-update-plan.json
+```
+
+For a content migration, the Skill researches and authors a temporary canonical-source candidate under the same readiness, clean-writer, assembly, and review rules as course creation, then reruns `check` with `--candidate-source /tmp/course-source`. After reviewing the plan and stopping course services, apply that same candidate:
+
+```bash
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/update_course.py" apply /path/to/course --plan /tmp/course-update-plan.json --candidate-source /tmp/course-source --confirm-stopped --json /tmp/course-update-result.json
+```
+
+The updater supports provenance-backed courses and verifiable generated Git baselines from v0.1.0 onward. It stages and verifies a current-format shadow, preserves learner files, unknown helpers, compatible local edits, progress, and Git history, and publishes new provenance last. A conflict, stale plan, invalid baseline, symlink, or replacement failure leaves the course unchanged. Schema-v2 to v3 migration requires a new evidence-readiness candidate and explicit `--accept-progress-reset`; the exact prior state is archived before active progress resets.
+
+This modifies the existing course rather than scaffolding a replacement. It does not auto-commit, change the target dependency version, or install/upgrade the plugin or Skill.
 
 ## Repository layout
 

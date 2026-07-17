@@ -34,6 +34,19 @@ Complete this checklist from a clean checkout before publishing a version.
 - [ ] Browser checks at 1440x900, 1024x700, 900x700, and 390x844 confirm focus reading before the knowledge gate, no Code/Result or file request while locked, and the resizable workspace after unlock.
 - [ ] A broad target stops at the track-selection gate before writing files.
 
+## Existing-course updates
+
+- [ ] Provenance and migration-registry schemas are closed and deterministic, and fresh scaffolding records provenance before its generated Git baseline.
+- [ ] Plugin/Skill/version/hash drift without an applicable unapplied `course_impacting` migration returns `up_to_date` without writes.
+- [ ] Real generated fixtures from v0.1.0, v0.1.1, and v0.2.0 pass legacy baseline adoption; unverifiable roots fail closed.
+- [ ] `check` changes no course byte, progress state, Git commit, or ref, and its digest detects later managed, learner, source, unknown, and state changes.
+- [ ] Managed conflict, stale plan, symlink, stopped-service refusal, shadow verification failure, and injected replacement failure each leave the complete course byte-for-byte unchanged.
+- [ ] Apply preserves learner-editable code, unknown helpers, Git history, fixed locale/target, and identity-compatible progress while updating only declared managed/source paths.
+- [ ] Content migration converts legacy tutorials and adds the architecture/interface lens through a reviewed candidate rather than whole-course regeneration.
+- [ ] Schema-v2 to v3 migration uses current readiness evidence, preserves formal Lab code/IDs where possible, archives exact state, and requires explicit reset acceptance.
+- [ ] Repeated check/apply is idempotent, and the updated pristine project passes the complete verifier.
+- [ ] Skill, architecture, forward rubric, changelog, and bilingual README files describe the same explicit-path update contract.
+
 ## Hosted GitHub settings and public verification
 
 - [ ] The public repository exists at `https://github.com/I0G4N/python-library-course-builder`, and the repository, website, and `https://github.com/I0G4N/python-library-course-builder#readme` URLs resolve to it.

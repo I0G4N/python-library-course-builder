@@ -34,7 +34,8 @@ The parent author fixes these values before launching any writer:
 - each graded Lab's starter/reference code, public and hidden tests, files, points, and cumulative capstone increment;
 - dependencies, one-mainline boundary, teaching-equivalent module cycle, official bridge, target symbols, lower-level primitives, and anti-delegation rules;
 - runnable examples that must agree with the code and tests; and
-- the exact operational behavior and boundary witnesses the chapter must explain.
+- the exact operational behavior and boundary witnesses the chapter must explain; and
+- for every `prepNN` and `labNN`, the component role, dependencies, interface ownership, selected design, credible alternative, and applicability/revisit boundary that deepen the existing mainline. `lab00` is exempt.
 
 Create a lock manifest for the assembler. The manifest orders every expected unit and records the complete JSON Pointer/value set for identity, discriminator, and mapping fields inside the writer-owned `lesson` and `quiz` payloads. A required pointer is any field named `id` or `kind`, or whose name ends in `_id` or `_ids`. This covers concept, outcome, prerequisite, example, trace, question, and choice identities; source and activity mappings; quiz kinds; and the correct-choice mapping. The expected-unit entry itself binds `unit_id`, so do not repeat it as a pointer. Everything outside `tutorial`, `lesson`, and `quiz` remains parent-owned by construction.
 
@@ -47,6 +48,7 @@ Create a new packet for each unit. Include only what that writer needs:
 - unit ID, locale, title, role in the cumulative route, and the previous/next chapter handoff;
 - the locked concept, outcome, example, and knowledge-check IDs plus their required mappings;
 - the fixed operational contract, concrete trace values, boundary witnesses, code behavior, expected outputs, and capstone increment;
+- for each non-orientation unit, the fixed **component responsibility and dependency direction**, **caller/implementer boundary**, concrete data/control flow, **credible alternative**, choice reason, benefits/tradeoffs, and **applicability boundary and revisit condition**;
 - only the official source excerpts or source facts needed for that chapter, with titles, URLs, version boundary, and guarantee-versus-implementation labels; and
 - the required fragment schema and relevant teaching-depth rules.
 
@@ -64,6 +66,8 @@ A writer prompt should say, in substance:
 
 > Write only the assigned unit from the attached packet. Preserve every locked ID and declared observable. Return exactly `unit_id`, `tutorial`, `lesson`, and `quiz`. Write the tutorial as a connected textbook chapter in the selected locale. Do not mention diagnostics, readiness, learner level, profiles, capabilities, or authoring machinery.
 
+For `prepNN` and `labNN`, the prompt also requires a subject-driven architecture and interface explanation after trace/boundary reasoning and before practice. It must compare the fixed selected design with the packet's alternative without creating a second mainline; `lab00` is exempt.
+
 ## Write a tutorial, not a template
 
 Make `tutorial` the full learner-facing Markdown chapter. Use headings where they improve navigation, but let the subject determine the narrative. Do not repeat a fixed heading inventory merely to mirror schema fields, and do not enforce a word-count target.
@@ -75,6 +79,7 @@ Develop the explanation slowly enough that the learner can predict the program:
 - carry the same real input or state through each relevant intermediate representation, type, shape, ownership transfer, or lifecycle transition;
 - explain not only what the code does, but why the behavior follows, which public contract supports it, and which nearby mental model would be wrong;
 - execute a normal case and a boundary case, connect wrong code to symptom and cause, apply the recovery, and show the corrected observable; and
+- for `prepNN` and `labNN`, place the same concept in its component and dependency flow, close the caller/implementer interface, compare the fixed alternative, and state benefits, tradeoffs, applicability, and when to revisit the choice; and
 - lead naturally into the knowledge check and, for graded Labs, the coding/capstone increment.
 
 Use the structured `lesson` as a sidecar that preserves concepts, outcomes, contracts, traces, mappings, and source claims for validation. Its facts must be visible and explained in `tutorial`; do not render the sidecar as a rigid learner-facing card sequence. Keep quiz prompts and feedback specific to the same concrete value flow.
@@ -145,6 +150,8 @@ Require the reviewer to check:
 - natural textbook progression and first-use definitions of professional terms;
 - one mainline per graded Lab, cumulative continuity, and correct official bridges;
 - tutorial/sidecar/quiz/code/test agreement for every concrete value and boundary;
+- architecture/interface coverage in every `prepNN` and `labNN`: component responsibility and dependency direction, caller/implementer boundary, the same value flow, a credible alternative, benefits/tradeoffs, and an applicability boundary plus revisit condition;
+- preservation of the same knowledge mainline, with no design-only concept, activity, points, or unsupported implementation claim;
 - absence of learner-facing readiness, diagnostic, profile, capability, and authoring metadata; and
 - enough explanatory depth that a locked knowledge check does not leave the reading surface thin.
 

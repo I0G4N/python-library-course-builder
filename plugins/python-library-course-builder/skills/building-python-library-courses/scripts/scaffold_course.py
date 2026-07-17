@@ -15,6 +15,11 @@ import sys
 import tempfile
 from typing import Any
 
+from course_provenance import (
+    ProvenanceError,
+    provenance_report,
+    write_generation_provenance,
+)
 from validate_course import (
     TOKEN_PATTERN,
     TUTORIAL_LESSON_FORMAT,
@@ -846,6 +851,7 @@ def scaffold(
         compile_and_initialize(workspace, spec)
         materialize_python_locks(workspace, spec)
         verify_no_tokens(workspace)
+        provenance = write_generation_provenance(workspace, spec)
         initialize_git(workspace)
         if destination.exists():
             destination.rmdir()
@@ -856,6 +862,7 @@ def scaffold(
         "target": spec["target"]["name"],
         "labs": len(spec["labs"]),
         "git_baseline": True,
+        "provenance": provenance_report(provenance),
     }
     if spec["schema_version"] == 3:
         report["preparatory_time"] = {
@@ -883,7 +890,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output,
             readiness_plan=args.readiness_plan,
         )
-    except (OSError, SpecValidationError, ScaffoldError) as error:
+    except (OSError, ProvenanceError, SpecValidationError, ScaffoldError) as error:
         print(f"scaffold failed: {error}", file=sys.stderr)
         return 1
     print(json.dumps(report, ensure_ascii=False, indent=2))

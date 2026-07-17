@@ -13,6 +13,7 @@ The generic template and bundled course infrastructure are independently authore
 - [Course language ownership](#course-language-ownership)
 - [Runtime boundaries](#runtime-boundaries)
 - [Compilation and workspace rules](#compilation-and-workspace-rules)
+- [Generated-course provenance and updates](#generated-course-provenance-and-updates)
 - [Privacy model](#privacy-model)
 - [Git checkpoints](#git-checkpoints)
 
@@ -30,6 +31,7 @@ project/
 │   ├── lab01/ ... labNN/           learner code plus public tests
 │   └── _course/coursekit/          generic CLI, progress, and pytest support
 └── platform/                       all non-learner engine and private artifacts
+    ├── coursekit-generation.json  generator provenance, migrations, managed hashes
     ├── app/                        content-driven Web shell and CodeMirror editor
     ├── runner/                     FastAPI workspace and grading service
     ├── coursekit/                  source loader, validator, and compiler
@@ -126,6 +128,26 @@ Curriculum schema is independent from runtime schemas. Schema v3 uses `<course-i
 Workspace initialization is empty-target-only and transactional. Reject files, symlinks, and non-empty destinations before the first write. Generated projects contain copied files, never symlinks or imports back to the Skill, template, or originating repository.
 
 Only allowlisted template tokens may be substituted. After rendering, scan every text file for unresolved tokens and every path for traversal or absolute source references.
+
+## Generated-course provenance and updates
+
+Fresh scaffolds write tracked `platform/coursekit-generation.json` before the generated Git baseline. Its closed schema records plugin and Skill versions, bundle/template/authoring digests, stable course identity, ordered `applied_migrations`, and `managed_files`. Each managed record has one role and SHA-256 digest:
+
+- `template` covers copied root and platform engine files;
+- `compiled` covers compiler-owned `platform/course/` artifacts but not canonical source; and
+- `workspace-runtime` covers the learner manifest, copied runtime, chapter README/example/public-test projections, locks, and other generated workspace support.
+
+Manifest-declared learner-editable files, canonical `platform/course/source/`, unknown local files, Git internals, and `labs/.coursekit/` state are not managed. The provenance file also excludes itself. Plugin, Skill, version, bundle, or template drift is audit information; only a registry entry with `course_impacting: true` whose ID is not already applied and whose `from_versions` includes the recorded release can trigger work.
+
+Update mode accepts only an explicit generated-course path. It reads and locks locale plus target name/version from canonical source, never scans other directories, and never turns the empty-only scaffolder into an overwrite command. `update_course.py check` validates provenance or a released v0.1.0+ generated Git root baseline, builds and verifies a temporary current-format shadow, classifies every file, computes conflicts and identity impact, and writes only the requested external plan JSON. A missing or forged baseline, unsafe path, symlink, or unknown provenance version fails closed.
+
+The plan digest binds managed, learner, unknown, canonical-source, and progress bytes plus the exact candidate tree, target provenance, staged payloads, and merge results. `apply` requires that reviewed digest, `--confirm-stopped`, the same candidate/live snapshot, and a conflict-free rebuilt shadow. Pristine managed files advance; unchanged migration targets preserve local edits; concurrent upstream/local text changes use a clean three-way merge when root-commit bytes are available. A collision, deleted managed requirement, unavailable merge base, or unresolved merge blocks all course writes. Learner-editable code, unknown files, and Git history are never replaced.
+
+Content migrations use an explicit `--candidate-source` created under the same official-source, readiness, clean-writer, assembly, and review rules as fresh authoring. Legacy structured schema-v3 lessons become `tutorial-markdown-v1` before receiving the architecture/interface lens. Schema v2 must rerun evidence readiness and provide schema-v3 source while preserving formal Lab IDs and learner files where possible; the updater must not invent evidence or change locale or the pinned target.
+
+Curriculum identity covers course/curriculum IDs and ordered Lab/question IDs. When it changes and active state exists, the reviewed plan declares a reset. `apply` then also requires `--accept-progress-reset`, writes the exact prior `labs/.coursekit/state.json` bytes to `labs/.coursekit/archive/state-<sha256-prefix>.json`, and removes active state only inside the same transaction. Identity-preserving updates leave state byte-for-byte unchanged.
+
+All target payloads are staged before writes. Archive publication comes before state removal; the new provenance is published last. Any replacement error restores every original byte and newly created directory. Success updates no Git refs and performs no commit, tag, Skill/plugin installation, or version/target upgrade. A repeated check/apply after migration is an idempotent `up_to_date` no-op.
 
 ## Privacy model
 
