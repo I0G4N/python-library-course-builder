@@ -10,6 +10,7 @@ Run the assessor, validator, scaffolder, and verifier through the uv-managed Pyt
 - [Top-level shape](#top-level-shape)
 - [Stable identity and evidence](#stable-identity-and-evidence)
 - [Private assessed readiness and duration](#private-assessed-readiness-and-duration)
+- [Private regeneration contract](#private-regeneration-contract)
 - [Tutorial Markdown and structured lesson sidecar](#tutorial-markdown-and-structured-lesson-sidecar)
 - [Knowledge checks](#knowledge-checks)
 - [The mechanism and official bridge cycle](#the-mechanism-and-official-bridge-cycle)
@@ -172,6 +173,22 @@ In learner-facing estimates these are 15-30, 30-45, and 45-60 minutes respective
 `min` and `max` are JSON integers, not booleans or numeric strings. `reason` is nonempty where required, and the closed shapes above allow no extra fields.
 
 Schema-v2 `basic-python` and `assessed/learner-self-report` specifications remain readable compatibility inputs with their original single-`foundation` behavior. They are not new authoring defaults.
+
+## Private regeneration contract
+
+Fresh scaffolding derives `platform/coursekit-regeneration.json`; authors do not hand-maintain it. The closed document has exactly `schema_version`, `language`, `target`, `route_intent`, `route_contract`, and `readiness_projection`:
+
+- `language` equals `course.language`;
+- `target` contains the pinned target `name`, `version`, and selected `track`;
+- `route_intent` contains `course_id`, `course_title`, `route_id`, and `route_title`;
+- `route_contract` contains validated `schema_version`, `language`, route, official sources, capabilities, and `capability_contracts` entries with exactly `id` plus deterministic definition `sha256`; and
+- `readiness_projection` contains `status`, `route_digest`, `capability_dag`, required/mastered/missing capability IDs, privacy-safe capability records, preparatory units/time, `readiness_summary`, and `plan_digest`.
+
+The sidecar and its digest are private authoring provenance. They may support a later readiness delta only when both a capability ID and its definition hash still match. They never enter learner/runtime manifests, `content.json`, generated README files, tutorials, Web/CLI/Runner payloads, public APIs, or scoring state. Raw diagnostic answers, submitted code, response text, and other evidence are forbidden even in this sidecar. Legacy schema-v2 courses may use null prep-time/summary compatibility values, but any course without a valid v0.3+ sidecar must complete full readiness assessment before regeneration.
+
+Materialize reuse only through `regenerate_course.py readiness COURSE --route CURRENT_ROUTE_JSON --json OUTPUT`. Pass `mode: reuse_unchanged` output with `--trusted-prior-decisions OUTPUT --trusted-course COURSE`; the assessor must rebind it to verified course bytes. Treat `mode: full_readiness` as an instruction to omit both flags and collect current evidence for every capability; never convert it into assumed mastery.
+
+Regeneration locks language, pinned target/version, selected track, and route intent from the old course. It creates a complete new schema-v3 specification after current-source research and readiness, not a patch to the old split source. Old tutorials, structured lessons, quizzes, starter/reference code, and tests are never inputs to the new chapter writers. A valid replacement must therefore have a different canonical-source digest and a substantive learner-facing change, while preserving the locked route identity inputs.
 
 ## Tutorial Markdown and structured lesson sidecar
 

@@ -6,7 +6,7 @@ This rubric is the required acceptance gate for a **local generated project**. G
 
 - [Required fail-closed negative tests](#required-fail-closed-negative-tests)
 - [Required authoring workflow evidence](#required-authoring-workflow-evidence)
-- [Required existing-course update matrix](#required-existing-course-update-matrix)
+- [Required existing-course regeneration matrix](#required-existing-course-regeneration-matrix)
 - [Required generated-project acceptance matrix](#required-generated-project-acceptance-matrix)
 - [Repository quality](#repository-quality)
 
@@ -21,11 +21,11 @@ Verify all of these separately:
 - an unselected large-target specification is rejected before destination creation;
 - check/validation mode does not mutate source or output;
 - an induced replacement failure leaves the prior generated output byte-for-byte intact.
-- generated-course `check` changes no course byte, Git ref, or progress state;
-- version/hash drift without an unapplied `course_impacting` migration is a no-op;
-- a tampered plan digest or any managed, learner, unknown, source, or state change after `check` blocks `apply`;
-- a missing/forged legacy baseline, managed hash collision, unsafe path, symlink, missing stop confirmation, unresolved merge, or shadow verification failure blocks all course writes; and
-- an identity-changing update without explicit reset acceptance leaves active progress and its course byte-for-byte intact.
+- regeneration `check` changes no course byte, Git ref, or progress state;
+- an equal current authoring fingerprint is `up_to_date`, while a changed or legacy fingerprint requires complete regeneration;
+- a newer recorded plugin version, equal-version fingerprint collision, unsafe path, symlink, containing roots, or missing stop/replacement confirmation blocks replacement;
+- a candidate with unchanged canonical source, provenance-only drift, no substantive learner-facing change, or failed full verification is `blocked`; and
+- a tampered plan, changed old/candidate tree, backup collision, or injected second-rename failure leaves or restores the old root byte-for-byte.
 
 ## Required authoring workflow evidence
 
@@ -40,22 +40,25 @@ For a real Skill-authored course, retain an author-side orchestration trace unti
 
 This is an observed workflow contract, not comparative scoring between agents or outputs. Generated-project tests validate the assembled artifacts; they cannot prove which context authored them.
 
-## Required existing-course update matrix
+## Required existing-course regeneration matrix
 
-Exercise the updater against copied fixtures; never use a learner's only course artifact.
+Exercise regeneration against copied fixtures; never use a learner's only course artifact.
 
-- fresh scaffolding records closed, deterministic `platform/coursekit-generation.json` before its generated Git baseline, with correct plugin/Skill/course identity, applied migration IDs, managed roles, and hashes;
-- an explicit existing-course path reads and locks its canonical language and pinned target without asking the fresh-course language question;
-- provenance-backed courses and real v0.1.0, v0.1.1, and v0.2.0 generated-root fixtures select only applicable unapplied registry IDs; unverifiable origins stop;
-- `check` reports managed `template`, `compiled`, and `workspace-runtime` operations plus `protected`, `author-source`, `unknown`, and `state` preservation without mutating the course;
-- apply rebinds the reviewed digest, rebuilds the candidate in a sibling shadow, passes compiler/provenance integrity plus the complete `scripts/verify_learning_project.py` acceptance flow on a pristine prepared snapshot, and only then starts the transaction;
-- unchanged managed files advance, clean three-way text merges retain compatible local edits, and unresolved conflicts produce zero target writes;
-- learner-editable code, canonical source unless explicitly supplied, unknown files, unchanged progress, Git HEAD, and every ref remain byte-for-byte unchanged;
-- content migrations supply reviewed canonical source; legacy structured v3 lessons gain `tutorial-markdown-v1` and the architecture/interface lens without changing locale, target, or formal identity;
-- v2-to-v3 uses current evidence readiness, retains formal Lab code/IDs where possible, reports identity change, archives exact state before reset, and requires `--accept-progress-reset`;
-- an injected failure after a real replacement restores the entire pre-apply tree, including empty-directory shape, while leaving Git refs untouched;
-- successful provenance lists the applied IDs, and repeated `check` plus `apply` returns `up_to_date` with no writes; and
-- no step scans for other courses, changes the empty-only scaffolder, commits/tags Git, or installs/upgrades a Skill, plugin, target, or course locale.
+- fresh scaffolding writes deterministic schema-v2 `platform/coursekit-generation.json` and private `platform/coursekit-regeneration.json` before its generated Git baseline, with current authoring-contract and regeneration-input hashes;
+- the authoring fingerprint changes for Skill, teaching/architecture reference, readiness, assembly, validator, scaffolder, verifier, or canonical compiler/model changes, but not README, release prose, or generic front-end/runtime-only changes;
+- an explicit course path locks canonical locale, target/version, selected track, and route intent without the fresh-course language question, directory scanning, or target upgrade;
+- a current equal fingerprint returns `up_to_date`; v0.1/v0.2 or missing/invalid sidecars require full readiness; a valid v0.3+ sidecar reuses only capability conclusions with unchanged IDs and definition hashes;
+- `regenerate_course.py readiness` emits assessor-ready `reuse_unchanged` only from verified provenance/sidecar input and emits `full_readiness` for every legacy, missing, or tampered case;
+- equal plugin versions with different fingerprints and recorded versions newer than the running plugin fail closed;
+- old tutorial/lesson/quiz text, code, tests, and reference artifacts never enter writer packets; every candidate unit comes from a new clean writer and the whole course receives a separate clean review;
+- the candidate is a complete empty-only sibling scaffold that passes schema-v3 validation, starter/reference RED/GREEN, setup, and `scripts/verify_learning_project.py --full` before review;
+- the second `check` returns `ready` only when canonical-source digest changes and canonical/compiled tutorial, lesson, quiz, starter, or public tests contain a substantive authored change; learner edits found only under live `labs/`, failed verification, or provenance-only drift return `blocked`;
+- the reviewed digest binds every byte of old and candidate roots, the current fingerprint, verification report, course identity, and reserved backup path; any later change blocks apply;
+- apply requires `--confirm-stopped` and `--accept-replacement`, renames the complete old root to `<course>.coursekit-backup-<UTC>-<snapshot8>`, and renames the verified sibling candidate to the original path;
+- provenance-free legacy input owns its Git top level; trusted readiness is rebound with `--trusted-course`; and control-file symlinks fail closed;
+- injected first/second-rename and post-swap snapshot failures restore the old root; stale plans, containing roots, invalid result paths, backup collision, and candidate drift leave it byte-for-byte unchanged;
+- successful replacement exactly equals the verified candidate with fresh progress and a new Git baseline, while old Git/state/code/custom files/build residue remain byte-for-byte in the permanent backup and are not merged forward; and
+- a repeated check is `up_to_date`; no step deletes the backup, modifies the empty-only scaffolder, commits/tags a surrounding repository, publishes a release, or installs/upgrades a Skill or plugin.
 
 ## Required generated-project acceptance matrix
 

@@ -21,6 +21,6 @@ Process groups, temporary workspaces, bounded output, path checks, and environme
 
 ## Course artifact visibility
 
-Generated projects are authoring repositories. Hidden tests are not secret when teacher artifacts are distributed: reference implementations and verified tests are separated from the learner workspace, but remain inspectable by anyone with access to the complete repository. Version 0.2.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
+Generated projects are authoring repositories. Hidden tests are not secret when teacher artifacts are distributed: reference implementations and verified tests are separated from the learner workspace, but remain inspectable by anyone with access to the complete repository. Version 0.3.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
 Never commit real credentials to a course specification, runnable example, fixture, verification report, or generated project.

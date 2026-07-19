@@ -94,7 +94,7 @@ uv run course score
 
 直接运行 `pytest` 时会使用同一个知识关卡。公开测试位于你的代码旁边。验证测试和参考实现保留在 `platform/course/` 下，绝不会复制到学员工作区。
 
-这种隔离可以避免本地学习时意外看到提示，但发布后不构成保密边界。如果将完整仓库推送到公开 Git 主机，任何人都可以查看 `platform/course/reference/` 和 `platform/course/tests/hidden/`。Version 0.2.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
+这种隔离可以避免本地学习时意外看到提示，但发布后不构成保密边界。如果将完整仓库推送到公开 Git 主机，任何人都可以查看 `platform/course/reference/` 和 `platform/course/tests/hidden/`。Version 0.3.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
 ## 作者与完整性
 

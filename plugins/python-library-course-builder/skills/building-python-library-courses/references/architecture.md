@@ -13,7 +13,7 @@ The generic template and bundled course infrastructure are independently authore
 - [Course language ownership](#course-language-ownership)
 - [Runtime boundaries](#runtime-boundaries)
 - [Compilation and workspace rules](#compilation-and-workspace-rules)
-- [Generated-course provenance and updates](#generated-course-provenance-and-updates)
+- [Generated-course provenance and regeneration](#generated-course-provenance-and-regeneration)
 - [Privacy model](#privacy-model)
 - [Git checkpoints](#git-checkpoints)
 
@@ -31,7 +31,8 @@ project/
 │   ├── lab01/ ... labNN/           learner code plus public tests
 │   └── _course/coursekit/          generic CLI, progress, and pytest support
 └── platform/                       all non-learner engine and private artifacts
-    ├── coursekit-generation.json  generator provenance, migrations, managed hashes
+    ├── coursekit-generation.json  generator provenance and authoring fingerprint
+    ├── coursekit-regeneration.json private route/readiness regeneration input
     ├── app/                        content-driven Web shell and CodeMirror editor
     ├── runner/                     FastAPI workspace and grading service
     ├── coursekit/                  source loader, validator, and compiler
@@ -62,11 +63,12 @@ CourseKit validation and deterministic compilation
       +--> sanitized manifest/content/knowledge --> Web + CLI + Runner
       +--> starter projection ---------> labs/
       +--> reference + hidden tests ---> private verification/grader
+      +--> regeneration sidecar ------> future author-side regeneration
 ```
 
 There is one split authoring source of truth. New schema-v3 chapters store primary tutorial prose in `tutorial.md` and deterministic concept/activity metadata in `lesson.json`. Prep lessons live under `course/source/preparatory_units/`; formal Lab metadata, code, and tests stay under `course/source/labs/`. Schema-v2 `foundations/` and schema-v3 sources without tutorial Markdown remain compatibility inputs. Do not keep an editable source `authoring-spec.json`. Consumers traverse the sanitized compiled manifest; unit order, titles, dependencies, score totals, questions, and lesson paths are data.
 
-The readiness plan, audience prerequisite profile, capability mappings, and readiness summary are author-side inputs. Validation and the private parity snapshot may inspect them; learner/runtime manifests, content payloads, generated README files, sidebar copy, and public APIs do not contain them. The curriculum ID may retain the readiness-derived suffix only as an opaque progress-isolation token.
+The readiness plan, audience prerequisite profile, capability mappings, readiness summary, and regeneration sidecar are author-side inputs. Validation and private authoring artifacts may inspect them; learner/runtime manifests, content payloads, generated README files, sidebar copy, and public APIs do not contain them. The curriculum ID may retain the readiness-derived suffix only as an opaque progress-isolation token.
 
 Each coding question carries normalized `timeout_seconds` metadata in both internal and learner manifests. It must be an integer from 1 through 90 and defaults to 30 when omitted.
 
@@ -129,25 +131,25 @@ Workspace initialization is empty-target-only and transactional. Reject files, s
 
 Only allowlisted template tokens may be substituted. After rendering, scan every text file for unresolved tokens and every path for traversal or absolute source references.
 
-## Generated-course provenance and updates
+## Generated-course provenance and regeneration
 
-Fresh scaffolds write tracked `platform/coursekit-generation.json` before the generated Git baseline. Its closed schema records plugin and Skill versions, bundle/template/authoring digests, stable course identity, ordered `applied_migrations`, and `managed_files`. Each managed record has one role and SHA-256 digest:
+Fresh scaffolds write tracked schema-v2 `platform/coursekit-generation.json` and private `platform/coursekit-regeneration.json` before the generated Git baseline. Generation provenance retains plugin/Skill versions, bundle/template/source digests, stable course identity, and managed-file hashes, and adds `authoring_contract.sha256` plus `regeneration_input.sha256`. Schema v1 is accepted only to recognize a legacy course and require regeneration; it never enables incremental migration. The retired migration registry and `applied_migrations` do not exist in schema v2.
 
-- `template` covers copied root and platform engine files;
-- `compiled` covers compiler-owned `platform/course/` artifacts but not canonical source; and
-- `workspace-runtime` covers the learner manifest, copied runtime, chapter README/example/public-test projections, locks, and other generated workspace support.
+The authoring-contract fingerprint is deterministic and changes when course-writing capability changes. It covers `SKILL.md`, every teaching/architecture reference, readiness assessment, chapter assembly, validation, scaffolding, full verification, and the canonical-source compiler/model. Release prose, README files, and generic front-end/runtime-only files are excluded. Bundle, template, or runtime drift alone therefore does not trigger new course content. A recorded plugin version newer than the running plugin refuses downgrade; equal plugin versions with unequal fingerprints are a version collision rather than a silent rewrite.
 
-Manifest-declared learner-editable files, canonical `platform/course/source/`, unknown local files, Git internals, and `labs/.coursekit/` state are not managed. The provenance file also excludes itself. Plugin, Skill, version, bundle, or template drift is audit information; only a registry entry with `course_impacting: true` whose ID is not already applied and whose `from_versions` includes the recorded release can trigger work.
+The regeneration sidecar is a closed author-only document containing `schema_version`, `language`, `target`, `route_intent`, `route_contract`, and `readiness_projection`. `target` locks name, version, and selected track. `route_intent` preserves course and route IDs/titles. `route_contract` retains validated `schema_version`, `language`, route, official sources, capabilities, and `capability_contracts` entries with exactly `id` plus definition `sha256`. `readiness_projection` retains only `status`, `route_digest`, `capability_dag`, required/mastered/missing IDs, privacy-safe capability decisions, preparatory-unit mapping/time, readiness summary, and plan digest. It never stores raw answers, code evidence, diagnostic responses, or learner-facing prose.
 
-Update mode accepts only an explicit generated-course path. It reads and locks locale plus target name/version from canonical source, never scans other directories, and never turns the empty-only scaffolder into an overwrite command. `update_course.py check` validates provenance or a released v0.1.0+ generated Git root baseline, builds and verifies a temporary current-format shadow, classifies every file, computes conflicts and identity impact, and writes only the requested external plan JSON. A missing or forged baseline, unsafe path, symlink, or unknown provenance version fails closed.
+Regeneration mode accepts only an explicit course root and never scans. It locks locale, target/version, track, and route intent; it does not automatically upgrade the target. A matching current authoring fingerprint returns `up_to_date`. A changed or legacy fingerprint returns `regeneration_required`. For a valid v0.3+ sidecar, readiness conclusions may be reused only when both capability ID and definition hash are unchanged; new or changed capabilities receive current diagnostics. Missing, invalid, v0.1, or v0.2 sidecars require complete reassessment.
 
-The plan digest binds managed, learner, unknown, canonical-source, and progress bytes plus the exact candidate tree, target provenance, staged payloads, and merge results. `apply` requires that reviewed digest, `--confirm-stopped`, the same candidate/live snapshot, and a conflict-free rebuilt shadow. Pristine managed files advance; unchanged migration targets preserve local edits; concurrent upstream/local text changes use a clean three-way merge when root-commit bytes are available. A collision, deleted managed requirement, unavailable merge base, or unresolved merge blocks all course writes. Learner-editable code, unknown files, and Git history are never replaced.
+After current-route research, `regenerate_course.py readiness COURSE --route CURRENT_ROUTE_JSON --json OUTPUT` materializes the boundary. Trusted v0.3+ input writes `mode: reuse_unchanged` and a closed decision set consumable by `assess_readiness.py --trusted-prior-decisions OUTPUT --trusted-course COURSE`; the assessor rebinds it to verified course bytes. Legacy, missing, or tampered input writes `mode: full_readiness`, for which the assessor omits both flags and diagnoses the entire current DAG.
 
-Content migrations use an explicit `--candidate-source` created under the same official-source, readiness, clean-writer, assembly, and review rules as fresh authoring. Legacy structured schema-v3 lessons become `tutorial-markdown-v1` before receiving the architecture/interface lens. Schema v2 must rerun evidence readiness and provide schema-v3 source while preserving formal Lab IDs and learner files where possible; the updater must not invent evidence or change locale or the pinned target.
+The old course supplies only those locked route inputs and eligible readiness conclusions. Its tutorials, lesson prose, quizzes, learner code, tests, and reference implementation are not writer inputs. Research official sources again, build the current route, use a distinct clean writer for every unit, run a separate whole-course review, scaffold into an empty sibling directory, and pass normal schema-v3 validation, RED/GREEN checks, and `verify_learning_project.py --full` before candidate review.
 
-Curriculum identity covers course/curriculum IDs and ordered Lab/question IDs. When it changes and active state exists, the reviewed plan declares a reset. `apply` then also requires `--accept-progress-reset`, writes the exact prior `labs/.coursekit/state.json` bytes to `labs/.coursekit/archive/state-<sha256-prefix>.json`, and removes active state only inside the same transaction. Identity-preserving updates leave state byte-for-byte unchanged.
+`regenerate_course.py check COURSE --candidate-course STAGING` binds the old and candidate snapshots. A `ready` plan requires a changed canonical-source hash and at least one substantive authored change among canonical tutorial, lesson, quiz, starter, compiled starter, or public-test paths; provenance-only changes and edits found only in the live learner workspace are `blocked`. Its digest binds the complete old tree, candidate tree, current fingerprint, verification report, course identity, route intent, and reserved backup path. Candidate validation failures are reported as `blocked`; unsafe roots, control-file symlinks, path containment, unrecognized formats, downgrade, or version collision fail closed. A provenance-free legacy course must own its Git top level rather than inherit an enclosing repository.
 
-All target payloads are staged before writes. Archive publication comes before state removal; the new provenance is published last. Any replacement error restores every original byte and newly created directory. Success updates no Git refs and performs no commit, tag, Skill/plugin installation, or version/target upgrade. A repeated check/apply after migration is an idempotent `up_to_date` no-op.
+`apply` accepts only that reviewed `ready` plan plus `--confirm-stopped` and `--accept-replacement`. It preflights the external result path, renames the complete old root to `<course>.coursekit-backup-<UTC>-<snapshot8>`, then renames the verified sibling candidate to the original path. Both roots must share a parent/filesystem. A first-rename error after mutation, failed second rename, or post-swap snapshot error immediately restores the old root. Stale bytes, candidate drift, backup collision, or replacement failure leaves or restores the old course byte-for-byte.
+
+Success means the new root is exactly the verified candidate with fresh progress and a new generated Git baseline. The old `.git`, state, learner code, custom files, and build residue remain intact only in the permanent backup; nothing is merged forward or automatically deleted. A repeated check against the new fingerprint is `up_to_date`. Regeneration does not install a Skill/plugin, commit the surrounding repository, or publish a release.
 
 ## Privacy model
 

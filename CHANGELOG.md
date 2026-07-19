@@ -4,21 +4,29 @@ All notable changes to Python Library Course Builder are documented in this file
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-18
+
 ### Added
 
 - Added clean-context chapter authoring: every orientation, preparation, and graded Lab is written by a distinct non-reused subagent from a sanitized packet, assembled deterministically, and reviewed in a separate clean context.
 - Added schema-v3 `tutorial-markdown-v1`, canonical `tutorial.md` chapter sources, exact Markdown compilation, stable heading navigation, and terminology guides while retaining structured lesson sidecars and legacy v2/v3 rendering.
 - Added a focus-reading Web layout with a rich chapter/check rail on wide screens and responsive single-column reading before the coding workspace unlocks.
-- Added deterministic `platform/coursekit-generation.json` provenance, a closed course-impacting migration registry, and managed-file ownership hashes to fresh generated baselines.
-- Added two-phase `update_course.py check/apply` updates for provenance-backed and verifiable v0.1.0+ courses, with stale-plan protection, verified shadow staging, conflict zero-write behavior, exact progress archival, and transactional rollback.
+- Added deterministic schema-v2 generation provenance with an authoring-capability fingerprint and private regeneration-input digest.
+- Added the private `platform/coursekit-regeneration.json` route/readiness sidecar without raw diagnostic answers or code evidence.
+- Added two-phase `regenerate_course.py check/apply` replacement for explicitly located courses, with full sibling-course verification, permanent whole-root backup, stale-plan protection, and rollback.
 
 ### Changed
 
 - Kept readiness diagnostics entirely author-side. Generated learner README files, manifests, content, sidebar copy, and public APIs no longer expose profiles, capability decisions, diagnostic summaries, or readiness-derived lists.
 - Made tutorial quality depend on progressive explanation, first-use term definitions, concrete value flow, boundary recovery, and aligned practice instead of a rigid learner-facing field template or word-count target.
 - Expanded future `prepNN` and graded `labNN` tutorials with a same-mainline architecture and interface lens covering component responsibilities, dependency and data/control flow, chosen versus credible alternative designs, benefits and tradeoffs, applicability, and revisit conditions; `lab00`, the schema, activities, scoring, and runtime remain unchanged.
-- Routed an explicitly located generated course through its fixed canonical language and target instead of the fresh-course language gate; version/hash drift alone remains a no-op without an applicable unapplied migration.
-- Required reviewed canonical-source candidates for content migration. Schema-v2 to v3 updates rerun evidence readiness, archive exact active progress, and require explicit reset acceptance rather than regenerating the course.
+- Routed an explicitly located course through its fixed language, target/version, track, and route intent instead of the fresh-course language gate.
+- Made authoring-capability drift trigger complete research, readiness, clean-writer authoring, scaffold, RED/GREEN, and full verification. A valid v0.3+ sidecar reuses only readiness conclusions whose capability ID and definition hash are unchanged; legacy courses reassess the full route.
+- Replaced the old course only after canonical source and substantive learner-facing content change. The replacement uses fresh progress and Git baseline; the old course, learner work, custom files, state, and Git history remain intact in the permanent backup.
+
+### Removed
+
+- Removed the course-impacting migration registry and incremental content-update semantics. `update_course.py` is retained only as a fail-closed pointer to full regeneration.
 
 ## [0.2.0] - 2026-07-15
 

@@ -19,6 +19,7 @@ from course_provenance import (
     ProvenanceError,
     provenance_report,
     write_generation_provenance,
+    write_regeneration_metadata,
 )
 from validate_course import (
     TOKEN_PATTERN,
@@ -838,7 +839,19 @@ def scaffold(
     *,
     readiness_plan: Path | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    spec = load_and_validate(spec_path, readiness_plan=readiness_plan)
+    readiness_payload: dict[str, Any] | None
+    if isinstance(readiness_plan, dict):
+        readiness_payload = copy.deepcopy(readiness_plan)
+    elif readiness_plan is not None:
+        try:
+            readiness_payload = json.loads(
+                Path(readiness_plan).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as error:
+            raise ScaffoldError(f"cannot load readiness plan: {error}") from error
+    else:
+        readiness_payload = None
+    spec = load_and_validate(spec_path, readiness_plan=readiness_payload)
     destination = output.absolute()
     ensure_empty_target(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -851,6 +864,11 @@ def scaffold(
         compile_and_initialize(workspace, spec)
         materialize_python_locks(workspace, spec)
         verify_no_tokens(workspace)
+        write_regeneration_metadata(
+            workspace,
+            spec,
+            readiness_plan=readiness_payload,
+        )
         provenance = write_generation_provenance(workspace, spec)
         initialize_git(workspace)
         if destination.exists():

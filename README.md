@@ -12,7 +12,7 @@ In one sentence: choose a course language, fix one coherent route, use reviewabl
 
 No CS61A code, assignments, tests, or instructional text are included, and this independently authored project is not affiliated with or endorsed by UC Berkeley, the CS61A course staff, or OpenAI.
 
-Version 0.2.0 supports exactly two course languages: Simplified Chinese (`zh-CN`) and English (`en`). On every fresh Skill invocation, language choice is the first question even when the request already names a language. Learner-facing lessons, readiness questions, quiz prompts, feedback, generated documentation, and course prose use the selected language. Code, shell commands, identifiers, target API names, and official source titles and URLs retain their original spelling.
+Version 0.3.0 supports exactly two course languages: Simplified Chinese (`zh-CN`) and English (`en`). On every fresh Skill invocation, language choice is the first question even when the request already names a language. Learner-facing lessons, readiness questions, quiz prompts, feedback, generated documentation, and course prose use the selected language. Code, shell commands, identifiers, target API names, and official source titles and URLs retain their original spelling.
 
 The bundled Skill is named `$building-python-library-courses`.
 
@@ -94,7 +94,7 @@ Course creation requires Codex plus network access to verify official sources an
 Add the repository as a Codex marketplace, then install the plugin:
 
 ```bash
-codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.2.0
+codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.3.0
 codex plugin add python-library-course-builder@python-library-course-builder
 ```
 
@@ -105,7 +105,7 @@ See the [official Codex plugin authoring and installation documentation](https:/
 From the directory that will contain the checkout, clone the repository, register its relative marketplace path, and install the plugin:
 
 ```bash
-git clone --branch v0.2.0 --depth 1 https://github.com/I0G4N/python-library-course-builder.git
+git clone --branch v0.3.0 --depth 1 https://github.com/I0G4N/python-library-course-builder.git
 codex plugin marketplace add ./python-library-course-builder
 codex plugin add python-library-course-builder@python-library-course-builder
 ```
@@ -134,31 +134,45 @@ npm run setup
 npm run learn
 ```
 
-## Update an earlier generated course
+## Regenerate a course created by an earlier authoring capability
 
-Give the Skill one explicit existing-course path to enter update mode:
+Give the Skill one explicit existing-course path to enter regeneration mode:
 
 ```text
-Use $building-python-library-courses to update the existing generated course at /path/to/course.
+Use $building-python-library-courses to regenerate the existing generated course at /path/to/course.
 ```
 
-The existing canonical source fixes the course language and pinned target version, so this route does not ask the fresh-course language question or silently change either value. It never scans for other courses. Only an unapplied entry in the closed migration registry whose `course_impacting` field is true triggers an update; plugin, Skill, template, bundle, or version drift by itself does not.
+The existing authoring source fixes the language, pinned target version, selected track, and route intent, so this route does not ask the fresh-course language question or silently upgrade the target. It never scans for other courses. The authoring-capability fingerprint covers the Skill, teaching/architecture references, readiness and assembly logic, validation/scaffolding/full verification, and canonical compiler/model. A matching fingerprint is `up_to_date`; a changed or legacy fingerprint requires full regeneration. Generic bundle, template, or runtime drift alone does not rewrite course content.
 
 The workflow first creates a read-only plan outside the course:
 
 ```bash
-uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/update_course.py" check /path/to/course --json /tmp/course-update-plan.json
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/regenerate_course.py" check /path/to/course --json /tmp/course-regeneration-plan.json
 ```
 
-For a content migration, the Skill researches and authors a temporary canonical-source candidate under the same readiness, clean-writer, assembly, and review rules as course creation, then reruns `check` with `--candidate-source /tmp/course-source`. After reviewing the plan and stopping course services, apply that same candidate:
+The Skill researches official sources again and authors a complete new course in an empty sibling directory. A valid v0.3+ private sidecar can reuse readiness conclusions only for capabilities whose ID and definition hash are unchanged; legacy, missing, or invalid sidecars require full readiness assessment. Old tutorials, learner code, tests, and reference solutions are never writer inputs. Every unit receives a new clean writer, the complete candidate receives a separate review, and the candidate must pass setup plus full verification.
+
+After researching the current route, materialize the trusted readiness boundary:
 
 ```bash
-uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/update_course.py" apply /path/to/course --plan /tmp/course-update-plan.json --candidate-source /tmp/course-source --confirm-stopped --json /tmp/course-update-result.json
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/regenerate_course.py" readiness /path/to/course --route /tmp/current-route.json --json /tmp/trusted-prior.json
 ```
 
-The updater supports provenance-backed courses and verifiable generated Git baselines from v0.1.0 onward. It stages and verifies a current-format shadow, preserves learner files, unknown helpers, compatible local edits, progress, and Git history, and publishes new provenance last. A conflict, stale plan, invalid baseline, symlink, or replacement failure leaves the course unchanged. Schema-v2 to v3 migration requires a new evidence-readiness candidate and explicit `--accept-progress-reset`; the exact prior state is archived before active progress resets.
+Pass `mode: reuse_unchanged` output to `assess_readiness.py --trusted-prior-decisions /tmp/trusted-prior.json --trusted-course /path/to/course`. For `mode: full_readiness`, omit both flags and assess the entire current capability DAG.
 
-This modifies the existing course rather than scaffolding a replacement. It does not auto-commit, change the target dependency version, or install/upgrade the plugin or Skill.
+Bind the complete sibling candidate to the old course. This returns `ready` only when canonical source and substantive learner-facing content changed; otherwise it returns `blocked`:
+
+```bash
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/regenerate_course.py" check /path/to/course --candidate-course /path/to/course-staging --json /tmp/course-regeneration-plan.json
+```
+
+After reviewing the reserved backup path and stopping course services, accept whole-root replacement:
+
+```bash
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/regenerate_course.py" apply /path/to/course --candidate-course /path/to/course-staging --plan /tmp/course-regeneration-plan.json --confirm-stopped --accept-replacement --json /tmp/course-regeneration-result.json
+```
+
+Apply renames the complete old root to a permanent sibling backup, then moves the already verified candidate to the original path. The new course starts with fresh progress and a new Git baseline. Old progress, learning code, custom files, build residue, and Git history remain intact only in the backup and are not merged forward automatically. A stale plan, candidate change, unsafe path, backup collision, or swap failure leaves or restores the old course byte-for-byte.
 
 ## Repository layout
 
@@ -182,7 +196,7 @@ The plugin bundle contains only the Skill and its local assets. It does not decl
 
 A generated project is an **authoring repository**: it contains the canonical course source, learner projection, reference implementations, and verified grader material needed to build and audit the course.
 
-Hidden tests are not secret when the complete repository is available. They are hidden from the normal learner workspace to avoid accidental hints, but a user with filesystem access can inspect teacher artifacts. Version 0.2.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
+Hidden tests are not secret when the complete repository is available. They are hidden from the normal learner workspace to avoid accidental hints, but a user with filesystem access can inspect teacher artifacts. Version 0.3.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
 The local Runner is a study tool, not an operating-system security sandbox. It reduces ordinary grading side effects and binds to loopback, but submitted Python executes with the current user's privileges. Run only trusted local course code, never expose the Runner as a public judge, and use a separate hardened sandbox for hostile submissions.
 

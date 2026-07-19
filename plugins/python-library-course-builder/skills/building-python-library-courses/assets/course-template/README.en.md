@@ -93,7 +93,7 @@ uv run course score
 
 Direct `pytest` runs use the same knowledge gate. Public tests sit beside starter code; verified tests and reference implementations remain under `platform/course/` and are never copied into the normal learner workspace.
 
-This separation reduces accidental hints but is not a secrecy boundary after publication. Anyone with the complete repository can inspect `platform/course/reference/` and `platform/course/tests/hidden/`. Version 0.2.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
+This separation reduces accidental hints but is not a secrecy boundary after publication. Anyone with the complete repository can inspect `platform/course/reference/` and `platform/course/tests/hidden/`. Version 0.3.0 does not provide an automated learner-only export. The supported secrecy path is to keep the complete teacher/authoring repository private.
 
 ## Authoring and integrity
 

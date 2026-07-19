@@ -34,18 +34,19 @@ Complete this checklist from a clean checkout before publishing a version.
 - [ ] Browser checks at 1440x900, 1024x700, 900x700, and 390x844 confirm focus reading before the knowledge gate, no Code/Result or file request while locked, and the resizable workspace after unlock.
 - [ ] A broad target stops at the track-selection gate before writing files.
 
-## Existing-course updates
+## Existing-course regeneration
 
-- [ ] Provenance and migration-registry schemas are closed and deterministic, and fresh scaffolding records provenance before its generated Git baseline.
-- [ ] Plugin/Skill/version/hash drift without an applicable unapplied `course_impacting` migration returns `up_to_date` without writes.
-- [ ] Real generated fixtures from v0.1.0, v0.1.1, and v0.2.0 pass legacy baseline adoption; unverifiable roots fail closed.
-- [ ] `check` changes no course byte, progress state, Git commit, or ref, and its digest detects later managed, learner, source, unknown, and state changes.
-- [ ] Managed conflict, stale plan, symlink, stopped-service refusal, shadow verification failure, and injected replacement failure each leave the complete course byte-for-byte unchanged.
-- [ ] Apply preserves learner-editable code, unknown helpers, Git history, fixed locale/target, and identity-compatible progress while updating only declared managed/source paths.
-- [ ] Content migration converts legacy tutorials and adds the architecture/interface lens through a reviewed candidate rather than whole-course regeneration.
-- [ ] Schema-v2 to v3 migration uses current readiness evidence, preserves formal Lab code/IDs where possible, archives exact state, and requires explicit reset acceptance.
-- [ ] Repeated check/apply is idempotent, and the updated pristine project passes the complete verifier.
-- [ ] Skill, architecture, forward rubric, changelog, and bilingual README files describe the same explicit-path update contract.
+- [ ] Fresh scaffolding records closed schema-v2 generation provenance, the authoring fingerprint, and the private regeneration sidecar before its generated Git baseline; schema v2 contains no migration registry or `applied_migrations`.
+- [ ] Fingerprint coverage includes Skill, teaching/architecture references, readiness, assembly, validation, scaffolding, verification, and canonical compiler/model, while README/release and runtime-only drift is excluded.
+- [ ] A current matching fingerprint returns `up_to_date`; v0.1/v0.2 or invalid/missing sidecars require full readiness; same-version fingerprint collision and downgrade refuse to proceed.
+- [ ] A valid v0.3+ sidecar reuses only readiness conclusions whose capability ID and definition hash are unchanged, and stores no raw answer, code evidence, or response text.
+- [ ] `regenerate_course.py readiness COURSE --route CURRENT_ROUTE_JSON --json OUTPUT` produces `reuse_unchanged` only for verified, non-symlink input; `assess_readiness.py --trusted-course COURSE` rebinds it before use, while legacy/missing/tampered input yields `full_readiness`.
+- [ ] Explicit-path regeneration locks locale, target/version, track, and route intent and never scans, upgrades the target, or uses old tutorial/code/test artifacts as writer input.
+- [ ] Every candidate unit comes from a new clean writer, receives separate whole-course review, and the complete empty-only sibling candidate passes schema-v3, RED/GREEN, setup, and `verify_learning_project.py --full`.
+- [ ] Candidate check blocks unchanged canonical source, provenance-only drift, learner-workspace-only drift, and absent authored learner-facing change; its digest detects every later old/candidate tree change.
+- [ ] Legacy input must own its Git top level. Stale plan, symlink, containing roots, invalid result path, backup collision, failed verification, candidate drift, either rename failure, and post-swap snapshot failure leave or restore the old root byte-for-byte.
+- [ ] Successful apply leaves the new path exactly equal to the verified candidate with fresh progress/Git baseline and preserves the complete old Git/state/code/custom/build tree in the permanent sibling backup.
+- [ ] `update_course.py` fails closed with a regeneration pointer, the migration registry is absent, and Skill, architecture, curriculum, forward rubric, changelog, and bilingual README files describe one full-regeneration contract.
 
 ## Hosted GitHub settings and public verification
 
@@ -54,12 +55,14 @@ Complete this checklist from a clean checkout before publishing a version.
 - [ ] Private Vulnerability Reporting is enabled, and `https://github.com/I0G4N/python-library-course-builder/security/advisories/new` opens the private security report flow.
 - [ ] The dependency graph, Dependabot alerts, and Dependabot security updates are enabled.
 - [ ] A main branch ruleset and a v* tag ruleset protect the release branch and tags.
-- [ ] The pinned public install command, `codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.2.0`, succeeds from a clean Codex environment.
-- [ ] Hosted main CI and the hosted v0.2.0 tag forward job pass for the release commit.
+- [ ] The pinned public install command, `codex plugin marketplace add I0G4N/python-library-course-builder --ref v0.3.0`, succeeds from a clean Codex environment.
+- [ ] Hosted main CI and the hosted v0.3.0 tag forward job pass for the release commit.
 
 ## Publication
 
 - [ ] Git status is clean and the release commit has independent review approval.
 - [ ] The local marketplace install succeeds without replacing the active standalone Skill prematurely.
+- [ ] The development reinstall used a temporary `+codex.<timestamp>` cachebuster, and no cachebuster suffix appears in the release tag or manifest.
 - [ ] The release tag points at the verified commit.
 - [ ] The GitHub release links to the [changelog](CHANGELOG.md), license, security policy, and installation instructions.
+- [ ] A clean temporary `CODEX_HOME` installs v0.3.0, and the local formal reinstall exposes the v0.3.0 Skill plus `regenerate_course.py` in a new Codex thread.

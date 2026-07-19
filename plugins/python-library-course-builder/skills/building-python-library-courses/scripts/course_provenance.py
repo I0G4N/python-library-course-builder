@@ -11,16 +11,25 @@ from pathlib import Path, PurePosixPath
 import re
 from typing import Any
 
+from assess_readiness import (
+    ReadinessValidationError,
+    validate_ready_plan,
+    validate_route_contract,
+)
+from authoring_contract import AuthoringContractError, authoring_contract_sha256
+
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ROOT = SKILL_ROOT.parents[1]
 TEMPLATE_ROOT = SKILL_ROOT / "assets" / "course-template"
-MIGRATION_REGISTRY_PATH = SKILL_ROOT / "references" / "course-migrations.json"
 PLUGIN_MANIFEST_PATH = PLUGIN_ROOT / ".codex-plugin" / "plugin.json"
 PROVENANCE_RELATIVE_PATH = "platform/coursekit-generation.json"
+REGENERATION_RELATIVE_PATH = "platform/coursekit-regeneration.json"
+CANONICAL_COURSE_RELATIVE_PATH = "platform/course/source/course.json"
 
-PROVENANCE_SCHEMA_VERSION = 1
-MIGRATION_REGISTRY_SCHEMA_VERSION = 1
+PROVENANCE_SCHEMA_VERSION = 2
+LEGACY_PROVENANCE_SCHEMA_VERSION = 1
+REGENERATION_SCHEMA_VERSION = 1
 PLUGIN_NAME = "python-library-course-builder"
 SKILL_NAME = "building-python-library-courses"
 MANAGED_ROLES = {"template", "compiled", "workspace-runtime"}
@@ -48,7 +57,7 @@ TREE_IGNORE_NAMES = {
 
 
 class ProvenanceError(RuntimeError):
-    """A provenance document or migration registry violated its contract."""
+    """A provenance or private regeneration document violated its contract."""
 
 
 def hash_file(path: Path) -> str:
@@ -159,105 +168,35 @@ def _require_relative_path(value: object, location: str) -> str:
     return text
 
 
-def _validate_migration_registry(value: object) -> dict[str, Any]:
-    registry = _require_exact_keys(
-        value,
-        {"schema_version", "migrations"},
-        "migration registry",
-    )
-    if registry["schema_version"] != MIGRATION_REGISTRY_SCHEMA_VERSION:
-        raise ProvenanceError("unsupported migration registry schema_version")
-    migrations = registry["migrations"]
-    if not isinstance(migrations, list) or not migrations:
-        raise ProvenanceError("migration registry migrations must be a non-empty list")
-    expected_keys = {
-        "id",
-        "course_impacting",
-        "impact",
-        "from_versions",
-        "to_version",
-        "source_schema_change",
-        "curriculum_identity_change",
-        "progress_reset_required",
-        "source_paths",
-    }
-    identifiers: set[str] = set()
-    for index, raw_entry in enumerate(migrations):
-        location = f"migration registry migrations[{index}]"
-        entry = _require_exact_keys(raw_entry, expected_keys, location)
-        identifier = _require_nonempty_string(entry["id"], f"{location}.id")
-        if identifier in identifiers:
-            raise ProvenanceError(f"duplicate migration id: {identifier}")
-        identifiers.add(identifier)
-        if entry["course_impacting"] is not True:
-            raise ProvenanceError(f"{location}.course_impacting must be true")
-        if entry["impact"] not in {"platform", "content"}:
-            raise ProvenanceError(f"{location}.impact is unsupported")
-        versions = entry["from_versions"]
-        if not isinstance(versions, list) or not versions:
-            raise ProvenanceError(f"{location}.from_versions must be non-empty")
-        if len(versions) != len(set(versions)):
-            raise ProvenanceError(f"{location}.from_versions contains duplicates")
-        for version_index, version in enumerate(versions):
-            _require_version(version, f"{location}.from_versions[{version_index}]")
-        _require_version(entry["to_version"], f"{location}.to_version")
-        for field in (
-            "source_schema_change",
-            "curriculum_identity_change",
-            "progress_reset_required",
-        ):
-            if not isinstance(entry[field], bool):
-                raise ProvenanceError(f"{location}.{field} must be boolean")
-        source_paths = entry["source_paths"]
-        if not isinstance(source_paths, list):
-            raise ProvenanceError(f"{location}.source_paths must be a list")
-        if len(source_paths) != len(set(source_paths)):
-            raise ProvenanceError(f"{location}.source_paths contains duplicates")
-        for path_index, path in enumerate(source_paths):
-            _require_relative_path(path, f"{location}.source_paths[{path_index}]")
-    return deepcopy(dict(registry))
+def _control_document_path(
+    supplied: Path,
+    relative: str,
+    location: str,
+) -> tuple[Path, Path]:
+    """Resolve a course control document without following in-root symlinks."""
 
-
-def load_migration_registry(path: Path = MIGRATION_REGISTRY_PATH) -> dict[str, Any]:
-    """Load and strictly validate the course-impacting migration registry."""
-
-    try:
-        value = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ProvenanceError(f"cannot load migration registry: {error}") from error
-    return _validate_migration_registry(value)
-
-
-def current_migration_ids() -> tuple[str, ...]:
-    """Return all migration IDs represented by the current generated format."""
-
-    return tuple(entry["id"] for entry in load_migration_registry()["migrations"])
-
-
-def course_impacting_migrations(
-    applied_migrations: Iterable[str] = (),
-    *,
-    registry: Mapping[str, Any] | None = None,
-) -> tuple[dict[str, Any], ...]:
-    """Return registered course-impacting migrations not already applied."""
-
-    validated = (
-        load_migration_registry()
-        if registry is None
-        else _validate_migration_registry(registry)
-    )
-    applied = tuple(applied_migrations)
-    if len(applied) != len(set(applied)):
-        raise ProvenanceError("applied_migrations contains duplicates")
-    known = {entry["id"] for entry in validated["migrations"]}
-    unknown = sorted(set(applied) - known)
-    if unknown:
-        raise ProvenanceError("unknown migration ids: " + ", ".join(unknown))
-    return tuple(
-        deepcopy(entry)
-        for entry in validated["migrations"]
-        if entry["course_impacting"] and entry["id"] not in applied
-    )
+    candidate = Path(supplied).absolute()
+    relative_path = Path(relative)
+    if candidate.name == relative_path.name and (
+        candidate.is_file() or candidate.is_symlink()
+    ):
+        root = candidate.parents[1]
+        path = candidate
+        if candidate.parent.name != relative_path.parent.name or path != root / relative_path:
+            raise ProvenanceError(
+                f"{location} direct path must use the canonical {relative} location"
+            )
+    else:
+        root = candidate
+        path = root / relative_path
+    if root.is_symlink():
+        raise ProvenanceError(f"{location} course root cannot be a symlink")
+    current = root
+    for part in relative_path.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ProvenanceError(f"{location} cannot contain symlinks")
+    return root, path
 
 
 def _canonical_json_digest(value: object) -> str:
@@ -318,9 +257,451 @@ def _plugin_metadata() -> dict[str, str]:
     return {"name": name, "version": version}
 
 
+_READINESS_PROJECTION_KEYS = (
+    "status",
+    "route_digest",
+    "capability_dag",
+    "required_capability_ids",
+    "mastered_capability_ids",
+    "missing_capability_ids",
+    "capabilities",
+    "preparatory_units",
+    "preparatory_time",
+    "readiness_summary",
+    "plan_digest",
+)
+
+
+def build_regeneration_metadata(
+    spec: Mapping[str, Any],
+    *,
+    readiness_plan: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build private, evidence-free inputs for a future full regeneration."""
+
+    course = spec["course"]
+    target = spec["target"]
+    language = course.get("language", "zh-CN")
+    route_contract: dict[str, Any] | None = None
+    readiness_projection: dict[str, Any] | None = None
+    route_id: str | None = None
+    route_title: str | None = None
+    if spec["schema_version"] == 3:
+        if readiness_plan is None:
+            raise ProvenanceError(
+                "schema-v3 regeneration metadata requires a readiness plan"
+            )
+        try:
+            plan = validate_ready_plan(readiness_plan)
+        except ReadinessValidationError as error:
+            raise ProvenanceError(f"invalid readiness plan: {error}") from error
+        route_contract = deepcopy(plan["route_contract"])
+        route_id = str(plan["route_id"])
+        route_title = str(route_contract["route"]["title"])
+        readiness_projection = {
+            key: deepcopy(plan[key]) for key in _READINESS_PROJECTION_KEYS
+        }
+    metadata = {
+        "schema_version": REGENERATION_SCHEMA_VERSION,
+        "language": language,
+        "target": {
+            "name": target["name"],
+            "version": target["version"],
+            "track": target.get("track") or None,
+        },
+        "route_intent": {
+            "course_id": course["id"],
+            "course_title": course["title"],
+            "route_id": route_id,
+            "route_title": route_title,
+        },
+        "route_contract": route_contract,
+        "readiness_projection": readiness_projection,
+    }
+    return validate_regeneration_metadata(metadata)
+
+
+def _reconstructed_ready_plan(
+    metadata: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    route_contract = metadata["route_contract"]
+    projection = metadata["readiness_projection"]
+    if route_contract is None or projection is None:
+        return None
+    plan = {
+        "schema_version": route_contract["schema_version"],
+        "status": projection["status"],
+        "route_id": metadata["route_intent"]["route_id"],
+        "route_digest": projection["route_digest"],
+        "route_contract": deepcopy(route_contract),
+        "official_sources": deepcopy(route_contract["official_sources"]),
+        "official_source_ids": [
+            str(source["id"]) for source in route_contract["official_sources"]
+        ],
+        "capability_dag": deepcopy(projection["capability_dag"]),
+        "required_capability_ids": deepcopy(
+            projection["required_capability_ids"]
+        ),
+        "mastered_capability_ids": deepcopy(
+            projection["mastered_capability_ids"]
+        ),
+        "missing_capability_ids": deepcopy(
+            projection["missing_capability_ids"]
+        ),
+        "capabilities": deepcopy(projection["capabilities"]),
+        "preparatory_units": deepcopy(projection["preparatory_units"]),
+        "preparatory_time": deepcopy(projection["preparatory_time"]),
+        "readiness_summary": projection["readiness_summary"],
+        "plan_digest": projection["plan_digest"],
+    }
+    if route_contract["schema_version"] == 2:
+        plan["language"] = metadata["language"]
+    return plan
+
+
+def validate_regeneration_metadata(value: object) -> dict[str, Any]:
+    """Strictly validate private regeneration inputs and readiness integrity."""
+
+    metadata = _require_exact_keys(
+        value,
+        {
+            "schema_version",
+            "language",
+            "target",
+            "route_intent",
+            "route_contract",
+            "readiness_projection",
+        },
+        "regeneration metadata",
+    )
+    if metadata["schema_version"] != REGENERATION_SCHEMA_VERSION:
+        raise ProvenanceError("unsupported regeneration metadata schema_version")
+    language = _require_nonempty_string(
+        metadata["language"], "regeneration metadata.language"
+    )
+    if language not in {"zh-CN", "en"}:
+        raise ProvenanceError("regeneration metadata.language is unsupported")
+    target = _require_exact_keys(
+        metadata["target"],
+        {"name", "version", "track"},
+        "regeneration metadata.target",
+    )
+    _require_nonempty_string(target["name"], "regeneration metadata.target.name")
+    _require_nonempty_string(
+        target["version"], "regeneration metadata.target.version"
+    )
+    if target["track"] is not None:
+        _require_nonempty_string(
+            target["track"], "regeneration metadata.target.track"
+        )
+    intent = _require_exact_keys(
+        metadata["route_intent"],
+        {"course_id", "course_title", "route_id", "route_title"},
+        "regeneration metadata.route_intent",
+    )
+    _require_nonempty_string(
+        intent["course_id"], "regeneration metadata.route_intent.course_id"
+    )
+    _require_nonempty_string(
+        intent["course_title"], "regeneration metadata.route_intent.course_title"
+    )
+    route_values = (intent["route_id"], intent["route_title"])
+    if (route_values[0] is None) != (route_values[1] is None):
+        raise ProvenanceError(
+            "regeneration metadata route id and title must both be present or null"
+        )
+    if route_values[0] is not None:
+        _require_nonempty_string(
+            route_values[0], "regeneration metadata.route_intent.route_id"
+        )
+        _require_nonempty_string(
+            route_values[1], "regeneration metadata.route_intent.route_title"
+        )
+
+    route_contract = metadata["route_contract"]
+    projection = metadata["readiness_projection"]
+    if (route_contract is None) != (projection is None):
+        raise ProvenanceError(
+            "regeneration metadata route contract and readiness projection must pair"
+        )
+    if route_contract is None:
+        if route_values != (None, None):
+            raise ProvenanceError(
+                "legacy regeneration metadata cannot retain a readiness route"
+            )
+    else:
+        projection_mapping = _require_exact_keys(
+            projection,
+            set(_READINESS_PROJECTION_KEYS),
+            "regeneration metadata.readiness_projection",
+        )
+        candidate = dict(metadata)
+        candidate["readiness_projection"] = projection_mapping
+        try:
+            plan = validate_ready_plan(_reconstructed_ready_plan(candidate))
+        except ReadinessValidationError as error:
+            raise ProvenanceError(
+                f"invalid regeneration readiness projection: {error}"
+            ) from error
+        if plan["route_id"] != route_values[0]:
+            raise ProvenanceError(
+                "regeneration metadata route intent does not match readiness route"
+            )
+        if plan["route_contract"]["route"]["title"] != route_values[1]:
+            raise ProvenanceError(
+                "regeneration metadata route title does not match readiness route"
+            )
+        if plan.get("language", "zh-CN") != language:
+            raise ProvenanceError(
+                "regeneration metadata language does not match readiness route"
+            )
+    return deepcopy(dict(metadata))
+
+
+def regeneration_input_sha256(value: object) -> str:
+    """Hash the canonical, validated private regeneration inputs."""
+
+    return _canonical_json_digest(validate_regeneration_metadata(value))
+
+
+def write_regeneration_metadata(
+    course_root: Path,
+    spec: Mapping[str, Any],
+    *,
+    readiness_plan: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Write private regeneration inputs before provenance and the Git baseline."""
+
+    root = Path(course_root)
+    metadata = build_regeneration_metadata(spec, readiness_plan=readiness_plan)
+    path = root / REGENERATION_RELATIVE_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        temporary.write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return metadata
+
+
+def load_regeneration_metadata(course_root: Path) -> dict[str, Any]:
+    """Load and validate private regeneration inputs from a generated course."""
+
+    root, path = _control_document_path(
+        Path(course_root),
+        REGENERATION_RELATIVE_PATH,
+        "course regeneration metadata",
+    )
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ProvenanceError(
+            f"cannot load course regeneration metadata: {error}"
+        ) from error
+    metadata = validate_regeneration_metadata(value)
+    _validate_regeneration_course_binding(root, metadata)
+    return metadata
+
+
+def _canonical_course_contract(course_root: Path) -> dict[str, Any]:
+    _, path = _control_document_path(
+        course_root,
+        CANONICAL_COURSE_RELATIVE_PATH,
+        "canonical course source",
+    )
+    try:
+        source = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ProvenanceError(f"cannot load canonical course source: {error}") from error
+    if not isinstance(source, Mapping):
+        raise ProvenanceError("canonical course source must be an object")
+    schema_version = source.get("schema_version")
+    if not isinstance(schema_version, int) or isinstance(schema_version, bool):
+        raise ProvenanceError("canonical course schema_version must be an integer")
+    course_id = _require_nonempty_string(source.get("id"), "canonical course id")
+    title = _require_nonempty_string(source.get("title"), "canonical course title")
+    language = _require_nonempty_string(
+        source.get("language"), "canonical course language"
+    )
+    if language not in {"zh-CN", "en"}:
+        raise ProvenanceError("canonical course language is unsupported")
+    manifest = source.get("manifest")
+    if not isinstance(manifest, Mapping):
+        raise ProvenanceError("canonical course manifest must be an object")
+    target = manifest.get("target")
+    if not isinstance(target, Mapping):
+        raise ProvenanceError("canonical course target must be an object")
+    target_name = _require_nonempty_string(
+        target.get("name"), "canonical course target.name"
+    )
+    target_version = _require_nonempty_string(
+        target.get("version"), "canonical course target.version"
+    )
+    track = target.get("track")
+    if track is not None:
+        track = _require_nonempty_string(track, "canonical course target.track")
+    route_id: str | None = None
+    audience = source.get("audience")
+    if isinstance(audience, Mapping):
+        profile = audience.get("prerequisite_profile")
+        if isinstance(profile, Mapping) and profile.get("route_id") is not None:
+            route_id = _require_nonempty_string(
+                profile.get("route_id"),
+                "canonical course audience.prerequisite_profile.route_id",
+            )
+    return {
+        "schema_version": schema_version,
+        "course_id": course_id,
+        "course_title": title,
+        "language": language,
+        "target": {
+            "name": target_name,
+            "version": target_version,
+            "track": track,
+        },
+        "route_id": route_id,
+    }
+
+
+def _validate_regeneration_course_binding(
+    course_root: Path,
+    metadata: Mapping[str, Any],
+) -> None:
+    canonical = _canonical_course_contract(course_root)
+    intent = metadata["route_intent"]
+    if metadata["language"] != canonical["language"]:
+        raise ProvenanceError(
+            "regeneration metadata language does not match canonical source"
+        )
+    if metadata["target"] != canonical["target"]:
+        raise ProvenanceError(
+            "regeneration metadata target does not match canonical source"
+        )
+    if intent["course_id"] != canonical["course_id"]:
+        raise ProvenanceError(
+            "regeneration metadata course id does not match canonical source"
+        )
+    if intent["course_title"] != canonical["course_title"]:
+        raise ProvenanceError(
+            "regeneration metadata course title does not match canonical source"
+        )
+    if intent["route_id"] != canonical["route_id"]:
+        raise ProvenanceError(
+            "regeneration metadata route id does not match canonical source"
+        )
+
+
+def trusted_readiness_reuse(
+    course_root: Path,
+    route_contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Reuse only unchanged capability decisions from verified v2 metadata."""
+
+    provenance = load_generation_provenance(course_root, verify_hashes=True)
+    if provenance["schema_version"] != PROVENANCE_SCHEMA_VERSION:
+        raise ProvenanceError(
+            "legacy provenance cannot establish trusted readiness reuse"
+        )
+    metadata = load_regeneration_metadata(course_root)
+    old_contract = metadata["route_contract"]
+    old_projection = metadata["readiness_projection"]
+    if old_contract is None or old_projection is None:
+        raise ProvenanceError(
+            "course requires full readiness reassessment"
+        )
+    try:
+        current_contract = validate_route_contract(route_contract)
+    except ReadinessValidationError as error:
+        raise ProvenanceError(f"invalid current route contract: {error}") from error
+    if current_contract.get("language", "zh-CN") != metadata["language"]:
+        raise ProvenanceError(
+            "current readiness route language does not match the generated course"
+        )
+    route_intent = metadata["route_intent"]
+    if current_contract["route"]["id"] != route_intent["route_id"]:
+        raise ProvenanceError(
+            "current readiness route id does not match the locked route intent"
+        )
+    if current_contract["route"]["title"] != route_intent["route_title"]:
+        raise ProvenanceError(
+            "current readiness route title does not match the locked route intent"
+        )
+
+    old_hashes = {
+        str(record["id"]): str(record["sha256"])
+        for record in old_contract["capability_contracts"]
+    }
+    current_records = current_contract["capability_contracts"]
+    current_hashes = {
+        str(record["id"]): str(record["sha256"])
+        for record in current_records
+    }
+    old_decisions = {
+        str(capability["id"]): str(capability["status"])
+        for capability in old_projection["capabilities"]
+    }
+    reusable: list[dict[str, str]] = []
+    needs_evidence: list[str] = []
+    new_ids: list[str] = []
+    changed_ids: list[str] = []
+    for record in current_records:
+        capability_id = str(record["id"])
+        if capability_id not in old_hashes:
+            new_ids.append(capability_id)
+            needs_evidence.append(capability_id)
+        elif old_hashes[capability_id] != record["sha256"]:
+            changed_ids.append(capability_id)
+            needs_evidence.append(capability_id)
+        else:
+            status = old_decisions.get(capability_id)
+            if status not in {"known", "missing"}:
+                raise ProvenanceError(
+                    f"trusted readiness decision is missing: {capability_id}"
+                )
+            reusable.append(
+                {
+                    "capability_id": capability_id,
+                    "contract_sha256": str(record["sha256"]),
+                    "status": status,
+                }
+            )
+    removed_ids = [
+        capability_id
+        for capability_id in old_hashes
+        if capability_id not in current_hashes
+    ]
+    return {
+        "schema_version": 1,
+        "mode": "reuse_unchanged",
+        "source": {
+            "course_identity_sha256": provenance["course"]["identity_sha256"],
+            "authoring_contract_sha256": provenance["authoring_contract"]["sha256"],
+            "regeneration_input_sha256": provenance["regeneration_input"]["sha256"],
+        },
+        "route_contract_sha256": _canonical_json_digest(current_contract),
+        "reusable_decisions": reusable,
+        "reusable_capability_ids": [
+            decision["capability_id"] for decision in reusable
+        ],
+        "needs_evidence_capability_ids": needs_evidence,
+        "missing_capability_ids": [
+            decision["capability_id"]
+            for decision in reusable
+            if decision["status"] == "missing"
+        ],
+        "new_capability_ids": new_ids,
+        "changed_capability_ids": changed_ids,
+        "removed_capability_ids": removed_ids,
+    }
+
+
 def _managed_path_is_excluded(relative: str) -> bool:
     parts = PurePosixPath(relative).parts
-    if relative == PROVENANCE_RELATIVE_PATH:
+    if relative in {PROVENANCE_RELATIVE_PATH, REGENERATION_RELATIVE_PATH}:
         return True
     if ".git" in parts or any(name in parts for name in TREE_IGNORE_NAMES):
         return True
@@ -461,8 +842,13 @@ def build_generation_provenance(
     if not source_root.is_dir():
         raise ProvenanceError("generated course is missing canonical source")
     plugin = _plugin_metadata()
+    regeneration_metadata = load_regeneration_metadata(root)
     identity = _course_identity(spec)
     identity["identity_sha256"] = course_identity_sha256(identity)
+    try:
+        contract_sha256 = authoring_contract_sha256()
+    except AuthoringContractError as error:
+        raise ProvenanceError(f"cannot build authoring contract: {error}") from error
     provenance = {
         "schema_version": PROVENANCE_SCHEMA_VERSION,
         "plugin": plugin,
@@ -476,8 +862,13 @@ def build_generation_provenance(
         "authoring": {
             "sha256": hash_tree(source_root, ignore=TREE_IGNORE_NAMES),
         },
+        "authoring_contract": {
+            "sha256": contract_sha256,
+        },
+        "regeneration_input": {
+            "sha256": regeneration_input_sha256(regeneration_metadata),
+        },
         "course": identity,
-        "applied_migrations": list(current_migration_ids()),
         "managed_files": _managed_files(root),
     }
     return validate_generation_provenance(provenance)
@@ -507,6 +898,30 @@ def _verify_course_hashes(root: Path, provenance: Mapping[str, Any]) -> None:
     source_root = root / "platform" / "course" / "source"
     if hash_tree(source_root, ignore=TREE_IGNORE_NAMES) != provenance["authoring"]["sha256"]:
         raise ProvenanceError("canonical authoring source hash mismatch")
+    canonical = _canonical_course_contract(root)
+    canonical_identity = {
+        "id": canonical["course_id"],
+        "schema_version": canonical["schema_version"],
+        "language": canonical["language"],
+        "target": {
+            "name": canonical["target"]["name"],
+            "version": canonical["target"]["version"],
+        },
+    }
+    canonical_identity["identity_sha256"] = course_identity_sha256(
+        canonical_identity
+    )
+    if provenance["course"] != canonical_identity:
+        raise ProvenanceError(
+            "provenance course identity does not match canonical source"
+        )
+    if provenance["schema_version"] == PROVENANCE_SCHEMA_VERSION:
+        metadata = load_regeneration_metadata(root)
+        if (
+            regeneration_input_sha256(metadata)
+            != provenance["regeneration_input"]["sha256"]
+        ):
+            raise ProvenanceError("regeneration input hash mismatch")
 
 
 def validate_generation_provenance(
@@ -517,9 +932,11 @@ def validate_generation_provenance(
 ) -> dict[str, Any]:
     """Strictly validate provenance and optionally bind it to current file bytes."""
 
-    provenance = _require_exact_keys(
-        value,
-        {
+    if not isinstance(value, Mapping):
+        raise ProvenanceError("provenance must be an object")
+    schema_version = value.get("schema_version")
+    if schema_version == LEGACY_PROVENANCE_SCHEMA_VERSION:
+        expected_keys = {
             "schema_version",
             "plugin",
             "skill",
@@ -529,11 +946,23 @@ def validate_generation_provenance(
             "course",
             "applied_migrations",
             "managed_files",
-        },
-        "provenance",
-    )
-    if provenance["schema_version"] != PROVENANCE_SCHEMA_VERSION:
+        }
+    elif schema_version == PROVENANCE_SCHEMA_VERSION:
+        expected_keys = {
+            "schema_version",
+            "plugin",
+            "skill",
+            "bundle",
+            "template",
+            "authoring",
+            "authoring_contract",
+            "regeneration_input",
+            "course",
+            "managed_files",
+        }
+    else:
         raise ProvenanceError("unsupported provenance schema_version")
+    provenance = _require_exact_keys(value, expected_keys, "provenance")
     plugin = _validate_name_version(provenance["plugin"], "provenance.plugin")
     skill = _validate_name_version(provenance["skill"], "provenance.skill")
     if plugin["name"] != PLUGIN_NAME:
@@ -547,6 +976,14 @@ def validate_generation_provenance(
             f"provenance.{field}",
         )
         _require_sha256(digest["sha256"], f"provenance.{field}.sha256")
+    if schema_version == PROVENANCE_SCHEMA_VERSION:
+        for field in ("authoring_contract", "regeneration_input"):
+            digest = _require_exact_keys(
+                provenance[field],
+                {"sha256"},
+                f"provenance.{field}",
+            )
+            _require_sha256(digest["sha256"], f"provenance.{field}.sha256")
 
     course = _require_exact_keys(
         provenance["course"],
@@ -575,21 +1012,18 @@ def validate_generation_provenance(
     if identity_digest != course_identity_sha256(course):
         raise ProvenanceError("provenance.course.identity_sha256 does not match identity")
 
-    migrations = provenance["applied_migrations"]
-    if not isinstance(migrations, list) or not all(
-        isinstance(identifier, str) and identifier for identifier in migrations
-    ):
-        raise ProvenanceError("provenance.applied_migrations must be a string list")
-    if len(migrations) != len(set(migrations)):
-        raise ProvenanceError("provenance.applied_migrations contains duplicates")
-    registered = current_migration_ids()
-    unknown = sorted(set(migrations) - set(registered))
-    if unknown:
-        raise ProvenanceError("provenance references unknown migration ids: " + ", ".join(unknown))
-    if tuple(migrations) != registered[: len(migrations)]:
-        raise ProvenanceError(
-            "provenance.applied_migrations must be a registry-order prefix"
-        )
+    if schema_version == LEGACY_PROVENANCE_SCHEMA_VERSION:
+        migrations = provenance["applied_migrations"]
+        if not isinstance(migrations, list) or not all(
+            isinstance(identifier, str) and identifier for identifier in migrations
+        ):
+            raise ProvenanceError(
+                "provenance.applied_migrations must be a string list"
+            )
+        if len(migrations) != len(set(migrations)):
+            raise ProvenanceError(
+                "provenance.applied_migrations contains duplicates"
+            )
 
     managed = provenance["managed_files"]
     if not isinstance(managed, Mapping):
@@ -647,13 +1081,11 @@ def load_generation_provenance(
 ) -> dict[str, Any]:
     """Load provenance from a course root (or from the provenance file itself)."""
 
-    supplied = Path(course_root)
-    if supplied.name == Path(PROVENANCE_RELATIVE_PATH).name and supplied.is_file():
-        path = supplied
-        root = supplied.parents[1]
-    else:
-        root = supplied
-        path = root / PROVENANCE_RELATIVE_PATH
+    root, path = _control_document_path(
+        Path(course_root),
+        PROVENANCE_RELATIVE_PATH,
+        "course provenance",
+    )
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -669,11 +1101,18 @@ def provenance_report(provenance: Mapping[str, Any]) -> dict[str, Any]:
     """Return the stable, compact scaffold-report projection."""
 
     validated = validate_generation_provenance(provenance)
-    return {
+    report = {
         "path": PROVENANCE_RELATIVE_PATH,
         "schema_version": validated["schema_version"],
         "plugin_version": validated["plugin"]["version"],
         "skill_version": validated["skill"]["version"],
         "course_identity_sha256": validated["course"]["identity_sha256"],
-        "applied_migrations": list(validated["applied_migrations"]),
     }
+    if validated["schema_version"] == PROVENANCE_SCHEMA_VERSION:
+        report["authoring_contract_sha256"] = validated["authoring_contract"][
+            "sha256"
+        ]
+        report["regeneration_input_sha256"] = validated["regeneration_input"][
+            "sha256"
+        ]
+    return report

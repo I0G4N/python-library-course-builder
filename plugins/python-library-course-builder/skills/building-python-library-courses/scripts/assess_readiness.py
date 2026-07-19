@@ -24,6 +24,14 @@ DIAGNOSTIC_KINDS = {"prediction", "code_reading", "micro_code"}
 EVIDENCE_KINDS = {"code", "conversation", "self_report"}
 EVIDENCE_VERDICTS = {"sufficient", "missing", "claim"}
 SUPPORTED_LANGUAGES = {"zh-CN", "en"}
+READINESS_BASES = {
+    "trusted-prior-decision",
+    "evidence",
+    "code-evidence",
+    "conversation-diagnostic-evidence",
+    "declared-missing",
+    "diagnostic-answer",
+}
 UNKNOWN_ANSWERS = {
     "不会",
     "我不会",
@@ -347,6 +355,76 @@ def _validate_route(payload: Any) -> tuple[dict[str, Any], list[str], dict[str, 
     return route_spec, ordered, levels
 
 
+def _route_contract_payload(contract: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: copy.deepcopy(value)
+        for key, value in contract.items()
+        if key != "capability_contracts"
+    }
+
+
+def build_route_contract(payload: Any) -> dict[str, Any]:
+    """Persist the complete diagnostic contract without learner evidence."""
+
+    route, ordered_ids, _ = _validate_route(payload)
+    by_id = {str(item["id"]): item for item in route["capabilities"]}
+    return {
+        **copy.deepcopy(route),
+        "capability_contracts": [
+            {"id": capability_id, "sha256": _digest(by_id[capability_id])}
+            for capability_id in ordered_ids
+        ],
+    }
+
+
+def validate_route_contract(payload: Any) -> dict[str, Any]:
+    """Validate full capability definitions and their independent digests."""
+
+    contract = copy.deepcopy(_object(payload, "route contract"))
+    schema_version = contract.get("schema_version")
+    expected_fields = {
+        "schema_version",
+        "route",
+        "official_sources",
+        "capabilities",
+        "capability_contracts",
+        *({"language"} if schema_version == 2 else set()),
+    }
+    _exact_fields(contract, expected_fields, "route contract")
+    route = _route_contract_payload(contract)
+    validated_route, ordered_ids, _ = _validate_route(route)
+    records = _array(
+        contract.get("capability_contracts"),
+        "route contract.capability_contracts",
+    )
+    by_id = {
+        str(capability["id"]): capability
+        for capability in validated_route["capabilities"]
+    }
+    if len(records) != len(ordered_ids):
+        raise ReadinessValidationError(
+            "route contract.capability_contracts must cover every capability"
+        )
+    for index, (raw_record, capability_id) in enumerate(
+        zip(records, ordered_ids, strict=True)
+    ):
+        label = f"route contract.capability_contracts[{index}]"
+        record = _object(raw_record, label)
+        _exact_fields(record, {"id", "sha256"}, label)
+        if record.get("id") != capability_id:
+            raise ReadinessValidationError(
+                "route contract.capability_contracts must follow DAG order"
+            )
+        digest = record.get("sha256")
+        if not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest):
+            raise ReadinessValidationError(f"{label}.sha256 must be sha256")
+        if digest != _digest(by_id[capability_id]):
+            raise ReadinessValidationError(
+                f"{label}.sha256 does not match its capability definition"
+            )
+    return {**validated_route, "capability_contracts": copy.deepcopy(records)}
+
+
 def _validate_evidence(
     payload: Any,
     *,
@@ -477,6 +555,7 @@ def _safe_plan_projection(plan: dict[str, Any]) -> dict[str, Any]:
         "status",
         "route_id",
         "route_digest",
+        "route_contract",
         "official_sources",
         "official_source_ids",
         "capability_dag",
@@ -559,6 +638,7 @@ def validate_ready_plan(payload: Any) -> dict[str, Any]:
         "status",
         "route_id",
         "route_digest",
+        "route_contract",
         "official_sources",
         "official_source_ids",
         "capability_dag",
@@ -591,6 +671,24 @@ def validate_ready_plan(payload: Any) -> dict[str, Any]:
     route_digest = plan.get("route_digest")
     if not isinstance(route_digest, str) or not SHA256_PATTERN.fullmatch(route_digest):
         raise ReadinessValidationError("readiness plan.route_digest must be sha256")
+    route_contract = validate_route_contract(plan.get("route_contract"))
+    route_payload = _route_contract_payload(route_contract)
+    if route_contract["schema_version"] != schema_version:
+        raise ReadinessValidationError(
+            "readiness plan route contract schema_version must match the plan"
+        )
+    if schema_version == 2 and route_contract["language"] != plan["language"]:
+        raise ReadinessValidationError(
+            "readiness plan route contract language must match the plan"
+        )
+    if route_contract["route"]["id"] != plan["route_id"]:
+        raise ReadinessValidationError(
+            "readiness plan route contract id must match route_id"
+        )
+    if _digest(route_payload) != route_digest:
+        raise ReadinessValidationError(
+            "readiness plan route contract does not match route_digest"
+        )
     summary = plan.get("readiness_summary")
     if not isinstance(summary, str) or not SUMMARY_PATTERN.fullmatch(summary):
         raise ReadinessValidationError(
@@ -620,12 +718,21 @@ def validate_ready_plan(payload: Any) -> dict[str, Any]:
         raise ReadinessValidationError(
             "readiness plan official_source_ids must match official_sources order"
         )
+    if normalized_sources != route_contract["official_sources"]:
+        raise ReadinessValidationError(
+            "readiness plan official_sources must match route contract"
+        )
     raw_dag = _array(plan.get("capability_dag"), "readiness plan.capability_dag")
 
     required_ids = _string_array(
         plan.get("required_capability_ids"),
         "readiness plan.required_capability_ids",
     )
+    _, contract_order, contract_levels = _validate_route(route_payload)
+    if required_ids != contract_order:
+        raise ReadinessValidationError(
+            "readiness plan required_capability_ids must match route contract"
+        )
     mastered_ids = _string_array(
         plan.get("mastered_capability_ids"),
         "readiness plan.mastered_capability_ids",
@@ -689,6 +796,31 @@ def validate_ready_plan(payload: Any) -> dict[str, Any]:
             )
         dag_by_id[capability_id] = entry
         dag_levels[capability_id] = expected_level
+    contract_by_id = {
+        str(capability["id"]): capability
+        for capability in route_contract["capabilities"]
+    }
+    expected_dag = []
+    for capability_id in required_ids:
+        definition = contract_by_id[capability_id]
+        expected_dag.append(
+            {
+                "id": capability_id,
+                "kind": definition["kind"],
+                "requires": copy.deepcopy(definition["requires"]),
+                "dag_level": contract_levels[capability_id],
+                "prep_tier": definition["prep_tier"],
+                **(
+                    {"prep_reason": definition["prep_reason"]}
+                    if "prep_reason" in definition
+                    else {}
+                ),
+            }
+        )
+    if raw_dag != expected_dag:
+        raise ReadinessValidationError(
+            "readiness plan capability_dag must match route contract"
+        )
     capabilities = _array(plan.get("capabilities"), "readiness plan.capabilities")
     if len(capabilities) != len(required_ids):
         raise ReadinessValidationError(
@@ -720,6 +852,16 @@ def validate_ready_plan(payload: Any) -> dict[str, Any]:
             )
         for key in ("subject", "title", "basis"):
             _text(capability, key, label)
+        if capability["basis"] not in READINESS_BASES:
+            raise ReadinessValidationError(
+                f"{label}.basis must be a privacy-safe readiness basis"
+            )
+        definition = contract_by_id[capability_id]
+        for key in ("kind", "subject", "title", "source_ids", "first_used_in"):
+            if capability.get(key) != definition.get(key):
+                raise ReadinessValidationError(
+                    f"{label}.{key} must match route contract"
+                )
         capability_sources = _string_array(
             capability.get("source_ids"), f"{label}.source_ids"
         )
@@ -875,7 +1017,165 @@ def validate_ready_plan(payload: Any) -> dict[str, Any]:
     return _safe_plan_projection(plan) | {"plan_digest": supplied_digest}
 
 
-def assess_readiness(route_payload: Any, evidence_payload: Any) -> dict[str, Any]:
+def _validate_trusted_prior_decisions(
+    payload: Any,
+    *,
+    route_contract: dict[str, Any],
+) -> list[dict[str, str]]:
+    trusted = copy.deepcopy(_object(payload, "trusted prior decisions"))
+    _exact_fields(
+        trusted,
+        {
+            "schema_version",
+            "mode",
+            "source",
+            "route_contract_sha256",
+            "reusable_decisions",
+            "reusable_capability_ids",
+            "needs_evidence_capability_ids",
+            "missing_capability_ids",
+            "new_capability_ids",
+            "changed_capability_ids",
+            "removed_capability_ids",
+        },
+        "trusted prior decisions",
+    )
+    if trusted.get("schema_version") != 1:
+        raise ReadinessValidationError(
+            "trusted prior decisions.schema_version must be 1"
+        )
+    if trusted.get("mode") != "reuse_unchanged":
+        raise ReadinessValidationError(
+            "trusted prior decisions.mode must be reuse_unchanged"
+        )
+    source = _object(trusted.get("source"), "trusted prior decisions.source")
+    _exact_fields(
+        source,
+        {
+            "course_identity_sha256",
+            "authoring_contract_sha256",
+            "regeneration_input_sha256",
+        },
+        "trusted prior decisions.source",
+    )
+    for key, value in source.items():
+        if not isinstance(value, str) or not SHA256_PATTERN.fullmatch(value):
+            raise ReadinessValidationError(
+                f"trusted prior decisions.source.{key} must be sha256"
+            )
+    expected_contract_digest = _digest(route_contract)
+    if trusted.get("route_contract_sha256") != expected_contract_digest:
+        raise ReadinessValidationError(
+            "trusted prior decisions do not match the current route contract"
+        )
+
+    records = _array(
+        trusted.get("reusable_decisions"),
+        "trusted prior decisions.reusable_decisions",
+    )
+    current_hashes = {
+        str(record["id"]): str(record["sha256"])
+        for record in route_contract["capability_contracts"]
+    }
+    current_ids = list(current_hashes)
+    reusable_ids: list[str] = []
+    normalized: list[dict[str, str]] = []
+    for index, raw_record in enumerate(records):
+        label = f"trusted prior decisions.reusable_decisions[{index}]"
+        record = _object(raw_record, label)
+        _exact_fields(
+            record,
+            {"capability_id", "contract_sha256", "status"},
+            label,
+        )
+        capability_id = _text(record, "capability_id", label)
+        if capability_id in reusable_ids:
+            raise ReadinessValidationError(
+                f"duplicate trusted prior decision: {capability_id}"
+            )
+        if capability_id not in current_hashes:
+            raise ReadinessValidationError(
+                f"{label}.capability_id is not in the current route"
+            )
+        if record.get("contract_sha256") != current_hashes[capability_id]:
+            raise ReadinessValidationError(
+                f"{label}.contract_sha256 does not match the current capability"
+            )
+        if record.get("status") not in {"known", "missing"}:
+            raise ReadinessValidationError(
+                f"{label}.status must be known or missing"
+            )
+        reusable_ids.append(capability_id)
+        normalized.append(
+            {
+                "capability_id": capability_id,
+                "contract_sha256": str(record["contract_sha256"]),
+                "status": str(record["status"]),
+            }
+        )
+    expected_reusable_order = [
+        capability_id
+        for capability_id in current_ids
+        if capability_id in set(reusable_ids)
+    ]
+    if reusable_ids != expected_reusable_order:
+        raise ReadinessValidationError(
+            "trusted reusable decisions must follow current DAG order"
+        )
+    if trusted.get("reusable_capability_ids") != reusable_ids:
+        raise ReadinessValidationError(
+            "trusted reusable_capability_ids must match reusable decisions"
+        )
+    expected_missing_ids = [
+        decision["capability_id"]
+        for decision in normalized
+        if decision["status"] == "missing"
+    ]
+    if trusted.get("missing_capability_ids") != expected_missing_ids:
+        raise ReadinessValidationError(
+            "trusted missing_capability_ids must match reusable missing decisions"
+        )
+    needs = _string_array(
+        trusted.get("needs_evidence_capability_ids"),
+        "trusted prior decisions.needs_evidence_capability_ids",
+        allow_empty=True,
+    )
+    if needs != [item for item in current_ids if item not in set(reusable_ids)]:
+        raise ReadinessValidationError(
+            "trusted prior decisions must resolve only unchanged capabilities"
+        )
+    new_ids = _string_array(
+        trusted.get("new_capability_ids"),
+        "trusted prior decisions.new_capability_ids",
+        allow_empty=True,
+    )
+    changed_ids = _string_array(
+        trusted.get("changed_capability_ids"),
+        "trusted prior decisions.changed_capability_ids",
+        allow_empty=True,
+    )
+    removed_ids = _string_array(
+        trusted.get("removed_capability_ids"),
+        "trusted prior decisions.removed_capability_ids",
+        allow_empty=True,
+    )
+    if set(new_ids).intersection(changed_ids) or set(new_ids + changed_ids) != set(needs):
+        raise ReadinessValidationError(
+            "trusted new and changed capabilities must equal needs_evidence"
+        )
+    if set(removed_ids).intersection(current_ids):
+        raise ReadinessValidationError(
+            "trusted removed capabilities cannot appear in the current route"
+        )
+    return normalized
+
+
+def assess_readiness(
+    route_payload: Any,
+    evidence_payload: Any,
+    *,
+    trusted_prior_decisions: Any | None = None,
+) -> dict[str, Any]:
     """Return one next diagnostic or a complete, integrity-checked ready plan."""
 
     route, ordered_ids, levels = _validate_route(route_payload)
@@ -896,6 +1196,18 @@ def assess_readiness(route_payload: Any, evidence_payload: Any) -> dict[str, Any
         for capability in route["capabilities"]
     }
     resolutions: dict[str, tuple[str, str]] = {}
+    route_contract = build_route_contract(route)
+    if trusted_prior_decisions is not None:
+        for decision in _validate_trusted_prior_decisions(
+            trusted_prior_decisions,
+            route_contract=route_contract,
+        ):
+            _set_resolution(
+                resolutions,
+                decision["capability_id"],
+                decision["status"],
+                "trusted-prior-decision",
+            )
 
     for index, raw_item in enumerate(evidence["evidence"]):
         label = f"evidence report.evidence[{index}]"
@@ -1032,6 +1344,7 @@ def assess_readiness(route_payload: Any, evidence_payload: Any) -> dict[str, Any
         "status": "needs_evidence" if needs_evidence_ids else "ready",
         "route_id": route_id,
         "route_digest": _digest(route),
+        "route_contract": route_contract,
         "official_sources": copy.deepcopy(route["official_sources"]),
         "official_source_ids": [str(item["id"]) for item in route["official_sources"]],
         "capability_dag": [
@@ -1130,16 +1443,65 @@ def _load_json(path: Path, label: str) -> Any:
         raise ReadinessValidationError(f"{label} is invalid JSON: {path}: {error}") from error
 
 
+def _bind_trusted_prior_to_course(
+    route_payload: Any,
+    trusted_payload: Any,
+    course_root: Path,
+) -> Any:
+    """Recompute trusted decisions from course bytes before CLI consumption."""
+
+    # Imported lazily because course_provenance itself imports this module's
+    # route/readiness validators.
+    from course_provenance import ProvenanceError, trusted_readiness_reuse
+
+    try:
+        expected = trusted_readiness_reuse(
+            course_root.resolve(strict=True),
+            build_route_contract(route_payload),
+        )
+    except (OSError, ProvenanceError) as error:
+        raise ReadinessValidationError(
+            f"trusted prior decisions cannot be bound to the course: {error}"
+        ) from error
+    if trusted_payload != expected:
+        raise ReadinessValidationError(
+            "trusted prior decisions do not match the verified course and route"
+        )
+    return trusted_payload
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("route", type=Path)
     parser.add_argument("evidence", type=Path)
+    parser.add_argument("--trusted-prior-decisions", type=Path)
+    parser.add_argument("--trusted-course", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if (args.trusted_prior_decisions is None) != (args.trusted_course is None):
+            raise ReadinessValidationError(
+                "--trusted-prior-decisions and --trusted-course must be supplied together"
+            )
+        route_payload = _load_json(args.route, "route specification")
+        trusted_payload = (
+            _load_json(
+                args.trusted_prior_decisions,
+                "trusted prior decisions",
+            )
+            if args.trusted_prior_decisions is not None
+            else None
+        )
+        if trusted_payload is not None:
+            trusted_payload = _bind_trusted_prior_to_course(
+                route_payload,
+                trusted_payload,
+                args.trusted_course,
+            )
         report = assess_readiness(
-            _load_json(args.route, "route specification"),
+            route_payload,
             _load_json(args.evidence, "evidence report"),
+            trusted_prior_decisions=trusted_payload,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(
