@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping
+import copy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -12,18 +13,30 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 from typing import Any
 
 from assess_readiness import ReadinessValidationError, build_route_contract
+from authoring_contract import (
+    v4_content_contract_sha256,
+    v4_runtime_contract_sha256,
+)
 from course_provenance import (
     PROVENANCE_RELATIVE_PATH,
     ProvenanceError,
     load_generation_provenance,
     load_regeneration_metadata,
     trusted_readiness_reuse,
+)
+from verify_v4_course import (
+    V4VerificationError,
+    tree_sha256 as v4_tree_sha256,
+    validate_v4_receipt,
 )
 
 
@@ -32,10 +45,59 @@ PLUGIN_MANIFEST_PATH = SKILL_ROOT.parents[1] / ".codex-plugin" / "plugin.json"
 VERIFIER_PATH = Path(__file__).with_name("verify_learning_project.py")
 SOURCE_PATH = Path("platform/course/source")
 STATE_PATH = Path("labs/.coursekit/state.json")
-PLAN_SCHEMA_VERSION = 1
+PLAN_SCHEMA_VERSION = 2
+REPLACEMENT_POLICY = "delete-old-after-success"
+ROLLBACK_LEARNER_NAME = "learner"
+ROLLBACK_AUTHOR_NAME = "author"
 GENERATED_BASELINE_MESSAGE = "coursekit: generated baseline"
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$")
+LOCAL_CACHEBUSTER_RE = re.compile(r"\+codex\.[0-9A-Za-z.-]+$")
+V4_GENERATION_FIELDS = {
+    "schema_version",
+    "course_schema_version",
+    "course_id",
+    "curriculum_id",
+    "plugin_version",
+    "content_contract_sha256",
+    "runtime_contract_sha256",
+    "course_contract_sha256",
+}
+V4_DEPTH_BRIEF_FIELDS = (
+    "chapter_id",
+    "chapter_kind",
+    "core_question",
+    "project_increment",
+    "required_facts",
+    "interface_boundary",
+    "walkthrough_case",
+    "boundary_case",
+    "design_choice",
+    "credible_alternative",
+    "previous_handoff",
+    "next_handoff",
+    "official_sources",
+    "task_contracts",
+    "owned_paths",
+)
+V4_TARGETED_MUTABLE_PATHS = {
+    ".coursekit/acceptance-progress.json",
+    ".coursekit/acceptance-progress.json.lock",
+    ".coursekit/progress.json",
+    ".coursekit/progress.json.lock",
+    ".coursekit/state.json",
+    ".coursekit/state.json.lock",
+}
+V4_TARGETED_EPHEMERAL_NAMES = {
+    ".DS_Store",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".uv-cache",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+}
 MATERIAL_IGNORED_NAMES = {
     ".DS_Store",
     ".coverage",
@@ -86,6 +148,17 @@ class CourseBaseline:
     authoring_contract_sha256: str | None
 
 
+@dataclass(frozen=True)
+class _BoundRollbackEntry:
+    """One inode-bound entry accepted for transient rollback deletion."""
+
+    name: str
+    kind: str
+    fingerprint: tuple[int, int, int, int, int]
+    mount_identity: tuple[int, ...] | None
+    children: tuple[_BoundRollbackEntry, ...] = ()
+
+
 def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -118,6 +191,7 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
         raise CourseRegenerationError(f"JSON output path is unsafe: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     rendered = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
+    rendered_bytes = rendered.encode("utf-8")
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -129,11 +203,49 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
             delete=False,
         ) as stream:
             stream.write(rendered)
+            stream.flush()
+            os.fsync(stream.fileno())
             temporary = Path(stream.name)
-        os.replace(temporary, destination)
+        try:
+            os.replace(temporary, destination)
+        except OSError:
+            # rename(2) wrappers can report an error after the directory entry
+            # was already replaced. Treat the exact postcondition as success;
+            # callers must never roll back an installed course while a matching
+            # commit receipt is visible.
+            if not _json_output_matches(destination, rendered_bytes):
+                raise
+        _fsync_directory(destination.parent)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def _json_output_matches(path: Path, expected: bytes) -> bool:
+    try:
+        return (
+            not path.is_symlink()
+            and path.is_file()
+            and path.read_bytes() == expected
+        )
+    except OSError:
+        return False
+
+
+def _json_value_matches(path: Path, expected: Mapping[str, Any]) -> bool:
+    rendered = (
+        json.dumps(expected, ensure_ascii=False, indent=2) + "\n"
+    ).encode("utf-8")
+    return _json_output_matches(path, rendered)
+
+
+def _fsync_directory(path: Path) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(path, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _preflight_json_output(path: Path) -> Path:
@@ -368,10 +480,16 @@ def _regeneration_state(
             and baseline.authoring_contract_sha256
             != runtime.authoring_contract_sha256
         ):
-            raise CourseRegenerationError(
-                "plugin version collision: the same version has a different "
-                "authoring-contract fingerprint"
+            is_local_iteration = (
+                baseline.plugin_version != runtime.plugin_version
+                and LOCAL_CACHEBUSTER_RE.search(runtime.plugin_version)
+                is not None
             )
+            if not is_local_iteration:
+                raise CourseRegenerationError(
+                    "plugin version collision: the same release version has a "
+                    "different authoring-contract fingerprint"
+                )
     if baseline.schema_version < 2 or baseline.authoring_contract_sha256 is None:
         return "regeneration_required", "legacy course has no authoring fingerprint"
     if baseline.authoring_contract_sha256 != runtime.authoring_contract_sha256:
@@ -521,6 +639,34 @@ def _readiness_strategy(root: Path, baseline: CourseBaseline) -> dict[str, str]:
     }
 
 
+def _finalize_scan_records(
+    raw_records: list[
+        tuple[str, str, bytes, tuple[int, int] | None, int]
+    ],
+) -> list[tuple[str, str, bytes]]:
+    """Add hardlink topology to raw records using the canonical tree format."""
+
+    hardlink_groups: dict[tuple[int, int], list[str]] = {}
+    for relative, kind, _, inode, link_count in raw_records:
+        if kind == "file" and inode is not None and link_count > 1:
+            hardlink_groups.setdefault(inode, []).append(relative)
+    records: list[tuple[str, str, bytes]] = []
+    for relative, kind, value, inode, link_count in raw_records:
+        if kind == "file" and inode is not None and link_count > 1:
+            topology = json.dumps(
+                {
+                    "paths": sorted(hardlink_groups[inode]),
+                    "link_count": link_count,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            value += b"\0hardlink\0" + hashlib.sha256(topology).digest()
+        records.append((relative, kind, value))
+    return records
+
+
 def _scan_tree(root: Path) -> list[tuple[str, str, bytes]]:
     raw_records: list[
         tuple[str, str, bytes, tuple[int, int] | None, int]
@@ -586,30 +732,12 @@ def _scan_tree(root: Path) -> list[tuple[str, str, bytes]]:
                 ) from error
 
     visit(root, PurePosixPath())
-    hardlink_groups: dict[tuple[int, int], list[str]] = {}
-    for relative, kind, _, inode, link_count in raw_records:
-        if kind == "file" and inode is not None and link_count > 1:
-            hardlink_groups.setdefault(inode, []).append(relative)
-    records: list[tuple[str, str, bytes]] = []
-    for relative, kind, value, inode, link_count in raw_records:
-        if kind == "file" and inode is not None and link_count > 1:
-            topology = json.dumps(
-                {
-                    "paths": sorted(hardlink_groups[inode]),
-                    "link_count": link_count,
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-            value += b"\0hardlink\0" + hashlib.sha256(topology).digest()
-        records.append((relative, kind, value))
-    return records
+    return _finalize_scan_records(raw_records)
 
 
-def _snapshot(root: Path) -> str:
+def _snapshot_records(records: list[tuple[str, str, bytes]]) -> str:
     digest = hashlib.sha256()
-    for relative, kind, value in _scan_tree(root):
+    for relative, kind, value in records:
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
         digest.update(kind.encode("ascii"))
@@ -617,6 +745,882 @@ def _snapshot(root: Path) -> str:
         digest.update(value)
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _snapshot(root: Path) -> str:
+    return _snapshot_records(_scan_tree(root))
+
+
+def _v4_course_root(path: Path) -> Path:
+    supplied = path.expanduser()
+    if supplied.is_symlink():
+        raise CourseRegenerationError("v4 course path cannot be a symlink")
+    try:
+        root = supplied.resolve(strict=True)
+    except OSError as error:
+        raise CourseRegenerationError(f"v4 course path is unavailable: {error}") from error
+    if not root.is_dir():
+        raise CourseRegenerationError(f"v4 course path is not a directory: {root}")
+    course_toml = _control_path(root, Path("course.toml"), "v4 course")
+    public_binding = _control_path(
+        root, Path(".coursekit/course.json"), "v4 course"
+    )
+    if not course_toml.is_file() or not public_binding.is_file():
+        raise CourseRegenerationError(
+            "v4 course is missing course.toml or .coursekit/course.json"
+        )
+    try:
+        metadata = tomllib.loads(course_toml.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise CourseRegenerationError(f"v4 course.toml is invalid: {error}") from error
+    if metadata.get("schema_version") != 4:
+        raise CourseRegenerationError("chapter regeneration requires schema v4")
+    return root
+
+
+def _sha256_file(path: Path, *, label: str) -> str:
+    if path.is_symlink() or not path.is_file():
+        raise CourseRegenerationError(f"{label} is missing or unsafe")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _v4_chapter_artifact_digest(
+    learner: Path,
+    author: Path,
+    chapter: Mapping[str, Any],
+) -> str:
+    digest = hashlib.sha256()
+    chapter_id = str(chapter["id"])
+    roots: list[tuple[str, Path]] = [
+        (
+            f"learner/chapters/{chapter_id}",
+            learner / "chapters" / chapter_id,
+        ),
+        (f"learner/tests/{chapter_id}", learner / "tests" / chapter_id),
+        (f"learner/examples/{chapter_id}", learner / "examples" / chapter_id),
+        (
+            f"author/tests/hidden/{chapter_id}",
+            author / "tests" / "hidden" / chapter_id,
+        ),
+    ]
+    for owned in chapter.get("owned_paths", []):
+        if not isinstance(owned, str):
+            raise CourseRegenerationError(
+                f"{chapter_id}.owned_paths must contain text paths"
+            )
+        roots.extend(
+            (
+                (f"learner/{owned}", learner / owned),
+                (f"author/solution/{owned}", author / "solution" / owned),
+            )
+        )
+    for logical_path, root in roots:
+        digest.update(logical_path.encode("utf-8"))
+        digest.update(b"\0")
+        if not root.exists():
+            digest.update(b"missing\0")
+            continue
+        if root.is_symlink():
+            raise CourseRegenerationError(
+                f"{chapter_id} artifact cannot be a symlink: {root}"
+            )
+        if root.is_file():
+            records = [(root.name, "file", root.read_bytes())]
+        elif root.is_dir():
+            records = _scan_tree(root)
+        else:
+            raise CourseRegenerationError(
+                f"{chapter_id} artifact is not a regular path: {root}"
+            )
+        for relative, kind, value in records:
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(kind.encode("ascii"))
+            digest.update(b"\0")
+            digest.update(value)
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _v4_package_selector(
+    selector: Any,
+    *,
+    prefix: str,
+    label: str,
+) -> str:
+    if not isinstance(selector, str):
+        raise CourseRegenerationError(f"{label} must be text")
+    path, separator, node = selector.partition("::")
+    if not separator or not node or not path.startswith(prefix):
+        raise CourseRegenerationError(
+            f"{label} is not a projected schema-v4 selector"
+        )
+    package_path = path.removeprefix(prefix)
+    if (
+        not package_path
+        or package_path.startswith("/")
+        or ".." in PurePosixPath(package_path).parts
+    ):
+        raise CourseRegenerationError(f"{label} has an unsafe package path")
+    return f"{package_path}::{node}"
+
+
+def _v4_package_task_contract(
+    chapter_id: str,
+    task: Mapping[str, Any],
+    hidden_selectors: list[Any],
+) -> dict[str, Any]:
+    required = (
+        "id",
+        "title",
+        "file",
+        "symbol",
+        "prompt",
+        "points",
+        "timeout_seconds",
+        "public_tests",
+    )
+    if any(key not in task for key in required):
+        raise CourseRegenerationError(
+            f"{chapter_id} contains an incomplete projected task contract"
+        )
+    public = task.get("public_tests")
+    if not isinstance(public, list) or not public:
+        raise CourseRegenerationError(
+            f"{chapter_id}.{task.get('id')} has no public selectors"
+        )
+    if not hidden_selectors:
+        raise CourseRegenerationError(
+            f"{chapter_id}.{task.get('id')} has no hidden selectors"
+        )
+    result = {
+        key: copy.deepcopy(task[key])
+        for key in (
+            "id",
+            "title",
+            "file",
+            "symbol",
+            "prompt",
+            "points",
+            "timeout_seconds",
+        )
+    }
+    result["public_tests"] = [
+        _v4_package_selector(
+            selector,
+            prefix=f"tests/{chapter_id}/",
+            label=f"{chapter_id}.{task.get('id')} public selector",
+        )
+        for selector in public
+    ]
+    result["hidden_tests"] = [
+        _v4_package_selector(
+            selector,
+            prefix=f"tests/hidden/{chapter_id}/",
+            label=f"{chapter_id}.{task.get('id')} hidden selector",
+        )
+        for selector in hidden_selectors
+    ]
+    example_fields = {
+        key: task.get(f"example_{key}")
+        for key in ("input", "output", "explanation")
+        if f"example_{key}" in task
+    }
+    if example_fields:
+        if set(example_fields) != {"input", "output", "explanation"}:
+            raise CourseRegenerationError(
+                f"{chapter_id}.{task.get('id')} has an incomplete example"
+            )
+        result["example"] = example_fields
+    return result
+
+
+def _v4_locked_chapter(
+    learner: Path,
+    author: Path,
+    chapters: list[Any],
+    selected_index: int,
+) -> dict[str, Any]:
+    selected = chapters[selected_index]
+    if not isinstance(selected, Mapping):
+        raise CourseRegenerationError("schema-v4 chapter metadata is invalid")
+    chapter_id = str(selected.get("id"))
+    author_binding = _read_json(author / "author.json", "v4 author binding")
+    hidden_by_task = {
+        (str(task.get("chapter_id")), str(task.get("task_id"))): list(
+            task.get("hidden_tests", [])
+        )
+        for task in author_binding.get("tasks", [])
+        if isinstance(task, Mapping)
+        and isinstance(task.get("hidden_tests"), list)
+    }
+    task_contracts: list[dict[str, Any]] = []
+    tasks = selected.get("tasks", [])
+    if not isinstance(tasks, list):
+        raise CourseRegenerationError(
+            f"{chapter_id} contains an invalid task collection"
+        )
+    for task in tasks:
+        if not isinstance(task, Mapping):
+            raise CourseRegenerationError(
+                f"{chapter_id} contains an invalid task contract"
+            )
+        task_id = str(task.get("id"))
+        hidden = hidden_by_task.get((chapter_id, task_id))
+        if not hidden:
+            raise CourseRegenerationError(
+                f"author sibling has no hidden selectors for {task_id}"
+            )
+        task_contracts.append(
+            _v4_package_task_contract(chapter_id, task, hidden)
+        )
+    sources = {
+        str(source.get("id")): dict(source)
+        for source in _v4_metadata(learner).get("sources", [])
+        if isinstance(source, Mapping) and isinstance(source.get("id"), str)
+    }
+    source_ids = selected.get("source_ids", [])
+    if not isinstance(source_ids, list):
+        raise CourseRegenerationError(
+            f"{chapter_id} contains invalid official source ids"
+        )
+    official_sources = [
+        sources[source_id]
+        for source_id in source_ids
+        if isinstance(source_id, str) and source_id in sources
+    ]
+    if len(official_sources) != len(source_ids):
+        raise CourseRegenerationError(
+            f"{chapter_id} references an unavailable official source"
+        )
+    return {
+        "id": selected.get("id"),
+        "title": selected.get("title"),
+        "kind": selected.get("kind"),
+        "depends_on": selected.get("depends_on"),
+        "study_minutes": {
+            "min": selected.get("study_min"),
+            "max": selected.get("study_max"),
+            **(
+                {"reason": selected["study_reason"]}
+                if selected.get("study_reason") is not None
+                else {}
+            ),
+        },
+        "official_sources": official_sources,
+        "task_contracts": task_contracts,
+        "owned_paths": list(selected.get("owned_paths", [])),
+        "previous_handoff": (
+            {
+                "id": chapters[selected_index - 1]["id"],
+                "title": chapters[selected_index - 1]["title"],
+            }
+            if selected_index > 0
+            else None
+        ),
+        "next_handoff": (
+            {
+                "id": chapters[selected_index + 1]["id"],
+                "title": chapters[selected_index + 1]["title"],
+            }
+            if selected_index + 1 < len(chapters)
+            else None
+        ),
+    }
+
+
+def plan_v4_chapter_regeneration(
+    course: Path,
+    *,
+    chapter_id: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Create a prompt-safe request that recalls only one schema-v4 Writer."""
+
+    live = _v4_course_root(course)
+    if not reason.strip():
+        raise CourseRegenerationError("--reason must be non-empty")
+    author = live.with_name(f"{live.name}-author")
+    if author.is_symlink() or not author.is_dir():
+        raise CourseRegenerationError("v4 author sibling is missing or unsafe")
+    try:
+        metadata = tomllib.loads(
+            (live / "course.toml").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise CourseRegenerationError(f"v4 course.toml is invalid: {error}") from error
+    chapters = metadata.get("chapters")
+    if not isinstance(chapters, list):
+        raise CourseRegenerationError("v4 course.toml has no chapter route")
+    selected_index = next(
+        (
+            index
+            for index, chapter in enumerate(chapters)
+            if isinstance(chapter, dict) and chapter.get("id") == chapter_id
+        ),
+        None,
+    )
+    if selected_index is None:
+        raise CourseRegenerationError(f"unknown schema-v4 chapter: {chapter_id}")
+    selected = chapters[selected_index]
+    if not isinstance(selected, Mapping):
+        raise CourseRegenerationError(f"invalid schema-v4 chapter: {chapter_id}")
+    locked_chapter = _v4_locked_chapter(
+        live,
+        author,
+        chapters,
+        selected_index,
+    )
+    preserved = [
+        {
+            "chapter_id": str(chapter["id"]),
+            "artifact_sha256": _v4_chapter_artifact_digest(
+                live, author, chapter
+            ),
+        }
+        for chapter in chapters
+        if isinstance(chapter, Mapping) and chapter.get("id") != chapter_id
+    ]
+    return {
+        "schema_version": 1,
+        "mode": "chapter-regeneration-v4",
+        "course": str(live),
+        "author": str(author),
+        "chapter_id": chapter_id,
+        "reason": reason.strip(),
+        "live_course_contract_sha256": _v4_generation(live)[
+            "course_contract_sha256"
+        ],
+        "course_identity": {
+            "course_id": metadata.get("course_id"),
+            "curriculum_id": metadata.get("curriculum_id"),
+            "language": metadata.get("language"),
+            "target": metadata.get("target"),
+            "capstone": metadata.get("capstone"),
+        },
+        "locked_chapter": locked_chapter,
+        "depth_brief_requirement": {
+            "required": True,
+            "source": "new-parent-agent-prompt-context",
+            "reuse_from_generated_course": False,
+            "persist_in_generated_course": False,
+            "fields": list(V4_DEPTH_BRIEF_FIELDS),
+        },
+        "preserve_chapters": preserved,
+        "writer_calls": 1,
+        "mechanical_repair_limit": 1,
+        "include_previous_tutorial": False,
+        "include_other_chapter_prose": False,
+    }
+
+
+def _looks_like_v4_course(path: Path) -> bool:
+    """Route a generated root without weakening either version's validator."""
+
+    supplied = path.expanduser()
+    if supplied.is_symlink() or not supplied.is_dir():
+        return False
+    course_toml = supplied / "course.toml"
+    return course_toml.exists() or course_toml.is_symlink()
+
+
+def _v4_metadata(root: Path) -> dict[str, Any]:
+    course_toml = _control_path(root, Path("course.toml"), "v4 course")
+    try:
+        value = tomllib.loads(course_toml.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise CourseRegenerationError(f"v4 course.toml is invalid: {error}") from error
+    if not isinstance(value, dict) or value.get("schema_version") != 4:
+        raise CourseRegenerationError("v4 course.toml schema_version must be 4")
+    return value
+
+
+def _v4_author_root(learner: Path, *, role: str) -> Path:
+    supplied = learner.with_name(f"{learner.name}-author")
+    if supplied.is_symlink():
+        raise CourseRegenerationError(f"{role} v4 author path cannot be a symlink")
+    try:
+        root = supplied.resolve(strict=True)
+    except OSError as error:
+        raise CourseRegenerationError(
+            f"{role} v4 author path is unavailable: {error}"
+        ) from error
+    if not root.is_dir() or root.parent != learner.parent:
+        raise CourseRegenerationError(
+            f"{role} v4 author must be a regular sibling directory"
+        )
+    for relative in ("author.json", "quiz-answers.json", "verification.json"):
+        path = _control_path(root, Path(relative), f"{role} v4 author")
+        if not path.is_file():
+            raise CourseRegenerationError(
+                f"{role} v4 author is missing {relative}"
+            )
+    return root
+
+
+def _v4_pair(path: Path, *, role: str) -> tuple[Path, Path]:
+    learner = _v4_course_root(path)
+    return learner, _v4_author_root(learner, role=role)
+
+
+def _v4_candidate_pair(
+    candidate: Path,
+    live: Path,
+    live_author: Path,
+) -> tuple[Path, Path]:
+    learner, author = _v4_pair(candidate, role="candidate")
+    roots = {live, live_author, learner, author}
+    if (
+        len(roots) != 4
+        or learner.parent != live.parent
+        or author.parent != live.parent
+    ):
+        raise CourseRegenerationError(
+            "v4 candidate learner and author must be distinct siblings of the live pair"
+        )
+    return learner, author
+
+
+def _v4_generation(root: Path) -> dict[str, Any]:
+    generation = _read_json(
+        _control_path(
+            root,
+            Path(".coursekit/generation.json"),
+            "v4 generation metadata",
+        ),
+        "v4 generation metadata",
+    )
+    if set(generation) != V4_GENERATION_FIELDS:
+        raise CourseRegenerationError(
+            "v4 generation metadata has an invalid shape"
+        )
+    if (
+        generation.get("schema_version") != 1
+        or generation.get("course_schema_version") != 4
+    ):
+        raise CourseRegenerationError(
+            "v4 generation metadata has an unsupported schema"
+        )
+    for field in (
+        "content_contract_sha256",
+        "runtime_contract_sha256",
+        "course_contract_sha256",
+    ):
+        value = generation.get(field)
+        if not isinstance(value, str) or SHA256_RE.fullmatch(value) is None:
+            raise CourseRegenerationError(
+                f"v4 generation metadata has an invalid {field}"
+            )
+    version = generation.get("plugin_version")
+    if not isinstance(version, str) or VERSION_RE.fullmatch(version) is None:
+        raise CourseRegenerationError(
+            "v4 generation metadata has an invalid plugin_version"
+        )
+    metadata = _v4_metadata(root)
+    public = _read_json(
+        _control_path(
+            root,
+            Path(".coursekit/course.json"),
+            "v4 public binding",
+        ),
+        "v4 public binding",
+    )
+    if (
+        generation.get("course_id") != metadata.get("course_id")
+        or generation.get("curriculum_id") != metadata.get("curriculum_id")
+        or generation.get("course_contract_sha256")
+        != public.get("course_contract_sha256")
+    ):
+        raise CourseRegenerationError(
+            "v4 generation metadata does not match the public course binding"
+        )
+    return generation
+
+
+def _v4_identity(root: Path) -> dict[str, Any]:
+    metadata = _v4_metadata(root)
+    target = metadata.get("target")
+    if not isinstance(target, Mapping):
+        raise CourseRegenerationError("v4 course identity has no target")
+    chapters = metadata.get("chapters")
+    if not isinstance(chapters, list) or not chapters:
+        raise CourseRegenerationError("v4 course identity has no chapter route")
+    route: list[dict[str, Any]] = []
+    for chapter in chapters:
+        if not isinstance(chapter, Mapping):
+            raise CourseRegenerationError(
+                "v4 course identity has an invalid chapter route"
+            )
+        chapter_id = chapter.get("id")
+        kind = chapter.get("kind")
+        depends_on = chapter.get("depends_on")
+        if (
+            not isinstance(chapter_id, str)
+            or not isinstance(kind, str)
+            or depends_on is not None
+            and not isinstance(depends_on, str)
+        ):
+            raise CourseRegenerationError(
+                "v4 course identity has an incomplete chapter route"
+            )
+        route.append(
+            {
+                "id": chapter_id,
+                "kind": kind,
+                "depends_on": depends_on,
+            }
+        )
+    identity = {
+        "course_id": metadata.get("course_id"),
+        "curriculum_id": metadata.get("curriculum_id"),
+        "language": metadata.get("language"),
+        "target": dict(target),
+        "route": route,
+    }
+    if (
+        not isinstance(identity["course_id"], str)
+        or not isinstance(identity["curriculum_id"], str)
+        or identity["language"] not in {"zh-CN", "en"}
+    ):
+        raise CourseRegenerationError("v4 course identity is incomplete")
+    return identity
+
+
+def _legacy_course_schema_version(root: Path) -> int:
+    source = _read_json(
+        _control_path(root, SOURCE_PATH / "course.json", "legacy canonical source"),
+        "legacy canonical course source",
+    )
+    schema_version = source.get("schema_version")
+    if type(schema_version) is not int or schema_version not in {2, 3}:
+        raise CourseRegenerationError(
+            "explicit v4 migration requires a schema-v2 or schema-v3 course"
+        )
+    return schema_version
+
+
+def _legacy_migration_identity(root: Path) -> dict[str, Any]:
+    identity = _identity(root)
+    return {
+        "course_id": identity["course_id"],
+        "language": identity["locale"],
+        "target": dict(identity["target"]),
+    }
+
+
+def _v4_migration_identity(root: Path) -> dict[str, Any]:
+    identity = _v4_identity(root)
+    target = identity["target"]
+    required = (
+        identity["course_id"],
+        identity["language"],
+        target.get("name"),
+        target.get("kind"),
+        target.get("version"),
+    )
+    if not all(isinstance(value, str) and value for value in required):
+        raise CourseRegenerationError(
+            "v4 migration candidate has an incomplete course/target identity"
+        )
+    track = target.get("track")
+    if track is not None and (not isinstance(track, str) or not track):
+        raise CourseRegenerationError(
+            "v4 migration candidate target track must be text or absent"
+        )
+    return {
+        "course_id": identity["course_id"],
+        "language": identity["language"],
+        "target": {
+            "name": target["name"],
+            "kind": target["kind"],
+            "version": target["version"],
+            "track": track,
+        },
+    }
+
+
+def _migration_identity_mismatches(
+    legacy: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+) -> list[str]:
+    fields = (
+        ("course_id", legacy.get("course_id"), candidate.get("course_id")),
+        ("language", legacy.get("language"), candidate.get("language")),
+    )
+    mismatches = [
+        field
+        for field, old_value, new_value in fields
+        if old_value != new_value
+    ]
+    legacy_target = legacy.get("target")
+    candidate_target = candidate.get("target")
+    if not isinstance(legacy_target, Mapping) or not isinstance(
+        candidate_target, Mapping
+    ):
+        return [*mismatches, "target"]
+    mismatches.extend(
+        f"target.{field}"
+        for field in ("name", "kind", "version", "track")
+        if legacy_target.get(field) != candidate_target.get(field)
+    )
+    return mismatches
+
+
+def _baseline_record(baseline: CourseBaseline) -> dict[str, Any]:
+    return {
+        "kind": baseline.kind,
+        "schema_version": baseline.schema_version,
+        "plugin_version": baseline.plugin_version,
+        "authoring_contract_sha256": baseline.authoring_contract_sha256,
+    }
+
+
+def _v4_receipt_summary(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "receipt_sha256": receipt["receipt_sha256"],
+        "learner_tree_sha256": receipt["learner_tree_sha256"],
+        "author_tree_sha256": receipt["author_tree_sha256"],
+        "runtime_sha256": receipt["runtime_sha256"],
+        "verifier_sha256": receipt["verifier_sha256"],
+    }
+
+
+def _legacy_to_v4_migration_record(
+    live: Path,
+    candidate: Path,
+) -> dict[str, Any]:
+    candidate_identity = _v4_identity(candidate)
+    return {
+        "kind": "explicit-schema-v2-v3-to-v4",
+        "source_schema_version": _legacy_course_schema_version(live),
+        "target_schema_version": 4,
+        "identity_lock": [
+            "course_id",
+            "language",
+            "target.name",
+            "target.kind",
+            "target.version",
+            "target.track",
+        ],
+        "legacy_route_intent": _route_intent(
+            live,
+            require_regeneration_metadata=False,
+        ),
+        "candidate_curriculum_id": candidate_identity["curriculum_id"],
+        "candidate_route": candidate_identity["route"],
+        "curriculum_id_policy": "new-v4-curriculum-id-allowed",
+        "route_semantics": (
+            "legacy route prose is not automatically comparable; course and "
+            "target identity are locked and the new v4 route is receipt-bound"
+        ),
+    }
+
+
+def _v4_content_metadata(root: Path) -> dict[str, Any]:
+    """Project author-controlled semantics without exporter-only TOML details."""
+
+    metadata = _v4_metadata(root)
+    chapters: list[dict[str, Any]] = []
+    for raw_chapter in metadata["chapters"]:
+        chapter = dict(raw_chapter)
+        tasks: list[dict[str, Any]] = []
+        for raw_task in chapter.get("tasks", []):
+            task = dict(raw_task)
+            tasks.append(
+                {
+                    key: task[key]
+                    for key in (
+                        "id",
+                        "title",
+                        "file",
+                        "symbol",
+                        "prompt",
+                        "points",
+                        "timeout_seconds",
+                        "example_input",
+                        "example_output",
+                        "example_explanation",
+                    )
+                    if key in task
+                }
+            )
+        chapters.append(
+            {
+                key: chapter[key]
+                for key in (
+                    "id",
+                    "title",
+                    "kind",
+                    "depends_on",
+                    "study_min",
+                    "study_max",
+                    "study_reason",
+                    "source_ids",
+                )
+                if key in chapter
+            }
+            | {"tasks": tasks}
+        )
+    return {
+        key: metadata[key]
+        for key in (
+            "course_id",
+            "curriculum_id",
+            "title",
+            "description",
+            "language",
+            "capstone",
+            "target",
+            "sources",
+        )
+        if key in metadata
+    } | {"chapters": chapters}
+
+
+def _v4_digest_selected_tree(
+    learner: Path,
+    author: Path,
+) -> str:
+    digest = hashlib.sha256()
+    metadata = _canonical_digest(_v4_content_metadata(learner)).encode("ascii")
+    digest.update(b"course-metadata\0")
+    digest.update(metadata)
+    digest.update(b"\0")
+    selected = (
+        ("learner", learner, ("chapters", "src", "tests", "examples")),
+        (
+            "author",
+            author,
+            ("quiz-answers.json", "solution", "tests/hidden"),
+        ),
+    )
+    for role, root, relatives in selected:
+        for raw_relative in relatives:
+            relative = Path(raw_relative)
+            path = _control_path(root, relative, f"v4 {role} content")
+            if not path.exists():
+                continue
+            if path.is_symlink():
+                raise CourseRegenerationError(
+                    f"v4 {role} content cannot be a symlink: {raw_relative}"
+                )
+            records = (
+                [(path.name, "file", path.read_bytes())]
+                if path.is_file()
+                else _scan_tree(path)
+                if path.is_dir()
+                else []
+            )
+            if not records:
+                if not path.is_dir():
+                    raise CourseRegenerationError(
+                        f"v4 {role} content is not regular: {raw_relative}"
+                    )
+                records = [(".", "directory", b"")]
+            digest.update(role.encode("ascii"))
+            digest.update(b"\0")
+            digest.update(raw_relative.encode("utf-8"))
+            digest.update(b"\0")
+            for item, kind, value in records:
+                digest.update(item.encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(kind.encode("ascii"))
+                digest.update(b"\0")
+                digest.update(value)
+                digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _v4_current_contracts() -> dict[str, str]:
+    content = v4_content_contract_sha256()
+    runtime = v4_runtime_contract_sha256()
+    if (
+        SHA256_RE.fullmatch(content) is None
+        or SHA256_RE.fullmatch(runtime) is None
+    ):
+        raise CourseRegenerationError(
+            "the installed Skill returned invalid v4 contract fingerprints"
+        )
+    return {
+        "plugin_version": _plugin_version(),
+        "content_contract_sha256": content,
+        "runtime_contract_sha256": runtime,
+    }
+
+
+def _v4_regeneration_state(
+    learner: Path,
+    author: Path,
+    generation: Mapping[str, Any],
+    current: Mapping[str, str],
+) -> tuple[str, str, str, int, list[str]]:
+    generated_version = str(generation["plugin_version"])
+    if _version_core(generated_version) > _version_core(current["plugin_version"]):
+        raise CourseRegenerationError(
+            "v4 course was generated by a newer plugin version; downgrade is refused"
+        )
+    if (
+        generation["content_contract_sha256"]
+        != current["content_contract_sha256"]
+    ):
+        chapter_ids = [
+            str(chapter["id"])
+            for chapter in _v4_metadata(learner)["chapters"]
+            if isinstance(chapter, Mapping)
+            and isinstance(chapter.get("id"), str)
+        ]
+        if not chapter_ids:
+            raise CourseRegenerationError(
+                "v4 content regeneration has no chapter Writers to recall"
+            )
+        return (
+            "needs_content_regeneration",
+            "content contract changed",
+            "regenerate-content",
+            len(chapter_ids),
+            chapter_ids,
+        )
+    if (
+        generation["runtime_contract_sha256"]
+        != current["runtime_contract_sha256"]
+        or generated_version != current["plugin_version"]
+    ):
+        return (
+            "needs_reexport_revalidation",
+            "runtime, exporter, verifier, or plugin version changed",
+            "re-export/revalidate",
+            0,
+            [],
+        )
+    try:
+        validate_v4_receipt(learner, author_root=author)
+    except V4VerificationError as error:
+        return (
+            "needs_revalidation",
+            f"verification receipt is stale or missing: {error}",
+            "revalidate",
+            0,
+            [],
+        )
+    return (
+        "up_to_date",
+        "v4 contracts and receipt are current",
+        "none",
+        0,
+        [],
+    )
+
+
+def _rollback_path(live: Path, *snapshots: str) -> Path:
+    if not snapshots or any(SHA256_RE.fullmatch(value) is None for value in snapshots):
+        raise CourseRegenerationError(
+            "cannot reserve a rollback path without valid snapshots"
+        )
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    suffix = "-".join(snapshot[:8] for snapshot in snapshots)
+    return live.with_name(
+        f".{live.name}.coursekit-rollback-{timestamp}-{suffix}"
+    )
 
 
 def _tree_state(root: Path) -> dict[str, tuple[str, bytes]]:
@@ -1270,13 +2274,6 @@ def _candidate_root(candidate: Path, live: Path) -> Path:
     return root
 
 
-def _backup_path(live: Path, live_snapshot: str) -> Path:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return live.with_name(
-        f"{live.name}.coursekit-backup-{timestamp}-{live_snapshot[:8]}"
-    )
-
-
 def _finish_plan(plan: dict[str, Any]) -> dict[str, Any]:
     result = dict(plan)
     result["plan_digest"] = _canonical_digest(plan)
@@ -1346,6 +2343,11 @@ def plan_regeneration(
     candidate_course: Path | None = None,
 ) -> dict[str, Any]:
     live = _course_root(course, role="live")
+    if candidate_course is not None and _looks_like_v4_course(candidate_course):
+        return plan_legacy_to_v4_regeneration(
+            live,
+            candidate_course=candidate_course,
+        )
     runtime = _current_runtime()
     baseline = _load_course_baseline(live)
     status, reason = _regeneration_state(baseline, runtime)
@@ -1445,9 +2447,11 @@ def plan_regeneration(
 
     live_snapshot = _snapshot(live)
     candidate_snapshot = _snapshot(candidate)
-    backup = _backup_path(live, live_snapshot)
-    if backup.exists() or backup.is_symlink():
-        raise CourseRegenerationError(f"planned backup path already exists: {backup}")
+    rollback = _rollback_path(live, live_snapshot)
+    if rollback.exists() or rollback.is_symlink():
+        raise CourseRegenerationError(
+            f"planned rollback path already exists: {rollback}"
+        )
     plan.update(
         {
             "status": "blocked" if blockers else "ready",
@@ -1461,10 +2465,822 @@ def plan_regeneration(
             "candidate_canonical_source_sha256": candidate_source,
             "material_learner_facing_diff": material_diff,
             "full_verification": verification,
-            "backup_path": str(backup),
+            "replacement_policy": REPLACEMENT_POLICY,
+            "rollback_path": str(rollback),
             "blockers": blockers,
         }
     )
+    return _finish_plan(plan)
+
+
+def plan_v4_regeneration(
+    course: Path,
+    *,
+    candidate_course: Path | None = None,
+) -> dict[str, Any]:
+    """Classify or bind a schema-v4 learner/author replacement pair."""
+
+    live, live_author = _v4_pair(course, role="live")
+    generation = _v4_generation(live)
+    current = _v4_current_contracts()
+    status, reason, action, writer_calls, chapter_ids = _v4_regeneration_state(
+        live,
+        live_author,
+        generation,
+        current,
+    )
+    live_identity = _v4_identity(live)
+    live_content = _v4_digest_selected_tree(live, live_author)
+    plan: dict[str, Any] = {
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "course_schema_version": 4,
+        "command": "check",
+        "status": status,
+        "reason": reason,
+        "required_action": action,
+        "writer_calls": writer_calls,
+        "chapter_ids": chapter_ids,
+        "course": str(live),
+        "author": str(live_author),
+        "current_plugin_version": current["plugin_version"],
+        "course_plugin_version": generation["plugin_version"],
+        "current_content_contract_sha256": current[
+            "content_contract_sha256"
+        ],
+        "course_content_contract_sha256": generation[
+            "content_contract_sha256"
+        ],
+        "current_runtime_contract_sha256": current[
+            "runtime_contract_sha256"
+        ],
+        "course_runtime_contract_sha256": generation[
+            "runtime_contract_sha256"
+        ],
+        "identity": live_identity,
+        "live_content_projection_sha256": live_content,
+    }
+    if candidate_course is None:
+        return _finish_plan(plan)
+
+    candidate, candidate_author = _v4_candidate_pair(
+        candidate_course,
+        live,
+        live_author,
+    )
+    candidate_generation = _v4_generation(candidate)
+    candidate_identity = _v4_identity(candidate)
+    candidate_content = _v4_digest_selected_tree(candidate, candidate_author)
+    blockers: list[dict[str, str]] = []
+    if status == "up_to_date":
+        blockers.append(
+            {
+                "code": "not-required",
+                "message": "live v4 course is already up to date",
+            }
+        )
+    if candidate_identity != live_identity:
+        blockers.append(
+            {
+                "code": "identity-mismatch",
+                "message": (
+                    "candidate changed the course id, curriculum, language, "
+                    "target, or chapter route"
+                ),
+            }
+        )
+    expected_generation = {
+        "plugin_version": current["plugin_version"],
+        "content_contract_sha256": current["content_contract_sha256"],
+        "runtime_contract_sha256": current["runtime_contract_sha256"],
+    }
+    stale_generation = sorted(
+        key
+        for key, value in expected_generation.items()
+        if candidate_generation.get(key) != value
+    )
+    if stale_generation:
+        blockers.append(
+            {
+                "code": "candidate-contract-stale",
+                "message": (
+                    "candidate was not exported by the current v4 contracts: "
+                    + ", ".join(stale_generation)
+                ),
+            }
+        )
+    if (
+        status == "needs_content_regeneration"
+        and candidate_content == live_content
+    ):
+        blockers.append(
+            {
+                "code": "content-unchanged",
+                "message": (
+                    "content-contract regeneration must produce a material "
+                    "author-controlled content change"
+                ),
+            }
+        )
+    if status in {"needs_reexport_revalidation", "needs_revalidation"} and (
+        candidate_content != live_content
+    ):
+        blockers.append(
+            {
+                "code": "unexpected-content-change",
+                "message": (
+                    "runtime export or revalidation cannot change Writer-owned "
+                    "course content"
+                ),
+            }
+        )
+
+    receipt: dict[str, Any] | None
+    try:
+        receipt = validate_v4_receipt(
+            candidate,
+            author_root=candidate_author,
+        )
+    except V4VerificationError as error:
+        receipt = None
+        blockers.append(
+            {
+                "code": "receipt-invalid",
+                "message": (
+                    "candidate acceptance receipt failed offline binding "
+                    f"validation: {error}"
+                ),
+            }
+        )
+    for root, label in (
+        (candidate, "candidate learner"),
+        (candidate_author, "candidate author"),
+    ):
+        external = _externally_hardlinked_files(root)
+        if external:
+            blockers.append(
+                {
+                    "code": "candidate-hardlink",
+                    "message": (
+                        f"{label} contains externally hard-linked files: "
+                        + ", ".join(external[:5])
+                    ),
+                }
+            )
+
+    live_snapshot = _snapshot(live)
+    live_author_snapshot = _snapshot(live_author)
+    candidate_snapshot = _snapshot(candidate)
+    candidate_author_snapshot = _snapshot(candidate_author)
+    rollback = _rollback_path(
+        live,
+        live_snapshot,
+        live_author_snapshot,
+    )
+    if rollback.exists() or rollback.is_symlink():
+        raise CourseRegenerationError(
+            f"planned v4 rollback path already exists: {rollback}"
+        )
+    plan.update(
+        {
+            "status": "blocked" if blockers else "ready",
+            "regeneration_kind": status,
+            "candidate_course": str(candidate),
+            "candidate_author": str(candidate_author),
+            "candidate_identity": candidate_identity,
+            "candidate_content_projection_sha256": candidate_content,
+            "candidate_generation": candidate_generation,
+            "candidate_receipt": (
+                {
+                    "receipt_sha256": receipt["receipt_sha256"],
+                    "learner_tree_sha256": receipt["learner_tree_sha256"],
+                    "author_tree_sha256": receipt["author_tree_sha256"],
+                    "runtime_sha256": receipt["runtime_sha256"],
+                    "verifier_sha256": receipt["verifier_sha256"],
+                }
+                if receipt is not None
+                else None
+            ),
+            "live_snapshot_sha256": live_snapshot,
+            "live_author_snapshot_sha256": live_author_snapshot,
+            "candidate_snapshot_sha256": candidate_snapshot,
+            "candidate_author_snapshot_sha256": candidate_author_snapshot,
+            "replacement_policy": REPLACEMENT_POLICY,
+            "rollback_path": str(rollback),
+            "blockers": blockers,
+        }
+    )
+    return _finish_plan(plan)
+
+
+def _validated_v4_chapter_request(
+    live: Path,
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    chapter_id = request.get("chapter_id")
+    reason = request.get("reason")
+    if not isinstance(chapter_id, str) or not isinstance(reason, str):
+        raise CourseRegenerationError(
+            "targeted regeneration request has no chapter_id or reason"
+        )
+    expected = plan_v4_chapter_regeneration(
+        live,
+        chapter_id=chapter_id,
+        reason=reason,
+    )
+    if dict(request) != expected:
+        raise CourseRegenerationError(
+            "targeted regeneration request is stale, forged, or for another course"
+        )
+    return expected
+
+
+def _v4_targeted_ephemeral(relative: str) -> bool:
+    path = PurePosixPath(relative)
+    return (
+        relative in V4_TARGETED_MUTABLE_PATHS
+        or any(part in V4_TARGETED_EPHEMERAL_NAMES for part in path.parts)
+        or path.suffix in {".pyc", ".pyo"}
+    )
+
+
+def _v4_targeted_allowed_path(
+    relative: str,
+    *,
+    role: str,
+    chapter_id: str,
+    owned_paths: set[str],
+) -> bool:
+    if _v4_targeted_ephemeral(relative):
+        return True
+    if role == "learner":
+        if relative in {
+            ".coursekit/course.json",
+            ".coursekit/generation.json",
+            f"chapters/{chapter_id}",
+            f"chapters/{chapter_id}/tutorial.md",
+            f"chapters/{chapter_id}/terms.json",
+            f"chapters/{chapter_id}/quiz.json",
+            "examples",
+            f"examples/{chapter_id}",
+            f"tests/{chapter_id}",
+        }:
+            return True
+        if relative in owned_paths:
+            return True
+        return (
+            relative.startswith(f"examples/{chapter_id}/")
+            or relative.startswith(f"tests/{chapter_id}/")
+        )
+    if relative in {
+        "author.json",
+        "quiz-answers.json",
+        "verification.json",
+        f"tests/hidden/{chapter_id}",
+    }:
+        return True
+    if relative.startswith(f"tests/hidden/{chapter_id}/"):
+        return True
+    return relative.removeprefix("solution/") in owned_paths and relative.startswith(
+        "solution/"
+    )
+
+
+def _v4_targeted_tree_diff(
+    live: Path,
+    candidate: Path,
+    *,
+    role: str,
+    chapter_id: str,
+    owned_paths: set[str],
+) -> dict[str, Any]:
+    before = _tree_state(live)
+    after = _tree_state(candidate)
+    changed = sorted(
+        relative
+        for relative in set(before) | set(after)
+        if before.get(relative) != after.get(relative)
+    )
+    material = [
+        relative for relative in changed if not _v4_targeted_ephemeral(relative)
+    ]
+    unauthorized = [
+        relative
+        for relative in material
+        if not _v4_targeted_allowed_path(
+            relative,
+            role=role,
+            chapter_id=chapter_id,
+            owned_paths=owned_paths,
+        )
+    ]
+    return {
+        "changed": material,
+        "unauthorized": unauthorized,
+    }
+
+
+def _v4_targeted_normalized_control(
+    root: Path,
+    *,
+    role: str,
+    relative: str,
+    chapter_id: str,
+) -> dict[str, Any]:
+    value = copy.deepcopy(
+        _read_json(
+            _control_path(root, Path(relative), f"v4 {role} targeted control"),
+            f"v4 {role} targeted control",
+        )
+    )
+    if relative == ".coursekit/course.json":
+        value.pop("course_contract_sha256", None)
+        quiz_hashes = value.get("public_quiz_sha256")
+        if not isinstance(quiz_hashes, dict) or chapter_id not in quiz_hashes:
+            raise CourseRegenerationError(
+                "targeted runtime course has no target chapter quiz binding"
+            )
+        quiz_hashes[chapter_id] = "<target-chapter-quiz>"
+    elif relative == ".coursekit/generation.json":
+        value.pop("course_contract_sha256", None)
+    elif relative == "author.json":
+        value.pop("course_contract_sha256", None)
+    elif relative == "quiz-answers.json":
+        chapters = value.get("chapters")
+        if not isinstance(chapters, dict) or chapter_id not in chapters:
+            raise CourseRegenerationError(
+                "targeted quiz answer book has no target chapter"
+            )
+        chapters.pop(chapter_id)
+    else:  # pragma: no cover - internal call contract
+        raise CourseRegenerationError(
+            f"unsupported targeted control comparison: {relative}"
+        )
+    return value
+
+
+def _v4_targeted_control_mismatches(
+    live: Path,
+    live_author: Path,
+    candidate: Path,
+    candidate_author: Path,
+    *,
+    chapter_id: str,
+) -> list[str]:
+    mismatches: list[str] = []
+    for role, first, second, relative in (
+        ("learner", live, candidate, ".coursekit/course.json"),
+        ("learner", live, candidate, ".coursekit/generation.json"),
+        ("author", live_author, candidate_author, "author.json"),
+        ("author", live_author, candidate_author, "quiz-answers.json"),
+    ):
+        if _v4_targeted_normalized_control(
+            first,
+            role=role,
+            relative=relative,
+            chapter_id=chapter_id,
+        ) != _v4_targeted_normalized_control(
+            second,
+            role=role,
+            relative=relative,
+            chapter_id=chapter_id,
+        ):
+            mismatches.append(f"{role}/{relative}")
+    return mismatches
+
+
+def _v4_targeted_chapter_digest(
+    learner: Path,
+    author: Path,
+    chapter: Mapping[str, Any],
+) -> str:
+    chapter_id = str(chapter["id"])
+    answers = _read_json(author / "quiz-answers.json", "v4 quiz answers")
+    chapters = answers.get("chapters")
+    if not isinstance(chapters, Mapping) or chapter_id not in chapters:
+        raise CourseRegenerationError(
+            f"v4 quiz answers have no chapter {chapter_id}"
+        )
+    return _canonical_digest(
+        {
+            "artifacts": _v4_chapter_artifact_digest(
+                learner,
+                author,
+                chapter,
+            ),
+            "quiz_answers": chapters[chapter_id],
+        }
+    )
+
+
+def _v4_targeted_scope_report(
+    live: Path,
+    live_author: Path,
+    candidate: Path,
+    candidate_author: Path,
+    *,
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    chapter_id = str(request["chapter_id"])
+    locked = request["locked_chapter"]
+    if not isinstance(locked, Mapping):
+        raise CourseRegenerationError(
+            "targeted regeneration request has no locked chapter"
+        )
+    owned_raw = locked.get("owned_paths")
+    if not isinstance(owned_raw, list) or not all(
+        isinstance(path, str) for path in owned_raw
+    ):
+        raise CourseRegenerationError(
+            "targeted regeneration request has invalid owned paths"
+        )
+    owned = set(owned_raw)
+    learner_diff = _v4_targeted_tree_diff(
+        live,
+        candidate,
+        role="learner",
+        chapter_id=chapter_id,
+        owned_paths=owned,
+    )
+    author_diff = _v4_targeted_tree_diff(
+        live_author,
+        candidate_author,
+        role="author",
+        chapter_id=chapter_id,
+        owned_paths=owned,
+    )
+    controls = _v4_targeted_control_mismatches(
+        live,
+        live_author,
+        candidate,
+        candidate_author,
+        chapter_id=chapter_id,
+    )
+    return {
+        "chapter_id": chapter_id,
+        "learner_changed_paths": learner_diff["changed"],
+        "author_changed_paths": author_diff["changed"],
+        "unauthorized_learner_paths": learner_diff["unauthorized"],
+        "unauthorized_author_paths": author_diff["unauthorized"],
+        "derived_control_mismatches": controls,
+    }
+
+
+def plan_v4_targeted_regeneration(
+    course: Path,
+    *,
+    candidate_course: Path,
+    chapter_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Bind one explicit chapter request to a receipt-valid replacement pair."""
+
+    live, live_author = _v4_pair(course, role="live")
+    candidate, candidate_author = _v4_candidate_pair(
+        candidate_course,
+        live,
+        live_author,
+    )
+    request = _validated_v4_chapter_request(live, chapter_request)
+    chapter_id = str(request["chapter_id"])
+    current = _v4_current_contracts()
+    live_generation = _v4_generation(live)
+    candidate_generation = _v4_generation(candidate)
+    live_status, live_reason, _action, _calls, _chapters = (
+        _v4_regeneration_state(
+            live,
+            live_author,
+            live_generation,
+            current,
+        )
+    )
+    live_identity = _v4_identity(live)
+    candidate_identity = _v4_identity(candidate)
+    blockers: list[dict[str, str]] = []
+    if live_status != "up_to_date":
+        blockers.append(
+            {
+                "code": "global-regeneration-required",
+                "message": (
+                    "targeted chapter regeneration requires current global "
+                    f"contracts and receipt: {live_reason}"
+                ),
+            }
+        )
+    if candidate_identity != live_identity:
+        blockers.append(
+            {
+                "code": "identity-mismatch",
+                "message": "targeted candidate changed the locked course route",
+            }
+        )
+    expected_generation = {
+        "plugin_version": current["plugin_version"],
+        "content_contract_sha256": current["content_contract_sha256"],
+        "runtime_contract_sha256": current["runtime_contract_sha256"],
+    }
+    stale = sorted(
+        key
+        for key, value in expected_generation.items()
+        if candidate_generation.get(key) != value
+    )
+    if stale:
+        blockers.append(
+            {
+                "code": "candidate-contract-stale",
+                "message": (
+                    "targeted candidate was not exported by current contracts: "
+                    + ", ".join(stale)
+                ),
+            }
+        )
+    scope = _v4_targeted_scope_report(
+        live,
+        live_author,
+        candidate,
+        candidate_author,
+        request=request,
+    )
+    unauthorized = [
+        *scope["unauthorized_learner_paths"],
+        *scope["unauthorized_author_paths"],
+        *scope["derived_control_mismatches"],
+    ]
+    if unauthorized:
+        blockers.append(
+            {
+                "code": "targeted-scope-violation",
+                "message": (
+                    "targeted candidate changed files or controls outside "
+                    f"{chapter_id}: " + ", ".join(unauthorized[:8])
+                ),
+            }
+        )
+
+    metadata = _v4_metadata(live)
+    selected = next(
+        (
+            chapter
+            for chapter in metadata["chapters"]
+            if isinstance(chapter, Mapping) and chapter.get("id") == chapter_id
+        ),
+        None,
+    )
+    if not isinstance(selected, Mapping):
+        raise CourseRegenerationError(
+            f"targeted chapter disappeared from live route: {chapter_id}"
+        )
+    live_target = _v4_targeted_chapter_digest(live, live_author, selected)
+    candidate_target = _v4_targeted_chapter_digest(
+        candidate,
+        candidate_author,
+        selected,
+    )
+    if live_target == candidate_target:
+        blockers.append(
+            {
+                "code": "targeted-content-unchanged",
+                "message": f"targeted candidate did not change {chapter_id}",
+            }
+        )
+
+    receipt: dict[str, Any] | None
+    try:
+        receipt = validate_v4_receipt(
+            candidate,
+            author_root=candidate_author,
+        )
+    except V4VerificationError as error:
+        receipt = None
+        blockers.append(
+            {
+                "code": "receipt-invalid",
+                "message": (
+                    "targeted candidate acceptance receipt failed offline "
+                    f"binding validation: {error}"
+                ),
+            }
+        )
+    for root, label in (
+        (candidate, "candidate learner"),
+        (candidate_author, "candidate author"),
+    ):
+        external = _externally_hardlinked_files(root)
+        if external:
+            blockers.append(
+                {
+                    "code": "candidate-hardlink",
+                    "message": (
+                        f"{label} contains externally hard-linked files: "
+                        + ", ".join(external[:5])
+                    ),
+                }
+            )
+
+    live_snapshot = _snapshot(live)
+    live_author_snapshot = _snapshot(live_author)
+    candidate_snapshot = _snapshot(candidate)
+    candidate_author_snapshot = _snapshot(candidate_author)
+    rollback = _rollback_path(
+        live,
+        live_snapshot,
+        live_author_snapshot,
+    )
+    if rollback.exists() or rollback.is_symlink():
+        raise CourseRegenerationError(
+            f"planned targeted v4 rollback path already exists: {rollback}"
+        )
+    plan = {
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "course_schema_version": 4,
+        "command": "check",
+        "status": "blocked" if blockers else "ready",
+        "reason": f"explicit targeted regeneration for {chapter_id}",
+        "required_action": "replace-targeted-chapter",
+        "regeneration_kind": "targeted-chapter",
+        "writer_calls": 1,
+        "mechanical_repair_limit": 1,
+        "chapter_ids": [chapter_id],
+        "course": str(live),
+        "author": str(live_author),
+        "candidate_course": str(candidate),
+        "candidate_author": str(candidate_author),
+        "chapter_request": request,
+        "chapter_request_sha256": _canonical_digest(request),
+        "current_plugin_version": current["plugin_version"],
+        "current_content_contract_sha256": current[
+            "content_contract_sha256"
+        ],
+        "current_runtime_contract_sha256": current[
+            "runtime_contract_sha256"
+        ],
+        "course_generation": live_generation,
+        "candidate_generation": candidate_generation,
+        "identity": live_identity,
+        "candidate_identity": candidate_identity,
+        "target_live_projection_sha256": live_target,
+        "target_candidate_projection_sha256": candidate_target,
+        "targeted_scope": scope,
+        "candidate_receipt": (
+            _v4_receipt_summary(receipt) if receipt is not None else None
+        ),
+        "live_snapshot_sha256": live_snapshot,
+        "live_author_snapshot_sha256": live_author_snapshot,
+        "candidate_snapshot_sha256": candidate_snapshot,
+        "candidate_author_snapshot_sha256": candidate_author_snapshot,
+        "replacement_policy": REPLACEMENT_POLICY,
+        "rollback_path": str(rollback),
+        "blockers": blockers,
+    }
+    return _finish_plan(plan)
+
+
+def plan_legacy_to_v4_regeneration(
+    course: Path,
+    *,
+    candidate_course: Path,
+) -> dict[str, Any]:
+    """Bind an explicit schema-v2/v3 course migration to a verified v4 pair."""
+
+    live = _course_root(course, role="live")
+    author_destination = live.with_name(f"{live.name}-author")
+    candidate, candidate_author = _v4_candidate_pair(
+        candidate_course,
+        live,
+        author_destination,
+    )
+    source_schema_version = _legacy_course_schema_version(live)
+    legacy_baseline = _load_course_baseline(live)
+    locked_identity = _legacy_migration_identity(live)
+    candidate_identity = _v4_migration_identity(candidate)
+    identity_mismatches = _migration_identity_mismatches(
+        locked_identity,
+        candidate_identity,
+    )
+    migration = _legacy_to_v4_migration_record(live, candidate)
+    current = _v4_current_contracts()
+    candidate_generation = _v4_generation(candidate)
+    blockers: list[dict[str, str]] = []
+
+    if author_destination.exists() or author_destination.is_symlink():
+        blockers.append(
+            {
+                "code": "author-destination-occupied",
+                "message": (
+                    "legacy-to-v4 migration requires an unused sibling author "
+                    f"path: {author_destination}"
+                ),
+            }
+        )
+    if identity_mismatches:
+        blockers.append(
+            {
+                "code": "migration-identity-mismatch",
+                "message": (
+                    "v4 candidate changed locked legacy identity fields: "
+                    + ", ".join(identity_mismatches)
+                ),
+            }
+        )
+    expected_generation = {
+        "plugin_version": current["plugin_version"],
+        "content_contract_sha256": current["content_contract_sha256"],
+        "runtime_contract_sha256": current["runtime_contract_sha256"],
+    }
+    stale_generation = sorted(
+        key
+        for key, value in expected_generation.items()
+        if candidate_generation.get(key) != value
+    )
+    if stale_generation:
+        blockers.append(
+            {
+                "code": "candidate-contract-stale",
+                "message": (
+                    "v4 migration candidate was not exported by the current "
+                    "contracts: " + ", ".join(stale_generation)
+                ),
+            }
+        )
+
+    receipt: dict[str, Any] | None
+    try:
+        receipt = validate_v4_receipt(
+            candidate,
+            author_root=candidate_author,
+        )
+    except V4VerificationError as error:
+        receipt = None
+        blockers.append(
+            {
+                "code": "receipt-invalid",
+                "message": (
+                    "v4 migration candidate receipt failed offline binding "
+                    f"validation: {error}"
+                ),
+            }
+        )
+    for root, label in (
+        (candidate, "candidate learner"),
+        (candidate_author, "candidate author"),
+    ):
+        external = _externally_hardlinked_files(root)
+        if external:
+            blockers.append(
+                {
+                    "code": "candidate-hardlink",
+                    "message": (
+                        f"{label} contains externally hard-linked files: "
+                        + ", ".join(external[:5])
+                    ),
+                }
+            )
+
+    live_snapshot = _snapshot(live)
+    candidate_snapshot = _snapshot(candidate)
+    candidate_author_snapshot = _snapshot(candidate_author)
+    rollback = _rollback_path(live, live_snapshot)
+    if rollback.exists() or rollback.is_symlink():
+        raise CourseRegenerationError(
+            f"planned legacy migration rollback path already exists: {rollback}"
+        )
+    plan = {
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "course_schema_version": 4,
+        "command": "check",
+        "status": "blocked" if blockers else "ready",
+        "reason": "explicit schema-v2/v3 to schema-v4 migration",
+        "required_action": "install-v4-learner-author-pair",
+        "migration_kind": "legacy-to-v4",
+        "writer_calls": 0,
+        "chapter_ids": [],
+        "course": str(live),
+        "author": str(author_destination),
+        "candidate_course": str(candidate),
+        "candidate_author": str(candidate_author),
+        "source_course_schema_version": source_schema_version,
+        "target_course_schema_version": 4,
+        "legacy_baseline": _baseline_record(legacy_baseline),
+        "identity": locked_identity,
+        "candidate_identity": candidate_identity,
+        "identity_mismatches": identity_mismatches,
+        "migration": migration,
+        "current_plugin_version": current["plugin_version"],
+        "current_content_contract_sha256": current[
+            "content_contract_sha256"
+        ],
+        "current_runtime_contract_sha256": current[
+            "runtime_contract_sha256"
+        ],
+        "candidate_generation": candidate_generation,
+        "candidate_receipt": (
+            _v4_receipt_summary(receipt) if receipt is not None else None
+        ),
+        "live_snapshot_sha256": live_snapshot,
+        "candidate_snapshot_sha256": candidate_snapshot,
+        "candidate_author_snapshot_sha256": candidate_author_snapshot,
+        "replacement_policy": REPLACEMENT_POLICY,
+        "rollback_path": str(rollback),
+        "blockers": blockers,
+    }
     return _finish_plan(plan)
 
 
@@ -1479,6 +3295,1929 @@ def _load_plan(path: Path) -> dict[str, Any]:
     return plan
 
 
+def _validated_rollback_path(
+    raw: Any,
+    *,
+    root: Path,
+    snapshots: tuple[str, ...],
+    label: str,
+) -> Path:
+    if not isinstance(raw, str):
+        raise CourseRegenerationError(f"regeneration plan has no {label}")
+    if not snapshots or any(
+        SHA256_RE.fullmatch(value) is None for value in snapshots
+    ):
+        raise CourseRegenerationError(
+            f"regeneration plan has invalid snapshots for {label}"
+        )
+    path = Path(raw)
+    suffix = "-".join(re.escape(snapshot[:8]) for snapshot in snapshots)
+    expected = re.compile(
+        re.escape(f".{root.name}.coursekit-rollback-")
+        + r"\d{8}T\d{6}Z-"
+        + suffix
+    )
+    if (
+        not path.is_absolute()
+        or path.parent != root.parent
+        or expected.fullmatch(path.name) is None
+        or path.exists()
+        or path.is_symlink()
+    ):
+        raise CourseRegenerationError(
+            f"planned {label} is unsafe or already exists"
+        )
+    return path
+
+
+def _create_rollback_root(path: Path) -> tuple[int, int]:
+    try:
+        path.mkdir(mode=0o700)
+    except OSError as error:
+        raise CourseRegenerationError(
+            f"cannot create transient rollback path {path}: {error}"
+        ) from error
+    if path.is_symlink() or not path.is_dir():
+        raise CourseRegenerationError(
+            f"transient rollback path is not a regular directory: {path}"
+        )
+    try:
+        stat_result = path.stat(follow_symlinks=False)
+    except OSError as error:
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+        raise CourseRegenerationError(
+            f"cannot bind transient rollback path {path}: {error}"
+        ) from error
+    return stat_result.st_dev, stat_result.st_ino
+
+
+def _matches_snapshot(path: Path, expected: str) -> bool:
+    return (
+        not path.is_symlink()
+        and path.is_dir()
+        and _snapshot(path) == expected
+    )
+
+
+def _directory_open_flags() -> int:
+    required = ("O_DIRECTORY", "O_NOFOLLOW")
+    if any(not hasattr(os, name) for name in required):
+        raise CourseRegenerationError(
+            "fd-bound rollback cleanup is unsupported on this platform"
+        )
+    return (
+        os.O_RDONLY
+        | os.O_DIRECTORY
+        | os.O_NOFOLLOW
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+
+
+def _file_open_flags() -> int:
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise CourseRegenerationError(
+            "fd-bound rollback cleanup is unsupported on this platform"
+        )
+    return os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+
+
+def _entry_fingerprint(
+    stat_result: os.stat_result,
+) -> tuple[int, int, int, int, int]:
+    return (
+        stat_result.st_dev,
+        stat_result.st_ino,
+        stat_result.st_mode,
+        stat_result.st_size,
+        stat_result.st_mtime_ns,
+    )
+
+
+def _fd_mount_identity(fd: int) -> tuple[int, ...]:
+    """Return an fd-bound mount identity or fail closed."""
+
+    stat_result = os.fstat(fd)
+    if sys.platform.startswith("linux"):
+        try:
+            fd_info = Path(f"/proc/self/fdinfo/{fd}").read_text(
+                encoding="utf-8"
+            )
+        except (OSError, UnicodeError) as error:
+            raise CourseRegenerationError(
+                "cannot inspect Linux mount identity for rollback cleanup"
+            ) from error
+        match = re.search(r"^mnt_id:\s*(\d+)\s*$", fd_info, re.MULTILINE)
+        if match is None:
+            raise CourseRegenerationError(
+                "Linux mount identity is unavailable for rollback cleanup"
+            )
+        return stat_result.st_dev, int(match.group(1))
+    if sys.platform == "darwin":
+        # macOS has no same-filesystem bind mount. st_dev changes at a
+        # mounted filesystem boundary and is available through the bound fd.
+        return (stat_result.st_dev,)
+    raise CourseRegenerationError(
+        "fd-bound rollback cleanup supports only macOS, Linux, and WSL2"
+    )
+
+
+def _open_directory_at(parent_fd: int, name: str) -> int:
+    try:
+        return os.open(name, _directory_open_flags(), dir_fd=parent_fd)
+    except OSError as error:
+        raise CourseRegenerationError(
+            f"cannot bind rollback directory entry {name}: {error}"
+        ) from error
+
+
+def _assert_same_mount(
+    fd: int,
+    root_mount_identity: tuple[int, ...],
+    *,
+    relative: str,
+) -> tuple[int, ...]:
+    mount_identity = _fd_mount_identity(fd)
+    if mount_identity != root_mount_identity:
+        raise CourseRegenerationError(
+            f"rollback tree crosses a nested mountpoint at {relative}"
+        )
+    return mount_identity
+
+
+def _scan_bound_rollback_directory(
+    directory_fd: int,
+    *,
+    root_mount_identity: tuple[int, ...],
+) -> tuple[
+    list[tuple[str, str, bytes]],
+    tuple[_BoundRollbackEntry, ...],
+]:
+    """Snapshot a directory through fds and bind every deletable inode."""
+
+    raw_records: list[
+        tuple[str, str, bytes, tuple[int, int] | None, int]
+    ] = []
+
+    def visit(
+        current_fd: int,
+        prefix: PurePosixPath,
+    ) -> tuple[_BoundRollbackEntry, ...]:
+        try:
+            with os.scandir(current_fd) as iterator:
+                names = sorted(entry.name for entry in iterator)
+        except OSError as error:
+            raise CourseRegenerationError(
+                f"cannot scan bound rollback tree: {error}"
+            ) from error
+
+        bound_entries: list[_BoundRollbackEntry] = []
+        for name in names:
+            relative_path = prefix / name
+            relative = relative_path.as_posix()
+            try:
+                stat_result = os.stat(
+                    name,
+                    dir_fd=current_fd,
+                    follow_symlinks=False,
+                )
+            except OSError as error:
+                raise CourseRegenerationError(
+                    f"cannot inspect bound rollback path {relative}: {error}"
+                ) from error
+            mode = (stat_result.st_mode & 0o7777).to_bytes(2, "big")
+            fingerprint = _entry_fingerprint(stat_result)
+
+            if stat.S_ISLNK(stat_result.st_mode):
+                try:
+                    target = os.readlink(name, dir_fd=current_fd)
+                except OSError as error:
+                    raise CourseRegenerationError(
+                        f"cannot read rollback symlink {relative}: {error}"
+                    ) from error
+                raw_records.append(
+                    (
+                        relative,
+                        "symlink",
+                        mode
+                        + target.encode(
+                            "utf-8",
+                            errors="surrogateescape",
+                        ),
+                        None,
+                        stat_result.st_nlink,
+                    )
+                )
+                bound_entries.append(
+                    _BoundRollbackEntry(
+                        name=name,
+                        kind="symlink",
+                        fingerprint=fingerprint,
+                        mount_identity=None,
+                    )
+                )
+                continue
+
+            if stat.S_ISDIR(stat_result.st_mode):
+                child_fd = _open_directory_at(current_fd, name)
+                try:
+                    opened_stat = os.fstat(child_fd)
+                    if _entry_fingerprint(opened_stat) != fingerprint:
+                        raise CourseRegenerationError(
+                            f"rollback directory changed while binding: {relative}"
+                        )
+                    mount_identity = _assert_same_mount(
+                        child_fd,
+                        root_mount_identity,
+                        relative=relative,
+                    )
+                    raw_records.append(
+                        (
+                            relative,
+                            "directory",
+                            mode,
+                            None,
+                            stat_result.st_nlink,
+                        )
+                    )
+                    children = visit(child_fd, relative_path)
+                    if _entry_fingerprint(os.fstat(child_fd)) != fingerprint:
+                        raise CourseRegenerationError(
+                            f"rollback directory changed while scanning: {relative}"
+                        )
+                finally:
+                    os.close(child_fd)
+                bound_entries.append(
+                    _BoundRollbackEntry(
+                        name=name,
+                        kind="directory",
+                        fingerprint=fingerprint,
+                        mount_identity=mount_identity,
+                        children=children,
+                    )
+                )
+                continue
+
+            if stat.S_ISREG(stat_result.st_mode):
+                try:
+                    file_fd = os.open(
+                        name,
+                        _file_open_flags(),
+                        dir_fd=current_fd,
+                    )
+                except OSError as error:
+                    raise CourseRegenerationError(
+                        f"cannot bind rollback file {relative}: {error}"
+                    ) from error
+                try:
+                    opened_stat = os.fstat(file_fd)
+                    if _entry_fingerprint(opened_stat) != fingerprint:
+                        raise CourseRegenerationError(
+                            f"rollback file changed while binding: {relative}"
+                        )
+                    mount_identity = _assert_same_mount(
+                        file_fd,
+                        root_mount_identity,
+                        relative=relative,
+                    )
+                    digest = hashlib.sha256()
+                    while chunk := os.read(file_fd, 1024 * 1024):
+                        digest.update(chunk)
+                    if _entry_fingerprint(os.fstat(file_fd)) != fingerprint:
+                        raise CourseRegenerationError(
+                            f"rollback file changed while scanning: {relative}"
+                        )
+                finally:
+                    os.close(file_fd)
+                raw_records.append(
+                    (
+                        relative,
+                        "file",
+                        mode + digest.digest(),
+                        (stat_result.st_dev, stat_result.st_ino),
+                        stat_result.st_nlink,
+                    )
+                )
+                bound_entries.append(
+                    _BoundRollbackEntry(
+                        name=name,
+                        kind="file",
+                        fingerprint=fingerprint,
+                        mount_identity=mount_identity,
+                    )
+                )
+                continue
+
+            raise CourseRegenerationError(
+                f"rollback tree contains a special file: {relative}"
+            )
+
+        return tuple(bound_entries)
+
+    bound_entries = visit(directory_fd, PurePosixPath())
+    return _finalize_scan_records(raw_records), bound_entries
+
+
+def _assert_named_directory_identity(
+    parent_fd: int,
+    name: str,
+    identity: tuple[int, int],
+) -> None:
+    try:
+        stat_result = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError as error:
+        raise CourseRegenerationError(
+            "transient rollback path identity changed during cleanup"
+        ) from error
+    if (
+        not stat.S_ISDIR(stat_result.st_mode)
+        or (stat_result.st_dev, stat_result.st_ino) != identity
+    ):
+        raise CourseRegenerationError(
+            "transient rollback path identity changed during cleanup"
+        )
+
+
+def _preflight_rollback_deletion(path: Path, expected_snapshot: str) -> None:
+    """Reject mounted or unstable old trees before the first live rename."""
+
+    parent_fd: int | None = None
+    root_fd: int | None = None
+    try:
+        parent_fd = os.open(path.parent, _directory_open_flags())
+        root_fd = _open_directory_at(parent_fd, path.name)
+        root_stat = os.fstat(root_fd)
+        identity = (root_stat.st_dev, root_stat.st_ino)
+        parent_mount_identity = _fd_mount_identity(parent_fd)
+        root_mount_identity = _assert_same_mount(
+            root_fd,
+            parent_mount_identity,
+            relative=".",
+        )
+        records, _ = _scan_bound_rollback_directory(
+            root_fd,
+            root_mount_identity=root_mount_identity,
+        )
+        if _snapshot_records(records) != expected_snapshot:
+            raise CourseRegenerationError(
+                f"old project changed during rollback cleanup preflight: {path}"
+            )
+        _assert_named_directory_identity(parent_fd, path.name, identity)
+    except OSError as error:
+        raise CourseRegenerationError(
+            f"cannot preflight rollback cleanup for {path}: {error}"
+        ) from error
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
+        if parent_fd is not None:
+            os.close(parent_fd)
+
+
+def _validate_rollback_root(
+    rollback: Path,
+    expected: Mapping[str, str],
+    *,
+    identity: tuple[int, int],
+    rollback_fd: int,
+    parent_mount_identity: tuple[int, ...],
+) -> tuple[tuple[_BoundRollbackEntry, ...], tuple[int, ...]]:
+    stat_result = os.fstat(rollback_fd)
+    if (
+        not stat.S_ISDIR(stat_result.st_mode)
+        or (stat_result.st_dev, stat_result.st_ino) != identity
+    ):
+        raise CourseRegenerationError(
+            "transient rollback path identity changed during replacement"
+        )
+    root_mount_identity = _assert_same_mount(
+        rollback_fd,
+        parent_mount_identity,
+        relative=".",
+    )
+    try:
+        with os.scandir(rollback_fd) as iterator:
+            names = sorted(entry.name for entry in iterator)
+    except OSError as error:
+        raise CourseRegenerationError(
+            f"cannot inspect transient rollback path {rollback}: {error}"
+        ) from error
+    if set(names) != set(expected):
+        raise CourseRegenerationError(
+            "transient rollback path contains unexpected or missing roots"
+        )
+
+    bound_entries: list[_BoundRollbackEntry] = []
+    for name, snapshot in expected.items():
+        try:
+            entry_stat = os.stat(
+                name,
+                dir_fd=rollback_fd,
+                follow_symlinks=False,
+            )
+        except OSError as error:
+            raise CourseRegenerationError(
+                f"cannot inspect transient rollback member {name}: {error}"
+            ) from error
+        if not stat.S_ISDIR(entry_stat.st_mode):
+            raise CourseRegenerationError(
+                f"transient rollback member is unsafe: {name}"
+            )
+        member_fd = _open_directory_at(rollback_fd, name)
+        try:
+            opened_stat = os.fstat(member_fd)
+            fingerprint = _entry_fingerprint(entry_stat)
+            if _entry_fingerprint(opened_stat) != fingerprint:
+                raise CourseRegenerationError(
+                    f"transient rollback member changed: {name}"
+                )
+            mount_identity = _assert_same_mount(
+                member_fd,
+                root_mount_identity,
+                relative=name,
+            )
+            records, children = _scan_bound_rollback_directory(
+                member_fd,
+                root_mount_identity=root_mount_identity,
+            )
+            if _snapshot_records(records) != snapshot:
+                raise CourseRegenerationError(
+                    f"transient rollback member changed: {name}"
+                )
+            if _entry_fingerprint(os.fstat(member_fd)) != fingerprint:
+                raise CourseRegenerationError(
+                    f"transient rollback member changed while scanning: {name}"
+                )
+        finally:
+            os.close(member_fd)
+        bound_entries.append(
+            _BoundRollbackEntry(
+                name=name,
+                kind="directory",
+                fingerprint=fingerprint,
+                mount_identity=mount_identity,
+                children=children,
+            )
+        )
+    return tuple(bound_entries), root_mount_identity
+
+
+def _assert_bound_entry(
+    parent_fd: int,
+    entry: _BoundRollbackEntry,
+) -> os.stat_result:
+    try:
+        stat_result = os.stat(
+            entry.name,
+            dir_fd=parent_fd,
+            follow_symlinks=False,
+        )
+    except OSError as error:
+        raise CourseRegenerationError(
+            f"validated rollback entry disappeared: {entry.name}"
+        ) from error
+    if _entry_fingerprint(stat_result) != entry.fingerprint:
+        raise CourseRegenerationError(
+            f"validated rollback entry changed before deletion: {entry.name}"
+        )
+    return stat_result
+
+
+def _delete_bound_rollback_contents(
+    directory_fd: int,
+    entries: tuple[_BoundRollbackEntry, ...],
+    *,
+    root_mount_identity: tuple[int, ...],
+) -> None:
+    """Recursively unlink only the inode manifest bound during validation."""
+
+    try:
+        current_names = set(os.listdir(directory_fd))
+    except OSError as error:
+        raise CourseRegenerationError(
+            f"cannot inspect bound rollback directory: {error}"
+        ) from error
+    expected_names = {entry.name for entry in entries}
+    if current_names != expected_names:
+        raise CourseRegenerationError(
+            "validated rollback directory changed before deletion"
+        )
+
+    for entry in entries:
+        stat_result = _assert_bound_entry(directory_fd, entry)
+        if entry.kind == "directory":
+            if not stat.S_ISDIR(stat_result.st_mode):
+                raise CourseRegenerationError(
+                    f"validated rollback directory became unsafe: {entry.name}"
+                )
+            child_fd = _open_directory_at(directory_fd, entry.name)
+            try:
+                if _entry_fingerprint(os.fstat(child_fd)) != entry.fingerprint:
+                    raise CourseRegenerationError(
+                        "validated rollback directory changed before deletion: "
+                        f"{entry.name}"
+                    )
+                mount_identity = _assert_same_mount(
+                    child_fd,
+                    root_mount_identity,
+                    relative=entry.name,
+                )
+                if mount_identity != entry.mount_identity:
+                    raise CourseRegenerationError(
+                        "validated rollback mount identity changed before deletion: "
+                        f"{entry.name}"
+                    )
+                _delete_bound_rollback_contents(
+                    child_fd,
+                    entry.children,
+                    root_mount_identity=root_mount_identity,
+                )
+                if os.listdir(child_fd):
+                    raise CourseRegenerationError(
+                        f"validated rollback directory is not empty: {entry.name}"
+                    )
+            finally:
+                os.close(child_fd)
+            current_stat = os.stat(
+                entry.name,
+                dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISDIR(current_stat.st_mode)
+                or (
+                    current_stat.st_dev,
+                    current_stat.st_ino,
+                )
+                != entry.fingerprint[:2]
+            ):
+                raise CourseRegenerationError(
+                    "validated rollback directory was replaced during deletion: "
+                    f"{entry.name}"
+                )
+            os.rmdir(entry.name, dir_fd=directory_fd)
+            continue
+
+        if entry.kind == "file":
+            if not stat.S_ISREG(stat_result.st_mode):
+                raise CourseRegenerationError(
+                    f"validated rollback file became unsafe: {entry.name}"
+                )
+            try:
+                file_fd = os.open(
+                    entry.name,
+                    _file_open_flags(),
+                    dir_fd=directory_fd,
+                )
+            except OSError as error:
+                raise CourseRegenerationError(
+                    f"cannot rebind rollback file {entry.name}: {error}"
+                ) from error
+            try:
+                if _entry_fingerprint(os.fstat(file_fd)) != entry.fingerprint:
+                    raise CourseRegenerationError(
+                        f"validated rollback file changed: {entry.name}"
+                    )
+                mount_identity = _assert_same_mount(
+                    file_fd,
+                    root_mount_identity,
+                    relative=entry.name,
+                )
+                if mount_identity != entry.mount_identity:
+                    raise CourseRegenerationError(
+                        "validated rollback mount identity changed before deletion: "
+                        f"{entry.name}"
+                    )
+            finally:
+                os.close(file_fd)
+            os.unlink(entry.name, dir_fd=directory_fd)
+            continue
+
+        if entry.kind != "symlink" or not stat.S_ISLNK(stat_result.st_mode):
+            raise CourseRegenerationError(
+                f"validated rollback entry became unsafe: {entry.name}"
+            )
+        os.unlink(entry.name, dir_fd=directory_fd)
+
+
+def _delete_rollback_root(
+    rollback: Path,
+    expected: Mapping[str, str],
+    *,
+    identity: tuple[int, int],
+) -> None:
+    """Delete only the fully validated old project tree after commit checks."""
+
+    parent_fd: int | None = None
+    rollback_fd: int | None = None
+    try:
+        parent_fd = os.open(rollback.parent, _directory_open_flags())
+        rollback_fd = _open_directory_at(parent_fd, rollback.name)
+        parent_mount_identity = _fd_mount_identity(parent_fd)
+        bound_entries, root_mount_identity = _validate_rollback_root(
+            rollback,
+            expected,
+            identity=identity,
+            rollback_fd=rollback_fd,
+            parent_mount_identity=parent_mount_identity,
+        )
+        # This check intentionally occurs after validation. If the pathname was
+        # swapped, the foreign tree is left untouched and cleanup fails closed.
+        _assert_named_directory_identity(parent_fd, rollback.name, identity)
+        _delete_bound_rollback_contents(
+            rollback_fd,
+            bound_entries,
+            root_mount_identity=root_mount_identity,
+        )
+        _assert_named_directory_identity(parent_fd, rollback.name, identity)
+        os.rmdir(rollback.name, dir_fd=parent_fd)
+    except OSError as error:
+        raise CourseRegenerationError(
+            f"cannot delete transient rollback path {rollback}: {error}"
+        ) from error
+    finally:
+        if rollback_fd is not None:
+            os.close(rollback_fd)
+        if parent_fd is not None:
+            os.close(parent_fd)
+    if rollback.exists() or rollback.is_symlink():
+        raise CourseRegenerationError(
+            f"transient rollback path still exists after deletion: {rollback}"
+        )
+
+
+def _prepare_apply_result_output(
+    result_path: Path | None,
+    *,
+    roots: tuple[Path, ...],
+    rollback: Path,
+    location: str,
+) -> Path | None:
+    if result_path is None:
+        return None
+    output = _safe_output(result_path, roots, location=location)
+    if output == rollback or rollback in output.parents:
+        raise CourseRegenerationError(
+            f"{location} must be outside the transient rollback path"
+        )
+    return _preflight_json_output(output)
+
+
+def _replacement_report(
+    base: Mapping[str, Any],
+    *,
+    rollback: Path,
+    cleanup_status: str,
+) -> dict[str, Any]:
+    if cleanup_status not in {"pending", "complete", "failed"}:
+        raise CourseRegenerationError(
+            f"invalid replacement cleanup status: {cleanup_status}"
+        )
+    if cleanup_status == "pending":
+        transaction_state = "replacement_committed"
+    elif cleanup_status == "complete":
+        rollback_retained = False
+        old_project_deleted = True
+        replacement_irreversible = True
+        residue_possible = False
+        transaction_state = "complete"
+    else:
+        transaction_state = "cleanup_failed"
+    report = {
+        **base,
+        "status": "applied",
+        "replacement_committed": True,
+        "transaction_state": transaction_state,
+        "cleanup_status": cleanup_status,
+        "backup_retained": False,
+    }
+    if cleanup_status == "complete":
+        report.update(
+            {
+                "rollback_retained": rollback_retained,
+                "old_project_deleted": old_project_deleted,
+                "replacement_irreversible": replacement_irreversible,
+                "cleanup_residue_possible": residue_possible,
+            }
+        )
+    elif cleanup_status == "failed":
+        # Recursive cleanup may have removed all, some, or none of the old
+        # tree, and pathname interference can leave an unrelated directory at
+        # rollback_path. Do not turn that uncertain residue into a backup or
+        # deletion claim.
+        report["cleanup_residue_possible"] = True
+    return report
+
+
+def _remove_empty_rollback_root(
+    rollback: Path,
+    errors: list[str],
+    *,
+    identity: tuple[int, int],
+) -> None:
+    if not rollback.exists() and not rollback.is_symlink():
+        return
+    if rollback.is_symlink() or not rollback.is_dir():
+        errors.append("transient rollback path became unsafe")
+        return
+    try:
+        stat_result = rollback.stat(follow_symlinks=False)
+        if (stat_result.st_dev, stat_result.st_ino) != identity:
+            errors.append("transient rollback path identity changed")
+            return
+        rollback.rmdir()
+    except OSError as error:
+        errors.append(f"cannot remove empty transient rollback path: {error}")
+
+
+def _validate_v4_targeted_ready_plan(
+    plan: Mapping[str, Any],
+    *,
+    live: Path,
+    live_author: Path,
+    candidate: Path,
+    candidate_author: Path,
+) -> tuple[Path, str, str]:
+    if (
+        plan.get("schema_version") != PLAN_SCHEMA_VERSION
+        or plan.get("course_schema_version") != 4
+        or plan.get("command") != "check"
+        or plan.get("status") != "ready"
+        or plan.get("regeneration_kind") != "targeted-chapter"
+        or plan.get("required_action") != "replace-targeted-chapter"
+        or plan.get("writer_calls") != 1
+        or plan.get("mechanical_repair_limit") != 1
+        or plan.get("replacement_policy") != REPLACEMENT_POLICY
+        or plan.get("blockers") != []
+    ):
+        raise CourseRegenerationError(
+            "targeted v4 apply requires a ready, blocker-free chapter plan"
+        )
+    if (
+        plan.get("course") != str(live)
+        or plan.get("author") != str(live_author)
+        or plan.get("candidate_course") != str(candidate)
+        or plan.get("candidate_author") != str(candidate_author)
+    ):
+        raise CourseRegenerationError(
+            "targeted v4 plan is for different learner/author paths"
+        )
+    request_raw = plan.get("chapter_request")
+    if not isinstance(request_raw, Mapping):
+        raise CourseRegenerationError(
+            "targeted v4 plan has no chapter request"
+        )
+    request = _validated_v4_chapter_request(live, request_raw)
+    if (
+        plan.get("chapter_request_sha256") != _canonical_digest(request)
+        or plan.get("chapter_ids") != [request["chapter_id"]]
+    ):
+        raise CourseRegenerationError(
+            "targeted v4 chapter request binding changed after check"
+        )
+
+    current = _v4_current_contracts()
+    if (
+        plan.get("current_plugin_version") != current["plugin_version"]
+        or plan.get("current_content_contract_sha256")
+        != current["content_contract_sha256"]
+        or plan.get("current_runtime_contract_sha256")
+        != current["runtime_contract_sha256"]
+    ):
+        raise CourseRegenerationError(
+            "the installed v4 Skill changed after targeted check"
+        )
+    live_generation = _v4_generation(live)
+    candidate_generation = _v4_generation(candidate)
+    status, _reason, _action, _calls, _chapters = _v4_regeneration_state(
+        live,
+        live_author,
+        live_generation,
+        current,
+    )
+    if (
+        status != "up_to_date"
+        or plan.get("course_generation") != live_generation
+        or plan.get("candidate_generation") != candidate_generation
+    ):
+        raise CourseRegenerationError(
+            "targeted v4 generation contracts changed after check"
+        )
+    expected_generation = {
+        "plugin_version": current["plugin_version"],
+        "content_contract_sha256": current["content_contract_sha256"],
+        "runtime_contract_sha256": current["runtime_contract_sha256"],
+    }
+    if any(
+        candidate_generation.get(key) != value
+        for key, value in expected_generation.items()
+    ):
+        raise CourseRegenerationError(
+            "targeted v4 candidate no longer uses current contracts"
+        )
+    live_identity = _v4_identity(live)
+    candidate_identity = _v4_identity(candidate)
+    if (
+        plan.get("identity") != live_identity
+        or plan.get("candidate_identity") != candidate_identity
+        or candidate_identity != live_identity
+    ):
+        raise CourseRegenerationError(
+            "targeted v4 course identity or route changed after check"
+        )
+
+    live_snapshot = _snapshot(live)
+    live_author_snapshot = _snapshot(live_author)
+    candidate_snapshot = _snapshot(candidate)
+    candidate_author_snapshot = _snapshot(candidate_author)
+    if (
+        plan.get("live_snapshot_sha256") != live_snapshot
+        or plan.get("live_author_snapshot_sha256") != live_author_snapshot
+    ):
+        raise CourseRegenerationError(
+            "live v4 pair changed after targeted check"
+        )
+    if (
+        plan.get("candidate_snapshot_sha256") != candidate_snapshot
+        or plan.get("candidate_author_snapshot_sha256")
+        != candidate_author_snapshot
+    ):
+        raise CourseRegenerationError(
+            "candidate v4 pair changed after targeted check"
+        )
+
+    scope = _v4_targeted_scope_report(
+        live,
+        live_author,
+        candidate,
+        candidate_author,
+        request=request,
+    )
+    if (
+        plan.get("targeted_scope") != scope
+        or scope["unauthorized_learner_paths"]
+        or scope["unauthorized_author_paths"]
+        or scope["derived_control_mismatches"]
+    ):
+        raise CourseRegenerationError(
+            "targeted v4 candidate escaped its chapter-owned scope"
+        )
+    metadata = _v4_metadata(live)
+    selected = next(
+        (
+            chapter
+            for chapter in metadata["chapters"]
+            if isinstance(chapter, Mapping)
+            and chapter.get("id") == request["chapter_id"]
+        ),
+        None,
+    )
+    if not isinstance(selected, Mapping):
+        raise CourseRegenerationError(
+            "targeted v4 chapter disappeared after check"
+        )
+    live_target = _v4_targeted_chapter_digest(
+        live,
+        live_author,
+        selected,
+    )
+    candidate_target = _v4_targeted_chapter_digest(
+        candidate,
+        candidate_author,
+        selected,
+    )
+    if (
+        live_target == candidate_target
+        or plan.get("target_live_projection_sha256") != live_target
+        or plan.get("target_candidate_projection_sha256") != candidate_target
+    ):
+        raise CourseRegenerationError(
+            "targeted v4 chapter change no longer matches the plan"
+        )
+
+    try:
+        receipt = validate_v4_receipt(
+            candidate,
+            author_root=candidate_author,
+        )
+    except V4VerificationError as error:
+        raise CourseRegenerationError(
+            f"targeted v4 candidate receipt changed or is invalid: {error}"
+        ) from error
+    if plan.get("candidate_receipt") != _v4_receipt_summary(receipt):
+        raise CourseRegenerationError(
+            "targeted v4 candidate receipt binding changed after check"
+        )
+    for root, label in (
+        (candidate, "candidate learner"),
+        (candidate_author, "candidate author"),
+    ):
+        external = _externally_hardlinked_files(root)
+        if external:
+            raise CourseRegenerationError(
+                f"{label} contains externally hard-linked files: "
+                + ", ".join(external[:5])
+            )
+
+    rollback = _validated_rollback_path(
+        plan.get("rollback_path"),
+        root=live,
+        snapshots=(live_snapshot, live_author_snapshot),
+        label="targeted v4 rollback path",
+    )
+    return rollback, candidate_snapshot, candidate_author_snapshot
+
+
+def _validate_v4_ready_plan(
+    plan: Mapping[str, Any],
+    *,
+    live: Path,
+    live_author: Path,
+    candidate: Path,
+    candidate_author: Path,
+) -> tuple[Path, str, str]:
+    if (
+        plan.get("schema_version") != PLAN_SCHEMA_VERSION
+        or plan.get("course_schema_version") != 4
+        or plan.get("command") != "check"
+        or plan.get("status") != "ready"
+        or plan.get("replacement_policy") != REPLACEMENT_POLICY
+        or plan.get("blockers") != []
+    ):
+        raise CourseRegenerationError(
+            "v4 apply requires a ready, blocker-free regeneration plan"
+        )
+    if (
+        plan.get("course") != str(live)
+        or plan.get("author") != str(live_author)
+        or plan.get("candidate_course") != str(candidate)
+        or plan.get("candidate_author") != str(candidate_author)
+    ):
+        raise CourseRegenerationError(
+            "v4 regeneration plan is for different learner/author paths"
+        )
+
+    current = _v4_current_contracts()
+    if (
+        plan.get("current_plugin_version") != current["plugin_version"]
+        or plan.get("current_content_contract_sha256")
+        != current["content_contract_sha256"]
+        or plan.get("current_runtime_contract_sha256")
+        != current["runtime_contract_sha256"]
+    ):
+        raise CourseRegenerationError("the installed v4 Skill changed after check")
+    live_generation = _v4_generation(live)
+    status, _reason, action, writer_calls, chapter_ids = _v4_regeneration_state(
+        live,
+        live_author,
+        live_generation,
+        current,
+    )
+    if (
+        plan.get("regeneration_kind") != status
+        or plan.get("required_action") != action
+        or plan.get("writer_calls") != writer_calls
+        or plan.get("chapter_ids") != chapter_ids
+        or status == "up_to_date"
+    ):
+        raise CourseRegenerationError(
+            "live v4 regeneration requirement changed after check"
+        )
+    if (
+        plan.get("course_plugin_version") != live_generation["plugin_version"]
+        or plan.get("course_content_contract_sha256")
+        != live_generation["content_contract_sha256"]
+        or plan.get("course_runtime_contract_sha256")
+        != live_generation["runtime_contract_sha256"]
+    ):
+        raise CourseRegenerationError(
+            "live v4 generation metadata changed after check"
+        )
+
+    live_identity = _v4_identity(live)
+    candidate_identity = _v4_identity(candidate)
+    if (
+        plan.get("identity") != live_identity
+        or plan.get("candidate_identity") != candidate_identity
+        or candidate_identity != live_identity
+    ):
+        raise CourseRegenerationError(
+            "v4 course identity or chapter route changed after check"
+        )
+    candidate_generation = _v4_generation(candidate)
+    if (
+        plan.get("candidate_generation") != candidate_generation
+        or candidate_generation["plugin_version"] != current["plugin_version"]
+        or candidate_generation["content_contract_sha256"]
+        != current["content_contract_sha256"]
+        or candidate_generation["runtime_contract_sha256"]
+        != current["runtime_contract_sha256"]
+    ):
+        raise CourseRegenerationError(
+            "v4 candidate generation contract changed after check"
+        )
+
+    live_snapshot = _snapshot(live)
+    live_author_snapshot = _snapshot(live_author)
+    candidate_snapshot = _snapshot(candidate)
+    candidate_author_snapshot = _snapshot(candidate_author)
+    if (
+        plan.get("live_snapshot_sha256") != live_snapshot
+        or plan.get("live_author_snapshot_sha256") != live_author_snapshot
+    ):
+        raise CourseRegenerationError("live v4 pair changed after check")
+    if (
+        plan.get("candidate_snapshot_sha256") != candidate_snapshot
+        or plan.get("candidate_author_snapshot_sha256")
+        != candidate_author_snapshot
+    ):
+        raise CourseRegenerationError("candidate v4 pair changed after check")
+
+    live_content = _v4_digest_selected_tree(live, live_author)
+    candidate_content = _v4_digest_selected_tree(candidate, candidate_author)
+    if (
+        plan.get("live_content_projection_sha256") != live_content
+        or plan.get("candidate_content_projection_sha256") != candidate_content
+    ):
+        raise CourseRegenerationError(
+            "v4 author-controlled content projection changed after check"
+        )
+    if status == "needs_content_regeneration":
+        if candidate_content == live_content:
+            raise CourseRegenerationError(
+                "v4 content regeneration produced no material content change"
+            )
+    elif candidate_content != live_content:
+        raise CourseRegenerationError(
+            "v4 runtime refresh or revalidation changed Writer-owned content"
+        )
+
+    try:
+        receipt = validate_v4_receipt(
+            candidate,
+            author_root=candidate_author,
+        )
+    except V4VerificationError as error:
+        raise CourseRegenerationError(
+            f"v4 candidate receipt changed or is invalid: {error}"
+        ) from error
+    receipt_summary = {
+        "receipt_sha256": receipt["receipt_sha256"],
+        "learner_tree_sha256": receipt["learner_tree_sha256"],
+        "author_tree_sha256": receipt["author_tree_sha256"],
+        "runtime_sha256": receipt["runtime_sha256"],
+        "verifier_sha256": receipt["verifier_sha256"],
+    }
+    if plan.get("candidate_receipt") != receipt_summary:
+        raise CourseRegenerationError(
+            "v4 candidate receipt binding changed after check"
+        )
+    for root, label in (
+        (candidate, "candidate learner"),
+        (candidate_author, "candidate author"),
+    ):
+        external = _externally_hardlinked_files(root)
+        if external:
+            raise CourseRegenerationError(
+                f"{label} contains externally hard-linked files: "
+                + ", ".join(external[:5])
+            )
+
+    rollback = _validated_rollback_path(
+        plan.get("rollback_path"),
+        root=live,
+        snapshots=(live_snapshot, live_author_snapshot),
+        label="v4 rollback path",
+    )
+    return rollback, candidate_snapshot, candidate_author_snapshot
+
+
+def _restore_v4_pair(
+    *,
+    live: Path,
+    live_author: Path,
+    candidate: Path,
+    candidate_author: Path,
+    rollback: Path,
+    rollback_identity: tuple[int, int],
+    old_snapshot: str,
+    old_author_snapshot: str,
+    candidate_snapshot: str,
+    candidate_author_snapshot: str,
+) -> str:
+    errors: list[str] = []
+    learner_rollback = rollback / ROLLBACK_LEARNER_NAME
+    author_rollback = rollback / ROLLBACK_AUTHOR_NAME
+
+    def matches(path: Path, expected: str, label: str) -> bool:
+        try:
+            return _matches_snapshot(path, expected)
+        except CourseRegenerationError as error:
+            errors.append(f"cannot inspect {label}: {error}")
+            return False
+
+    def location(
+        current: Path,
+        staged: Path,
+        expected: str,
+        label: str,
+    ) -> str | None:
+        if matches(staged, expected, f"staged {label}"):
+            return "rollback"
+        if matches(current, expected, f"current {label}"):
+            return "live"
+        errors.append(f"original {label} is not recoverable")
+        return None
+
+    learner_location = location(
+        live,
+        learner_rollback,
+        old_snapshot,
+        "learner",
+    )
+    author_location = location(
+        live_author,
+        author_rollback,
+        old_author_snapshot,
+        "author",
+    )
+    restore_specs = (
+        (
+            "learner",
+            learner_location,
+            live,
+            candidate,
+            learner_rollback,
+            candidate_snapshot,
+        ),
+        (
+            "author",
+            author_location,
+            live_author,
+            candidate_author,
+            author_rollback,
+            candidate_author_snapshot,
+        ),
+    )
+    for label, source, current, candidate_path, _staged, expected in restore_specs:
+        if source != "rollback" or (
+            not current.exists() and not current.is_symlink()
+        ):
+            continue
+        if candidate_path.exists() or candidate_path.is_symlink():
+            errors.append(f"candidate {label} path is occupied")
+        elif not matches(current, expected, f"installed candidate {label}"):
+            errors.append(f"installed candidate {label} changed")
+    if errors:
+        return (
+            "manual recovery required ("
+            + "; ".join(errors)
+            + f"); installed paths were preserved and rollback is {rollback}"
+        )
+
+    def move(source: Path, destination: Path, message: str) -> bool:
+        try:
+            os.replace(source, destination)
+            return True
+        except OSError as error:
+            if (
+                not source.exists()
+                and not source.is_symlink()
+                and (destination.exists() or destination.is_symlink())
+            ):
+                return True
+            errors.append(f"{message}: {error}")
+            return False
+
+    moved_candidates: dict[str, bool] = {}
+    for label, source, current, candidate_path, staged, _expected in reversed(
+        restore_specs
+    ):
+        if source != "rollback":
+            continue
+        current_occupied = current.exists() or current.is_symlink()
+        moved = True
+        if current_occupied:
+            moved = move(
+                current,
+                candidate_path,
+                f"cannot move failed candidate {label} back",
+            )
+            moved_candidates[label] = moved
+        if moved and not current.exists() and not current.is_symlink():
+            move(staged, current, f"cannot restore original {label}")
+
+    try:
+        restored = (
+            live.is_dir()
+            and not live.is_symlink()
+            and live_author.is_dir()
+            and not live_author.is_symlink()
+            and _snapshot(live) == old_snapshot
+            and _snapshot(live_author) == old_author_snapshot
+        )
+    except CourseRegenerationError as error:
+        errors.append(f"cannot verify restored pair: {error}")
+        restored = False
+    for label, moved in moved_candidates.items():
+        if not moved:
+            continue
+        candidate_path = candidate if label == "learner" else candidate_author
+        expected = (
+            candidate_snapshot
+            if label == "learner"
+            else candidate_author_snapshot
+        )
+        try:
+            if not _matches_snapshot(candidate_path, expected):
+                errors.append(f"restored candidate {label} changed")
+        except CourseRegenerationError as error:
+            errors.append(f"cannot verify restored candidate {label}: {error}")
+    _remove_empty_rollback_root(
+        rollback,
+        errors,
+        identity=rollback_identity,
+    )
+    if restored and not errors:
+        return "rolled back learner and author with no retained rollback"
+    detail = "; ".join(errors) or "restored pair did not match snapshots"
+    return f"manual recovery required ({detail}); rollback is {rollback}"
+
+
+def apply_v4_regeneration(
+    course: Path,
+    *,
+    candidate_course: Path,
+    plan_path: Path,
+    confirm_stopped: bool,
+    accept_replacement: bool,
+    result_path: Path | None = None,
+) -> dict[str, Any]:
+    """Install a receipt-bound v4 learner/author pair without rerunning tests."""
+
+    if not confirm_stopped:
+        raise CourseRegenerationError("--confirm-stopped is required")
+    if not accept_replacement:
+        raise CourseRegenerationError("--accept-replacement is required")
+    live, live_author = _v4_pair(course, role="live")
+    candidate, candidate_author = _v4_candidate_pair(
+        candidate_course,
+        live,
+        live_author,
+    )
+    plan_file = _safe_output(
+        plan_path,
+        (live, live_author, candidate, candidate_author),
+        location="v4 plan path",
+    )
+    plan = _load_plan(plan_file)
+    validator = (
+        _validate_v4_targeted_ready_plan
+        if plan.get("regeneration_kind") == "targeted-chapter"
+        else _validate_v4_ready_plan
+    )
+    rollback, candidate_snapshot, candidate_author_snapshot = validator(
+        plan,
+        live=live,
+        live_author=live_author,
+        candidate=candidate,
+        candidate_author=candidate_author,
+    )
+    old_snapshot = str(plan["live_snapshot_sha256"])
+    old_author_snapshot = str(plan["live_author_snapshot_sha256"])
+    output = _prepare_apply_result_output(
+        result_path,
+        roots=(live, live_author, candidate, candidate_author),
+        rollback=rollback,
+        location="v4 result output",
+    )
+    result_base = {
+        "schema_version": 2,
+        "course_schema_version": 4,
+        "course": str(live),
+        "author": str(live_author),
+        "replacement_policy": REPLACEMENT_POLICY,
+        "rollback_path": str(rollback),
+        "old_snapshot_sha256": old_snapshot,
+        "old_author_snapshot_sha256": old_author_snapshot,
+        "new_snapshot_sha256": candidate_snapshot,
+        "new_author_snapshot_sha256": candidate_author_snapshot,
+        "plan_digest": plan["plan_digest"],
+        "receipt_validation": "offline",
+        "writer_calls_during_apply": 0,
+        **(
+            {
+                "regeneration_kind": "targeted-chapter",
+                "chapter_ids": list(plan["chapter_ids"]),
+            }
+            if plan.get("regeneration_kind") == "targeted-chapter"
+            else {}
+        ),
+    }
+    learner_rollback = rollback / ROLLBACK_LEARNER_NAME
+    author_rollback = rollback / ROLLBACK_AUTHOR_NAME
+    _preflight_rollback_deletion(live, old_snapshot)
+    _preflight_rollback_deletion(live_author, old_author_snapshot)
+    rollback_identity = _create_rollback_root(rollback)
+    try:
+        os.replace(live, learner_rollback)
+        os.replace(live_author, author_rollback)
+        for root, expected, label in (
+            (candidate, candidate_snapshot, "candidate learner"),
+            (
+                candidate_author,
+                candidate_author_snapshot,
+                "candidate author",
+            ),
+        ):
+            external = _externally_hardlinked_files(root)
+            if external or _snapshot(root) != expected:
+                detail = (
+                    "externally hard-linked files: " + ", ".join(external[:5])
+                    if external
+                    else "snapshot changed"
+                )
+                raise CourseRegenerationError(f"{label} {detail}")
+        os.replace(candidate, live)
+        os.replace(candidate_author, live_author)
+        if (
+            _snapshot(learner_rollback) != old_snapshot
+            or _snapshot(author_rollback) != old_author_snapshot
+            or _snapshot(live) != candidate_snapshot
+            or _snapshot(live_author) != candidate_author_snapshot
+        ):
+            raise CourseRegenerationError(
+                "post-swap v4 learner/author snapshots do not match"
+            )
+        validate_v4_receipt(live, author_root=live_author)
+    except (OSError, CourseRegenerationError, V4VerificationError) as error:
+        recovery = _restore_v4_pair(
+            live=live,
+            live_author=live_author,
+            candidate=candidate,
+            candidate_author=candidate_author,
+            rollback=rollback,
+            rollback_identity=rollback_identity,
+            old_snapshot=old_snapshot,
+            old_author_snapshot=old_author_snapshot,
+            candidate_snapshot=candidate_snapshot,
+            candidate_author_snapshot=candidate_author_snapshot,
+        )
+        raise CourseRegenerationError(
+            f"v4 pair replacement failed: {error}; {recovery}"
+        ) from error
+    pending_report = _replacement_report(
+        result_base,
+        rollback=rollback,
+        cleanup_status="pending",
+    )
+    if output is not None:
+        try:
+            _write_json(output, pending_report)
+        except (CourseRegenerationError, OSError) as error:
+            if _json_value_matches(output, pending_report):
+                raise CourseRegenerationError(
+                    "v4 pair was installed and verified and its commit receipt "
+                    "is visible, but receipt durability could not be confirmed; "
+                    f"cleanup was not started and rollback remains at {rollback}: "
+                    f"{error}"
+                ) from error
+            recovery = _restore_v4_pair(
+                live=live,
+                live_author=live_author,
+                candidate=candidate,
+                candidate_author=candidate_author,
+                rollback=rollback,
+                rollback_identity=rollback_identity,
+                old_snapshot=old_snapshot,
+                old_author_snapshot=old_author_snapshot,
+                candidate_snapshot=candidate_snapshot,
+                candidate_author_snapshot=candidate_author_snapshot,
+            )
+            raise CourseRegenerationError(
+                "cannot persist the v4 replacement commit receipt before "
+                f"cleanup: {error}; {recovery}"
+            ) from error
+    try:
+        _delete_rollback_root(
+            rollback,
+            {
+                ROLLBACK_LEARNER_NAME: old_snapshot,
+                ROLLBACK_AUTHOR_NAME: old_author_snapshot,
+            },
+            identity=rollback_identity,
+        )
+    except CourseRegenerationError as error:
+        receipt_note = ""
+        if output is not None:
+            failure_report = _replacement_report(
+                result_base,
+                rollback=rollback,
+                cleanup_status="failed",
+            )
+            try:
+                _write_json(output, failure_report)
+                receipt_note = (
+                    f"; result output {output} records cleanup_status=failed"
+                )
+            except (CourseRegenerationError, OSError) as receipt_error:
+                receipt_note = (
+                    "; the durable pending commit receipt remains"
+                    if _json_value_matches(output, pending_report)
+                    else "; no matching result receipt could be confirmed"
+                ) + (
+                    " because recording cleanup failure also failed: "
+                    f"{receipt_error}"
+                )
+        raise CourseRegenerationError(
+            "v4 pair was installed and verified, but deleting the old project "
+            f"failed: {error}; the new pair remains installed and cleanup "
+            f"residue may remain at {rollback}{receipt_note}"
+        ) from error
+    complete_report = _replacement_report(
+        result_base,
+        rollback=rollback,
+        cleanup_status="complete",
+    )
+    if output is not None:
+        try:
+            _write_json(output, complete_report)
+        except (CourseRegenerationError, OSError) as error:
+            durable_state = (
+                "the complete result is visible but its directory sync failed"
+                if _json_value_matches(output, complete_report)
+                else "the durable pending commit receipt remains"
+            )
+            raise CourseRegenerationError(
+                "v4 pair was installed and verified and the old project was "
+                f"deleted, but finalizing result output failed: {error}; "
+                f"{durable_state} at {output}"
+            ) from error
+    return complete_report
+
+
+def _validate_legacy_to_v4_ready_plan(
+    plan: Mapping[str, Any],
+    *,
+    live: Path,
+    author_destination: Path,
+    candidate: Path,
+    candidate_author: Path,
+) -> tuple[Path, str, str]:
+    if (
+        plan.get("schema_version") != PLAN_SCHEMA_VERSION
+        or plan.get("course_schema_version") != 4
+        or plan.get("command") != "check"
+        or plan.get("status") != "ready"
+        or plan.get("migration_kind") != "legacy-to-v4"
+        or plan.get("required_action") != "install-v4-learner-author-pair"
+        or plan.get("writer_calls") != 0
+        or plan.get("chapter_ids") != []
+        or plan.get("replacement_policy") != REPLACEMENT_POLICY
+        or plan.get("blockers") != []
+    ):
+        raise CourseRegenerationError(
+            "legacy-to-v4 apply requires a ready, blocker-free migration plan"
+        )
+    if (
+        plan.get("course") != str(live)
+        or plan.get("author") != str(author_destination)
+        or plan.get("candidate_course") != str(candidate)
+        or plan.get("candidate_author") != str(candidate_author)
+    ):
+        raise CourseRegenerationError(
+            "legacy-to-v4 plan is for different learner/author paths"
+        )
+    if author_destination.exists() or author_destination.is_symlink():
+        raise CourseRegenerationError(
+            "legacy-to-v4 author destination became occupied after check"
+        )
+
+    source_schema_version = _legacy_course_schema_version(live)
+    baseline = _load_course_baseline(live)
+    locked_identity = _legacy_migration_identity(live)
+    candidate_identity = _v4_migration_identity(candidate)
+    mismatches = _migration_identity_mismatches(
+        locked_identity,
+        candidate_identity,
+    )
+    if (
+        plan.get("source_course_schema_version") != source_schema_version
+        or plan.get("target_course_schema_version") != 4
+        or plan.get("legacy_baseline") != _baseline_record(baseline)
+        or plan.get("identity") != locked_identity
+        or plan.get("candidate_identity") != candidate_identity
+        or plan.get("identity_mismatches") != []
+        or mismatches
+    ):
+        raise CourseRegenerationError(
+            "legacy or v4 migration identity changed after check"
+        )
+    migration = _legacy_to_v4_migration_record(live, candidate)
+    if plan.get("migration") != migration:
+        raise CourseRegenerationError(
+            "legacy-to-v4 route migration record changed after check"
+        )
+
+    current = _v4_current_contracts()
+    if (
+        plan.get("current_plugin_version") != current["plugin_version"]
+        or plan.get("current_content_contract_sha256")
+        != current["content_contract_sha256"]
+        or plan.get("current_runtime_contract_sha256")
+        != current["runtime_contract_sha256"]
+    ):
+        raise CourseRegenerationError(
+            "the installed v4 Skill changed after migration check"
+        )
+    candidate_generation = _v4_generation(candidate)
+    if (
+        plan.get("candidate_generation") != candidate_generation
+        or candidate_generation["plugin_version"] != current["plugin_version"]
+        or candidate_generation["content_contract_sha256"]
+        != current["content_contract_sha256"]
+        or candidate_generation["runtime_contract_sha256"]
+        != current["runtime_contract_sha256"]
+    ):
+        raise CourseRegenerationError(
+            "v4 migration candidate contracts changed after check"
+        )
+
+    live_snapshot = _snapshot(live)
+    candidate_snapshot = _snapshot(candidate)
+    candidate_author_snapshot = _snapshot(candidate_author)
+    if plan.get("live_snapshot_sha256") != live_snapshot:
+        raise CourseRegenerationError("legacy course changed after migration check")
+    if (
+        plan.get("candidate_snapshot_sha256") != candidate_snapshot
+        or plan.get("candidate_author_snapshot_sha256")
+        != candidate_author_snapshot
+    ):
+        raise CourseRegenerationError(
+            "v4 migration candidate pair changed after check"
+        )
+
+    try:
+        receipt = validate_v4_receipt(
+            candidate,
+            author_root=candidate_author,
+        )
+    except V4VerificationError as error:
+        raise CourseRegenerationError(
+            f"v4 migration receipt changed or is invalid: {error}"
+        ) from error
+    if plan.get("candidate_receipt") != _v4_receipt_summary(receipt):
+        raise CourseRegenerationError(
+            "v4 migration receipt binding changed after check"
+        )
+    for root, label in (
+        (candidate, "candidate learner"),
+        (candidate_author, "candidate author"),
+    ):
+        external = _externally_hardlinked_files(root)
+        if external:
+            raise CourseRegenerationError(
+                f"{label} contains externally hard-linked files: "
+                + ", ".join(external[:5])
+            )
+
+    rollback = _validated_rollback_path(
+        plan.get("rollback_path"),
+        root=live,
+        snapshots=(live_snapshot,),
+        label="legacy migration rollback path",
+    )
+    return rollback, candidate_snapshot, candidate_author_snapshot
+
+
+def _restore_failed_legacy_to_v4(
+    *,
+    live: Path,
+    author_destination: Path,
+    candidate: Path,
+    candidate_author: Path,
+    rollback: Path,
+    rollback_identity: tuple[int, int],
+    old_snapshot: str,
+    candidate_snapshot: str,
+    candidate_author_snapshot: str,
+) -> str:
+    errors: list[str] = []
+    learner_rollback = rollback / ROLLBACK_LEARNER_NAME
+
+    def matches(path: Path, expected: str, label: str) -> bool:
+        try:
+            return _matches_snapshot(path, expected)
+        except CourseRegenerationError as error:
+            errors.append(f"cannot inspect {label}: {error}")
+            return False
+
+    old_is_staged = matches(
+        learner_rollback,
+        old_snapshot,
+        "staged legacy learner",
+    )
+    old_is_live = matches(live, old_snapshot, "current legacy learner")
+    if not old_is_staged and not old_is_live:
+        errors.append("original legacy learner is not recoverable")
+
+    learner_installed = (
+        old_is_staged and (live.exists() or live.is_symlink())
+    )
+    author_destination_occupied = (
+        author_destination.exists() or author_destination.is_symlink()
+    )
+    author_installed = (
+        author_destination_occupied
+        and not candidate_author.exists()
+        and not candidate_author.is_symlink()
+        and matches(
+            author_destination,
+            candidate_author_snapshot,
+            "installed candidate author",
+        )
+    )
+    if learner_installed:
+        if candidate.exists() or candidate.is_symlink():
+            errors.append("candidate learner path is occupied")
+        elif not matches(
+            live,
+            candidate_snapshot,
+            "installed candidate learner",
+        ):
+            errors.append("installed candidate learner changed")
+    if errors:
+        return (
+            "manual recovery required ("
+            + "; ".join(errors)
+            + f"); installed paths were preserved and rollback is {rollback}"
+        )
+
+    def move(source: Path, destination: Path, message: str) -> bool:
+        try:
+            os.replace(source, destination)
+            return True
+        except OSError as error:
+            if (
+                not source.exists()
+                and not source.is_symlink()
+                and (destination.exists() or destination.is_symlink())
+            ):
+                return True
+            errors.append(f"{message}: {error}")
+            return False
+
+    if author_installed:
+        move(
+            author_destination,
+            candidate_author,
+            "cannot move failed author installation back",
+        )
+    if learner_installed:
+        move(
+            live,
+            candidate,
+            "cannot move failed learner installation back",
+        )
+    if old_is_staged and not live.exists() and not live.is_symlink():
+        move(
+            learner_rollback,
+            live,
+            "cannot restore original legacy learner",
+        )
+
+    try:
+        restored = (
+            not live.is_symlink()
+            and live.is_dir()
+            and _snapshot(live) == old_snapshot
+            and not author_destination.exists()
+            and not author_destination.is_symlink()
+            and candidate.is_dir()
+            and _snapshot(candidate) == candidate_snapshot
+            and candidate_author.is_dir()
+            and _snapshot(candidate_author) == candidate_author_snapshot
+        )
+    except CourseRegenerationError as error:
+        errors.append(f"cannot verify restored migration inputs: {error}")
+        restored = False
+    _remove_empty_rollback_root(
+        rollback,
+        errors,
+        identity=rollback_identity,
+    )
+    if restored and not errors:
+        return (
+            "rolled back legacy root with no author destination or retained "
+            "rollback"
+        )
+    detail = "; ".join(errors) or "restored paths did not match snapshots"
+    return f"manual recovery required ({detail}); rollback is {rollback}"
+
+
+def apply_legacy_to_v4_regeneration(
+    course: Path,
+    *,
+    candidate_course: Path,
+    plan_path: Path,
+    confirm_stopped: bool,
+    accept_replacement: bool,
+    result_path: Path | None = None,
+) -> dict[str, Any]:
+    """Install a receipt-bound v4 pair over one legacy course root."""
+
+    if not confirm_stopped:
+        raise CourseRegenerationError("--confirm-stopped is required")
+    if not accept_replacement:
+        raise CourseRegenerationError("--accept-replacement is required")
+    live = _course_root(course, role="live")
+    author_destination = live.with_name(f"{live.name}-author")
+    candidate, candidate_author = _v4_candidate_pair(
+        candidate_course,
+        live,
+        author_destination,
+    )
+    plan_file = _safe_output(
+        plan_path,
+        (live, author_destination, candidate, candidate_author),
+        location="legacy-to-v4 plan path",
+    )
+    plan = _load_plan(plan_file)
+    (
+        rollback,
+        candidate_snapshot,
+        candidate_author_snapshot,
+    ) = _validate_legacy_to_v4_ready_plan(
+        plan,
+        live=live,
+        author_destination=author_destination,
+        candidate=candidate,
+        candidate_author=candidate_author,
+    )
+    old_snapshot = str(plan["live_snapshot_sha256"])
+    output = _prepare_apply_result_output(
+        result_path,
+        roots=(live, author_destination, candidate, candidate_author),
+        rollback=rollback,
+        location="legacy-to-v4 result output",
+    )
+    result_base = {
+        "schema_version": 2,
+        "course_schema_version": 4,
+        "migration_kind": "legacy-to-v4",
+        "source_course_schema_version": plan[
+            "source_course_schema_version"
+        ],
+        "course": str(live),
+        "author": str(author_destination),
+        "replacement_policy": REPLACEMENT_POLICY,
+        "rollback_path": str(rollback),
+        "old_snapshot_sha256": old_snapshot,
+        "new_snapshot_sha256": candidate_snapshot,
+        "new_author_snapshot_sha256": candidate_author_snapshot,
+        "plan_digest": plan["plan_digest"],
+        "receipt_validation": "offline",
+        "writer_calls_during_apply": 0,
+    }
+    learner_rollback = rollback / ROLLBACK_LEARNER_NAME
+    _preflight_rollback_deletion(live, old_snapshot)
+    rollback_identity = _create_rollback_root(rollback)
+    try:
+        os.replace(live, learner_rollback)
+        for root, expected, label in (
+            (candidate, candidate_snapshot, "candidate learner"),
+            (
+                candidate_author,
+                candidate_author_snapshot,
+                "candidate author",
+            ),
+        ):
+            external = _externally_hardlinked_files(root)
+            if external or _snapshot(root) != expected:
+                detail = (
+                    "externally hard-linked files: " + ", ".join(external[:5])
+                    if external
+                    else "snapshot changed"
+                )
+                raise CourseRegenerationError(f"{label} {detail}")
+        if author_destination.exists() or author_destination.is_symlink():
+            raise CourseRegenerationError(
+                "author destination was occupied during migration"
+            )
+        os.replace(candidate, live)
+        os.replace(candidate_author, author_destination)
+        if (
+            _snapshot(learner_rollback) != old_snapshot
+            or _snapshot(live) != candidate_snapshot
+            or _snapshot(author_destination) != candidate_author_snapshot
+        ):
+            raise CourseRegenerationError(
+                "post-swap legacy-to-v4 snapshots do not match"
+            )
+        validate_v4_receipt(live, author_root=author_destination)
+    except (OSError, CourseRegenerationError, V4VerificationError) as error:
+        recovery = _restore_failed_legacy_to_v4(
+            live=live,
+            author_destination=author_destination,
+            candidate=candidate,
+            candidate_author=candidate_author,
+            rollback=rollback,
+            rollback_identity=rollback_identity,
+            old_snapshot=old_snapshot,
+            candidate_snapshot=candidate_snapshot,
+            candidate_author_snapshot=candidate_author_snapshot,
+        )
+        raise CourseRegenerationError(
+            f"legacy-to-v4 pair replacement failed: {error}; {recovery}"
+        ) from error
+    pending_report = _replacement_report(
+        result_base,
+        rollback=rollback,
+        cleanup_status="pending",
+    )
+    if output is not None:
+        try:
+            _write_json(output, pending_report)
+        except (CourseRegenerationError, OSError) as error:
+            if _json_value_matches(output, pending_report):
+                raise CourseRegenerationError(
+                    "the v4 pair was installed over the legacy course and its "
+                    "commit receipt is visible, but receipt durability could "
+                    "not be confirmed; cleanup was not started and rollback "
+                    f"remains at {rollback}: {error}"
+                ) from error
+            recovery = _restore_failed_legacy_to_v4(
+                live=live,
+                author_destination=author_destination,
+                candidate=candidate,
+                candidate_author=candidate_author,
+                rollback=rollback,
+                rollback_identity=rollback_identity,
+                old_snapshot=old_snapshot,
+                candidate_snapshot=candidate_snapshot,
+                candidate_author_snapshot=candidate_author_snapshot,
+            )
+            raise CourseRegenerationError(
+                "cannot persist the legacy-to-v4 replacement commit receipt "
+                f"before cleanup: {error}; {recovery}"
+            ) from error
+    try:
+        _delete_rollback_root(
+            rollback,
+            {ROLLBACK_LEARNER_NAME: old_snapshot},
+            identity=rollback_identity,
+        )
+    except CourseRegenerationError as error:
+        receipt_note = ""
+        if output is not None:
+            failure_report = _replacement_report(
+                result_base,
+                rollback=rollback,
+                cleanup_status="failed",
+            )
+            try:
+                _write_json(output, failure_report)
+                receipt_note = (
+                    f"; result output {output} records cleanup_status=failed"
+                )
+            except (CourseRegenerationError, OSError) as receipt_error:
+                receipt_note = (
+                    "; the durable pending commit receipt remains"
+                    if _json_value_matches(output, pending_report)
+                    else "; no matching result receipt could be confirmed"
+                ) + (
+                    " because recording cleanup failure also failed: "
+                    f"{receipt_error}"
+                )
+        raise CourseRegenerationError(
+            "v4 pair was installed and verified, but deleting the old legacy "
+            f"project failed: {error}; the new pair remains installed and "
+            f"cleanup residue may remain at {rollback}{receipt_note}"
+        ) from error
+    complete_report = _replacement_report(
+        result_base,
+        rollback=rollback,
+        cleanup_status="complete",
+    )
+    if output is not None:
+        try:
+            _write_json(output, complete_report)
+        except (CourseRegenerationError, OSError) as error:
+            durable_state = (
+                "the complete result is visible but its directory sync failed"
+                if _json_value_matches(output, complete_report)
+                else "the durable pending commit receipt remains"
+            )
+            raise CourseRegenerationError(
+                "the v4 pair was installed over the legacy course and the old "
+                f"project was deleted, but finalizing result output failed: "
+                f"{error}; {durable_state} at {output}"
+            ) from error
+    return complete_report
+
+
 def _validate_ready_plan(
     plan: Mapping[str, Any],
     live: Path,
@@ -1491,6 +5230,7 @@ def _validate_ready_plan(
         plan.get("schema_version") != PLAN_SCHEMA_VERSION
         or plan.get("command") != "check"
         or plan.get("status") != "ready"
+        or plan.get("replacement_policy") != REPLACEMENT_POLICY
     ):
         raise CourseRegenerationError("apply requires a ready regeneration plan")
     if plan.get("course") != str(live) or plan.get("candidate_course") != str(candidate):
@@ -1594,47 +5334,110 @@ def _validate_ready_plan(
             "learner-facing diff changed during apply verification"
         )
     post_verification_snapshot = _snapshot(candidate)
-    backup_raw = plan.get("backup_path")
-    if not isinstance(backup_raw, str):
-        raise CourseRegenerationError("plan has no backup path")
-    backup = Path(backup_raw)
-    expected_name = re.compile(
-        re.escape(live.name)
-        + r"\.coursekit-backup-\d{8}T\d{6}Z-"
-        + re.escape(str(plan["live_snapshot_sha256"])[:8])
+    rollback = _validated_rollback_path(
+        plan.get("rollback_path"),
+        root=live,
+        snapshots=(str(plan["live_snapshot_sha256"]),),
+        label="course rollback path",
     )
-    if (
-        not backup.is_absolute()
-        or backup.parent != live.parent
-        or expected_name.fullmatch(backup.name) is None
-        or backup.exists()
-        or backup.is_symlink()
-    ):
-        raise CourseRegenerationError("planned backup path is unsafe or already exists")
-    return backup, post_verification_snapshot
+    return rollback, post_verification_snapshot
 
 
 def _restore_after_failed_swap(
-    live: Path, candidate: Path, backup: Path, old_snapshot: str
+    live: Path,
+    candidate: Path,
+    rollback: Path,
+    rollback_identity: tuple[int, int],
+    old_snapshot: str,
+    candidate_snapshot: str,
 ) -> str:
     recovery_errors: list[str] = []
-    if live.exists() or live.is_symlink():
+    learner_rollback = rollback / ROLLBACK_LEARNER_NAME
+
+    def matches(path: Path, expected: str, label: str) -> bool:
+        try:
+            return _matches_snapshot(path, expected)
+        except CourseRegenerationError as error:
+            recovery_errors.append(f"cannot inspect {label}: {error}")
+            return False
+
+    old_is_staged = matches(
+        learner_rollback,
+        old_snapshot,
+        "staged original course",
+    )
+    old_is_live = matches(live, old_snapshot, "current original course")
+    if not old_is_staged and not old_is_live:
+        recovery_errors.append("original course is not recoverable")
+
+    candidate_installed = old_is_staged and (
+        live.exists() or live.is_symlink()
+    )
+    if candidate_installed:
         if candidate.exists() or candidate.is_symlink():
             recovery_errors.append("candidate path is occupied")
-        else:
-            try:
-                os.replace(live, candidate)
-            except OSError as error:
-                recovery_errors.append(f"cannot move failed candidate back: {error}")
-    if not live.exists() and not live.is_symlink():
+        elif not matches(live, candidate_snapshot, "installed candidate"):
+            recovery_errors.append("installed candidate changed")
+    if recovery_errors:
+        return (
+            "manual recovery required ("
+            + "; ".join(recovery_errors)
+            + f"); installed paths were preserved and rollback is {rollback}"
+        )
+
+    if candidate_installed:
         try:
-            os.replace(backup, live)
+            os.replace(live, candidate)
         except OSError as error:
-            recovery_errors.append(f"cannot restore backup: {error}")
-    if live.is_dir() and _snapshot(live) == old_snapshot:
-        return "rolled back"
+            if (
+                live.exists()
+                or live.is_symlink()
+                or (
+                    not candidate.exists()
+                    and not candidate.is_symlink()
+                )
+            ):
+                recovery_errors.append(
+                    f"cannot move failed candidate back: {error}"
+                )
+    if (
+        old_is_staged
+        and not live.exists()
+        and not live.is_symlink()
+    ):
+        try:
+            os.replace(learner_rollback, live)
+        except OSError as error:
+            if (
+                learner_rollback.exists()
+                or learner_rollback.is_symlink()
+                or (
+                    not live.exists()
+                    and not live.is_symlink()
+                )
+            ):
+                recovery_errors.append(
+                    f"cannot restore original course: {error}"
+                )
+    try:
+        restored = _matches_snapshot(live, old_snapshot)
+        if candidate_installed and not _matches_snapshot(
+            candidate,
+            candidate_snapshot,
+        ):
+            recovery_errors.append("restored candidate changed")
+    except CourseRegenerationError as error:
+        recovery_errors.append(f"cannot verify restored paths: {error}")
+        restored = False
+    _remove_empty_rollback_root(
+        rollback,
+        recovery_errors,
+        identity=rollback_identity,
+    )
+    if restored and not recovery_errors:
+        return "rolled back with no retained rollback"
     detail = "; ".join(recovery_errors) or "restored tree did not match snapshot"
-    return f"manual recovery required ({detail}); backup remains at {backup}"
+    return f"manual recovery required ({detail}); rollback is {rollback}"
 
 
 def apply_regeneration(
@@ -1644,12 +5447,22 @@ def apply_regeneration(
     plan_path: Path,
     confirm_stopped: bool,
     accept_replacement: bool,
+    result_path: Path | None = None,
 ) -> dict[str, Any]:
     if not confirm_stopped:
         raise CourseRegenerationError("--confirm-stopped is required")
     if not accept_replacement:
         raise CourseRegenerationError("--accept-replacement is required")
     live = _course_root(course, role="live")
+    if _looks_like_v4_course(candidate_course):
+        return apply_legacy_to_v4_regeneration(
+            live,
+            candidate_course=candidate_course,
+            plan_path=plan_path,
+            confirm_stopped=confirm_stopped,
+            accept_replacement=accept_replacement,
+            result_path=result_path,
+        )
     candidate = _candidate_root(candidate_course, live)
     plan_file = _safe_output(plan_path, (live, candidate), location="plan path")
     plan = _load_plan(plan_file)
@@ -1659,7 +5472,7 @@ def apply_regeneration(
     if status != "regeneration_required":
         raise CourseRegenerationError("live course no longer requires regeneration")
     candidate_baseline = _candidate_baseline(candidate, runtime)
-    backup, candidate_snapshot = _validate_ready_plan(
+    rollback, candidate_snapshot = _validate_ready_plan(
         plan,
         live,
         candidate,
@@ -1668,15 +5481,40 @@ def apply_regeneration(
         candidate_baseline,
     )
     old_snapshot = str(plan["live_snapshot_sha256"])
+    output = _prepare_apply_result_output(
+        result_path,
+        roots=(live, candidate),
+        rollback=rollback,
+        location="result output",
+    )
+    result_base = {
+        "schema_version": 2,
+        "course": str(live),
+        "replacement_policy": REPLACEMENT_POLICY,
+        "rollback_path": str(rollback),
+        "old_snapshot_sha256": old_snapshot,
+        "new_snapshot_sha256": candidate_snapshot,
+        "plan_digest": plan["plan_digest"],
+        "fresh_baseline": True,
+        "progress_state": "empty",
+    }
+    learner_rollback = rollback / ROLLBACK_LEARNER_NAME
+    _preflight_rollback_deletion(live, old_snapshot)
+    rollback_identity = _create_rollback_root(rollback)
 
     try:
-        os.replace(live, backup)
+        os.replace(live, learner_rollback)
     except OSError as error:
         recovery = _restore_after_failed_swap(
-            live, candidate, backup, old_snapshot
+            live,
+            candidate,
+            rollback,
+            rollback_identity,
+            old_snapshot,
+            candidate_snapshot,
         )
         raise CourseRegenerationError(
-            f"cannot create complete course backup: {error}; {recovery}"
+            f"cannot stage the old course for replacement: {error}; {recovery}"
         ) from error
     try:
         hardlinked_files = _externally_hardlinked_files(candidate)
@@ -1689,7 +5527,12 @@ def apply_regeneration(
             raise CourseRegenerationError(detail)
     except CourseRegenerationError as error:
         recovery = _restore_after_failed_swap(
-            live, candidate, backup, old_snapshot
+            live,
+            candidate,
+            rollback,
+            rollback_identity,
+            old_snapshot,
+            candidate_snapshot,
         )
         raise CourseRegenerationError(
             f"candidate changed before replacement: {error}; {recovery}"
@@ -1697,7 +5540,14 @@ def apply_regeneration(
     try:
         os.replace(candidate, live)
     except OSError as error:
-        recovery = _restore_after_failed_swap(live, candidate, backup, old_snapshot)
+        recovery = _restore_after_failed_swap(
+            live,
+            candidate,
+            rollback,
+            rollback_identity,
+            old_snapshot,
+            candidate_snapshot,
+        )
         raise CourseRegenerationError(
             f"candidate replacement failed: {error}; {recovery}"
         ) from error
@@ -1710,34 +5560,114 @@ def apply_regeneration(
                 + ", ".join(hardlinked_files[:5])
             )
         snapshots_match = (
-            _snapshot(backup) == old_snapshot
+            _snapshot(learner_rollback) == old_snapshot
             and _snapshot(live) == candidate_snapshot
         )
     except CourseRegenerationError as error:
         recovery = _restore_after_failed_swap(
-            live, candidate, backup, old_snapshot
+            live,
+            candidate,
+            rollback,
+            rollback_identity,
+            old_snapshot,
+            candidate_snapshot,
         )
         raise CourseRegenerationError(
             f"post-swap snapshot verification failed: {error}; {recovery}"
         ) from error
     if not snapshots_match:
         recovery = _restore_after_failed_swap(
-            live, candidate, backup, old_snapshot
+            live,
+            candidate,
+            rollback,
+            rollback_identity,
+            old_snapshot,
+            candidate_snapshot,
         )
         raise CourseRegenerationError(
             f"post-swap snapshot verification failed; {recovery}"
         )
-    return {
-        "schema_version": 1,
-        "status": "applied",
-        "course": str(live),
-        "backup_path": str(backup),
-        "old_snapshot_sha256": old_snapshot,
-        "new_snapshot_sha256": candidate_snapshot,
-        "plan_digest": plan["plan_digest"],
-        "fresh_baseline": True,
-        "progress_state": "empty",
-    }
+    pending_report = _replacement_report(
+        result_base,
+        rollback=rollback,
+        cleanup_status="pending",
+    )
+    if output is not None:
+        try:
+            _write_json(output, pending_report)
+        except (CourseRegenerationError, OSError) as error:
+            if _json_value_matches(output, pending_report):
+                raise CourseRegenerationError(
+                    "replacement was installed and verified and its commit "
+                    "receipt is visible, but receipt durability could not be "
+                    "confirmed; cleanup was not started and rollback remains "
+                    f"at {rollback}: {error}"
+                ) from error
+            recovery = _restore_after_failed_swap(
+                live,
+                candidate,
+                rollback,
+                rollback_identity,
+                old_snapshot,
+                candidate_snapshot,
+            )
+            raise CourseRegenerationError(
+                "cannot persist the replacement commit receipt before "
+                f"cleanup: {error}; {recovery}"
+            ) from error
+    try:
+        _delete_rollback_root(
+            rollback,
+            {ROLLBACK_LEARNER_NAME: old_snapshot},
+            identity=rollback_identity,
+        )
+    except CourseRegenerationError as error:
+        receipt_note = ""
+        if output is not None:
+            failure_report = _replacement_report(
+                result_base,
+                rollback=rollback,
+                cleanup_status="failed",
+            )
+            try:
+                _write_json(output, failure_report)
+                receipt_note = (
+                    f"; result output {output} records cleanup_status=failed"
+                )
+            except (CourseRegenerationError, OSError) as receipt_error:
+                receipt_note = (
+                    "; the durable pending commit receipt remains"
+                    if _json_value_matches(output, pending_report)
+                    else "; no matching result receipt could be confirmed"
+                ) + (
+                    " because recording cleanup failure also failed: "
+                    f"{receipt_error}"
+                )
+        raise CourseRegenerationError(
+            "replacement was installed and verified, but deleting the old "
+            f"course failed: {error}; the new course remains installed and "
+            f"cleanup residue may remain at {rollback}{receipt_note}"
+        ) from error
+    complete_report = _replacement_report(
+        result_base,
+        rollback=rollback,
+        cleanup_status="complete",
+    )
+    if output is not None:
+        try:
+            _write_json(output, complete_report)
+        except (CourseRegenerationError, OSError) as error:
+            durable_state = (
+                "the complete result is visible but its directory sync failed"
+                if _json_value_matches(output, complete_report)
+                else "the durable pending commit receipt remains"
+            )
+            raise CourseRegenerationError(
+                "replacement was installed and verified and the old course was "
+                f"deleted, but finalizing result output failed: {error}; "
+                f"{durable_state} at {output}"
+            ) from error
+    return complete_report
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -1746,6 +5676,11 @@ def _parser() -> argparse.ArgumentParser:
     check = commands.add_parser("check", help="check whether full regeneration is required")
     check.add_argument("course", type=Path)
     check.add_argument("--candidate-course", type=Path)
+    check.add_argument(
+        "--chapter-request",
+        type=Path,
+        help="bind a chapter command request to one targeted v4 candidate",
+    )
     check.add_argument("--json", dest="json_path", type=Path, required=True)
     readiness = commands.add_parser(
         "readiness", help="reuse only unchanged trusted readiness decisions"
@@ -1753,6 +5688,14 @@ def _parser() -> argparse.ArgumentParser:
     readiness.add_argument("course", type=Path)
     readiness.add_argument("--route", type=Path, required=True)
     readiness.add_argument("--json", dest="json_path", type=Path, required=True)
+    chapter = commands.add_parser(
+        "chapter",
+        help="prepare one schema-v4 chapter-only regeneration request",
+    )
+    chapter.add_argument("course", type=Path)
+    chapter.add_argument("--chapter", dest="chapter_id", required=True)
+    chapter.add_argument("--reason", required=True)
+    chapter.add_argument("--json", dest="json_path", type=Path, required=True)
     apply = commands.add_parser("apply", help="atomically install a verified replacement")
     apply.add_argument("course", type=Path)
     apply.add_argument("--candidate-course", type=Path, required=True)
@@ -1767,19 +5710,99 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "check":
-            live = _course_root(args.course, role="live")
-            candidate = (
-                _candidate_root(args.candidate_course, live)
-                if args.candidate_course is not None
-                else None
-            )
-            output = _safe_output(
-                args.json_path,
-                (live,) if candidate is None else (live, candidate),
-                location="plan output",
-            )
-            output = _preflight_json_output(output)
-            report = plan_regeneration(live, candidate_course=candidate)
+            if (
+                args.chapter_request is not None
+                and args.candidate_course is None
+            ):
+                raise CourseRegenerationError(
+                    "--chapter-request requires --candidate-course"
+                )
+            if _looks_like_v4_course(args.course):
+                live, live_author = _v4_pair(args.course, role="live")
+                if args.candidate_course is None:
+                    candidate = None
+                    roots = (live, live_author)
+                else:
+                    candidate, candidate_author = _v4_candidate_pair(
+                        args.candidate_course,
+                        live,
+                        live_author,
+                    )
+                    roots = (
+                        live,
+                        live_author,
+                        candidate,
+                        candidate_author,
+                    )
+                output = _safe_output(
+                    args.json_path,
+                    roots,
+                    location="v4 plan output",
+                )
+                chapter_request: dict[str, Any] | None = None
+                if args.chapter_request is not None:
+                    request_path = _safe_output(
+                        args.chapter_request,
+                        roots,
+                        location="chapter request path",
+                    )
+                    if request_path == output:
+                        raise CourseRegenerationError(
+                            "chapter request and plan output must differ"
+                        )
+                    chapter_request = _read_json(
+                        request_path,
+                        "chapter regeneration request",
+                    )
+                output = _preflight_json_output(output)
+                report = (
+                    plan_v4_targeted_regeneration(
+                        live,
+                        candidate_course=candidate,
+                        chapter_request=chapter_request,
+                    )
+                    if chapter_request is not None and candidate is not None
+                    else plan_v4_regeneration(
+                        live,
+                        candidate_course=candidate,
+                    )
+                )
+            else:
+                if args.chapter_request is not None:
+                    raise CourseRegenerationError(
+                        "--chapter-request is available only for schema-v4 courses"
+                    )
+                live = _course_root(args.course, role="live")
+                if (
+                    args.candidate_course is not None
+                    and _looks_like_v4_course(args.candidate_course)
+                ):
+                    author_destination = live.with_name(f"{live.name}-author")
+                    candidate, candidate_author = _v4_candidate_pair(
+                        args.candidate_course,
+                        live,
+                        author_destination,
+                    )
+                    roots = (
+                        live,
+                        author_destination,
+                        candidate,
+                        candidate_author,
+                    )
+                else:
+                    candidate = (
+                        _candidate_root(args.candidate_course, live)
+                        if args.candidate_course is not None
+                        else None
+                    )
+                    roots = (live,) if candidate is None else (live, candidate)
+                output = _safe_output(
+                    args.json_path,
+                    roots,
+                    location="plan output",
+                )
+                output = _preflight_json_output(output)
+                report = plan_regeneration(live, candidate_course=candidate)
         elif args.command == "readiness":
             live = _course_root(args.course, role="live")
             output = _safe_output(
@@ -1787,31 +5810,107 @@ def main(argv: list[str] | None = None) -> int:
             )
             output = _preflight_json_output(output)
             report = plan_readiness_reuse(live, args.route)
-        else:
-            live = _course_root(args.course, role="live")
-            candidate = _candidate_root(args.candidate_course, live)
+        elif args.command == "chapter":
+            live = _v4_course_root(args.course)
+            author = live.with_name(f"{live.name}-author")
             output = _safe_output(
-                args.json_path, (live, candidate), location="result output"
+                args.json_path,
+                (live, author),
+                location="chapter regeneration output",
             )
-            plan_preview = _load_plan(
-                _safe_output(args.plan, (live, candidate), location="plan path")
-            )
-            backup_raw = plan_preview.get("backup_path")
-            if isinstance(backup_raw, str):
-                planned_backup = Path(backup_raw)
-                if output == planned_backup or planned_backup in output.parents:
-                    raise CourseRegenerationError(
-                        "result output must be outside the permanent course backup"
-                    )
             output = _preflight_json_output(output)
-            report = apply_regeneration(
+            report = plan_v4_chapter_regeneration(
                 live,
-                candidate_course=candidate,
-                plan_path=args.plan,
-                confirm_stopped=args.confirm_stopped,
-                accept_replacement=args.accept_replacement,
+                chapter_id=args.chapter_id,
+                reason=args.reason,
             )
-        _write_json(output, report)
+        else:
+            if _looks_like_v4_course(args.course):
+                live, live_author = _v4_pair(args.course, role="live")
+                candidate, candidate_author = _v4_candidate_pair(
+                    args.candidate_course,
+                    live,
+                    live_author,
+                )
+                roots = (live, live_author, candidate, candidate_author)
+                output = _safe_output(
+                    args.json_path,
+                    roots,
+                    location="v4 result output",
+                )
+                plan_preview = _load_plan(
+                    _safe_output(
+                        args.plan,
+                        roots,
+                        location="v4 plan path",
+                    )
+                )
+                rollback_raw = plan_preview.get("rollback_path")
+                if isinstance(rollback_raw, str):
+                    planned_rollback = Path(rollback_raw)
+                    if (
+                        output == planned_rollback
+                        or planned_rollback in output.parents
+                    ):
+                        raise CourseRegenerationError(
+                            "result output must be outside the transient v4 "
+                            "rollback path"
+                        )
+                output = _preflight_json_output(output)
+                report = apply_v4_regeneration(
+                    live,
+                    candidate_course=candidate,
+                    plan_path=args.plan,
+                    confirm_stopped=args.confirm_stopped,
+                    accept_replacement=args.accept_replacement,
+                    result_path=output,
+                )
+            else:
+                live = _course_root(args.course, role="live")
+                if _looks_like_v4_course(args.candidate_course):
+                    author_destination = live.with_name(f"{live.name}-author")
+                    candidate, candidate_author = _v4_candidate_pair(
+                        args.candidate_course,
+                        live,
+                        author_destination,
+                    )
+                    roots = (
+                        live,
+                        author_destination,
+                        candidate,
+                        candidate_author,
+                    )
+                else:
+                    candidate = _candidate_root(args.candidate_course, live)
+                    roots = (live, candidate)
+                output = _safe_output(
+                    args.json_path, roots, location="result output"
+                )
+                plan_preview = _load_plan(
+                    _safe_output(args.plan, roots, location="plan path")
+                )
+                rollback_raw = plan_preview.get("rollback_path")
+                if isinstance(rollback_raw, str):
+                    planned_rollback = Path(rollback_raw)
+                    if (
+                        output == planned_rollback
+                        or planned_rollback in output.parents
+                    ):
+                        raise CourseRegenerationError(
+                            "result output must be outside the transient course "
+                            "rollback path"
+                        )
+                output = _preflight_json_output(output)
+                report = apply_regeneration(
+                    live,
+                    candidate_course=candidate,
+                    plan_path=args.plan,
+                    confirm_stopped=args.confirm_stopped,
+                    accept_replacement=args.accept_replacement,
+                    result_path=output,
+                )
+        if args.command != "apply":
+            _write_json(output, report)
     except (CourseRegenerationError, OSError) as error:
         print(f"course regeneration failed: {error}", file=sys.stderr)
         return 1

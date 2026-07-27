@@ -27,6 +27,15 @@ updates:
         patterns:
           - "*"
 
+  - package-ecosystem: "npm"
+    directory: "/plugins/python-library-course-builder/skills/building-python-library-courses/assets/course-template-v4/web-src"
+    schedule:
+      interval: "weekly"
+    groups:
+      v4-web:
+        patterns:
+          - "*"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

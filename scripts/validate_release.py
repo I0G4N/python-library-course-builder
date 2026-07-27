@@ -1174,11 +1174,14 @@ def _plugin_paths(root: Path) -> dict[str, Path]:
     plugin = root / "plugins" / PLUGIN_NAME
     skill = plugin / "skills" / SKILL_NAME
     template = skill / "assets" / "course-template"
+    v4_template = skill / "assets" / "course-template-v4"
     return {
         "plugin": plugin,
         "skill": skill,
         "template": template,
         "platform": template / "platform",
+        "v4_web": v4_template / "web-src",
+        "v4_runtime": v4_template / "coursekit_runtime",
         "scripts": skill / "scripts",
     }
 
@@ -1248,6 +1251,12 @@ def repository_contract_errors(
         npm_lock_errors(
             paths["platform"] / "package.json",
             paths["platform"] / "package-lock.json",
+        )
+    )
+    errors.extend(
+        npm_lock_errors(
+            paths["v4_web"] / "package.json",
+            paths["v4_web"] / "package-lock.json",
         )
     )
     return errors
@@ -1484,7 +1493,10 @@ def validate_release(*, codex_validators: bool, forward: bool) -> None:
         environment=environment,
         timeout=1200,
     )
-    node_tests = sorted((paths["platform"] / "tests").glob("*.test.mjs"))
+    node_tests = [
+        *sorted((paths["platform"] / "tests").glob("*.test.mjs")),
+        *sorted((paths["v4_web"] / "tests").glob("*.test.mjs")),
+    ]
     if not node_tests:
         raise RuntimeError("no bundled Node contract tests were found")
     run_checked(

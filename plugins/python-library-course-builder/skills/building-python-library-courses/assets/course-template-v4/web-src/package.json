@@ -1,0 +1,41 @@
+{
+  "name": "coursekit-v4-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/course-locale-v4.test.mjs tests/lesson-guide.test.mjs tests/web-contract.test.mjs",
+    "test:browser": "playwright test",
+    "test:browser:list": "playwright test --list",
+    "test:static": "node --test tests/static-build.test.mjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run test:static"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/commands": "6.10.4",
+    "@codemirror/lang-python": "6.2.1",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/search": "6.7.1",
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.43.6",
+    "@lezer/highlight": "1.2.3",
+    "katex": "0.18.1",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.0",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "typescript": "5.9.3",
+    "vite": "8.1.5"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

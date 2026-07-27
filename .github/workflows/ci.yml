@@ -44,8 +44,54 @@ jobs:
           enable-cache: true
       - name: Install locked release dependencies
         run: uv sync --locked
+      - name: Validate shared schema-v4 Web runtime
+        working-directory: plugins/python-library-course-builder/skills/building-python-library-courses/assets/course-template-v4/web-src
+        run: |
+          npm ci
+          npm run check
+          git diff --exit-code -- ../coursekit_runtime/static
       - name: Run deterministic release validation
         run: uv run python scripts/validate_release.py
+
+  browser:
+    name: Shared v4 Web (${{ matrix.browser }})
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser:
+          - chromium
+          - firefox
+          - webkit
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.7"
+          enable-cache: true
+      - name: Install locked release dependencies
+        run: uv sync --locked
+      - name: Exercise the shared v4 Web in a real browser
+        working-directory: plugins/python-library-course-builder/skills/building-python-library-courses/assets/course-template-v4/web-src
+        run: |
+          npm ci
+          npx playwright install --with-deps "${{ matrix.browser }}"
+          npm run build
+          npm run test:browser -- --project="${{ matrix.browser }}"
 
   forward:
     name: Generate and fully verify a standard-library course

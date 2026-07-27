@@ -21,6 +21,8 @@ from course_provenance import (
     write_generation_provenance,
     write_regeneration_metadata,
 )
+from scaffold_v4_course import V4ScaffoldError, scaffold_v4_pair
+from v4_contract import V4ContractError
 from validate_course import (
     TOKEN_PATTERN,
     TUTORIAL_LESSON_FORMAT,
@@ -838,7 +840,23 @@ def scaffold(
     output: Path,
     *,
     readiness_plan: Path | dict[str, Any] | None = None,
+    chapter_packages: Path | None = None,
+    author_output: Path | None = None,
 ) -> dict[str, Any]:
+    if chapter_packages is not None:
+        if readiness_plan is not None:
+            raise ScaffoldError(
+                "schema v4 uses the completed parent route and does not accept "
+                "--readiness-plan during scaffolding"
+            )
+        return scaffold_v4_pair(
+            spec_path,
+            chapter_packages,
+            output,
+            author_output=author_output,
+        )
+    if author_output is not None:
+        raise ScaffoldError("--author-output requires --chapter-packages")
     readiness_payload: dict[str, Any] | None
     if isinstance(readiness_plan, dict):
         readiness_payload = copy.deepcopy(readiness_plan)
@@ -852,6 +870,10 @@ def scaffold(
     else:
         readiness_payload = None
     spec = load_and_validate(spec_path, readiness_plan=readiness_payload)
+    if spec["schema_version"] == 4:
+        raise ScaffoldError(
+            "schema v4 scaffolding requires --chapter-packages"
+        )
     destination = output.absolute()
     ensure_empty_target(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -901,14 +923,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("spec", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--readiness-plan", type=Path)
+    parser.add_argument("--chapter-packages", type=Path)
+    parser.add_argument("--author-output", type=Path)
     args = parser.parse_args(argv)
     try:
         report = scaffold(
             args.spec,
             args.output,
             readiness_plan=args.readiness_plan,
+            chapter_packages=args.chapter_packages,
+            author_output=args.author_output,
         )
-    except (OSError, ProvenanceError, SpecValidationError, ScaffoldError) as error:
+    except (
+        OSError,
+        ProvenanceError,
+        SpecValidationError,
+        ScaffoldError,
+        V4ContractError,
+        V4ScaffoldError,
+    ) as error:
         print(f"scaffold failed: {error}", file=sys.stderr)
         return 1
     print(json.dumps(report, ensure_ascii=False, indent=2))

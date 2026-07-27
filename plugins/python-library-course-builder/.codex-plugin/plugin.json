@@ -1,7 +1,7 @@
 {
   "name": "python-library-course-builder",
-  "version": "0.3.0",
-  "description": "Build source-backed hands-on learning repositories for Python libraries in Simplified Chinese or English.",
+  "version": "0.3.0+codex.20260727050002",
+  "description": "Build deep, source-backed Python courses with runnable labs and a complete local Web experience.",
   "author": {
     "name": "I0G4N",
     "url": "https://github.com/I0G4N"
@@ -20,14 +20,14 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Python Library Course Builder",
-    "shortDescription": "Build or regenerate Python courses in Chinese or English",
-    "longDescription": "Turn a Python library into a cumulative course in Simplified Chinese or English, or fully regenerate an existing course when authoring capability changes.",
+    "shortDescription": "Build deep Python courses in Chinese or English",
+    "longDescription": "Turn a Python library into a cumulative schema-v4 course with free-form chapters, runnable labs, public tests, hidden submit, and a complete local Web experience. Regenerate content only when authoring prompts change.",
     "developerName": "I0G4N",
     "category": "Productivity",
     "capabilities": [],
     "websiteURL": "https://github.com/I0G4N/python-library-course-builder",
     "defaultPrompt": [
-      "Use $building-python-library-courses to create or fully regenerate a source-backed course for a Python library or repository."
+      "Use $building-python-library-courses to build or selectively regenerate a schema-v4 course for a Python library."
     ]
   }
 }

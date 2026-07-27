@@ -1,0 +1,41 @@
+.tutorial-lesson .math-inline {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: -0.16em;
+}
+
+.tutorial-lesson .math-display {
+  display: block;
+  max-width: 100%;
+  margin: 1rem 0;
+  padding: 0.35rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.tutorial-lesson .math-display .katex-display {
+  min-width: max-content;
+  margin: 0;
+  padding: 0.2rem 0;
+}
+
+.tutorial-lesson .math-error,
+.tutorial-lesson .katex-error {
+  border: 1px solid #e7b6b1;
+  border-radius: 0.3rem;
+  background: #fff2f0;
+  color: #9f2f2f;
+  font-family: var(--mono);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+}
+
+.tutorial-lesson .math-inline.math-error {
+  padding: 0.08rem 0.28rem;
+}
+
+.tutorial-lesson .math-display.math-error {
+  padding: 0.6rem 0.75rem;
+}

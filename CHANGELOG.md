@@ -4,6 +4,35 @@ All notable changes to Python Library Course Builder are documented in this file
 
 ## [Unreleased]
 
+### Added
+
+- Added schema-v4 authoring: a parent-owned route and private Depth Briefs,
+  one complete chapter package per Writer, learner/author projections, a
+  single-port Python Runner with the full Web experience, and one aggregated
+  RED/GREEN/API acceptance receipt.
+- Added a shared Playwright CI matrix for Chromium, Firefox, and WebKit that
+  exercises the v4 Web learning loop against mocked same-origin APIs; generated
+  courses continue to copy prebuilt assets and never install Node.
+
+### Changed
+
+- Replaced whole-course review, replacement Writers, depth scoring, prose
+  ranges, and semantic lesson validation with one same-call silent Writer
+  revision plus minimal mechanical package checks.
+- Split v4 content and runtime contracts so prompt/Depth-Brief drift recalls
+  Writers, while Web, Runner, exporter, or verifier drift only re-exports or
+  revalidates existing content.
+- Let an explicit local `+codex.<cachebuster>` build trigger full regeneration
+  on authoring drift while preserving exact-version collision and downgrade
+  protection.
+- Changed existing-course apply to use the previous learner/author roots only
+  as transient rollback storage, restore them on pre-cleanup failure, and
+  delete them after verified success. Successful replacement now retains no
+  backup and is irreversible.
+- Made apply persist and filesystem-sync a committed/pending result before
+  destructive cleanup, then atomically upgrade it after cleanup, so output
+  write failures cannot make an installed replacement look rolled back.
+
 ## [0.3.0] - 2026-07-18
 
 ### Added

@@ -15,6 +15,11 @@ from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
 from assess_readiness import ReadinessValidationError, validate_ready_plan
+from v4_contract import (
+    V4ContractError,
+    load_v4_authoring,
+    validate_v4_route,
+)
 
 
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -2085,7 +2090,16 @@ def validate_spec(
         return _validate_spec_v2(payload)
     if spec.get("schema_version") == 3:
         return _validate_spec_v3(payload, readiness_plan=readiness_plan)
-    raise SpecValidationError("schema_version must be 2 or 3")
+    if spec.get("schema_version") == 4:
+        if readiness_plan is not None:
+            raise SpecValidationError(
+                "schema v4 route validation does not accept a readiness plan"
+            )
+        try:
+            return validate_v4_route(payload)
+        except V4ContractError as error:
+            raise SpecValidationError(str(error)) from error
+    raise SpecValidationError("schema_version must be 2, 3, or 4")
 
 
 def _load_json(path: Path | str, *, label: str) -> Any:
@@ -2116,10 +2130,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("spec", type=Path)
     parser.add_argument("--readiness-plan", type=Path)
+    parser.add_argument("--chapter-packages", type=Path)
     args = parser.parse_args(argv)
     try:
-        spec = load_and_validate(args.spec, readiness_plan=args.readiness_plan)
-    except SpecValidationError as error:
+        if args.chapter_packages is not None:
+            if args.readiness_plan is not None:
+                raise SpecValidationError(
+                    "--chapter-packages cannot be combined with --readiness-plan"
+                )
+            authoring = load_v4_authoring(args.spec, args.chapter_packages)
+            spec = authoring.route
+        else:
+            spec = load_and_validate(args.spec, readiness_plan=args.readiness_plan)
+    except (SpecValidationError, V4ContractError) as error:
         print(f"invalid course spec: {error}", file=sys.stderr)
         return 1
     print(
@@ -2128,7 +2151,15 @@ def main(argv: list[str] | None = None) -> int:
                 "valid": True,
                 "course_id": spec["course"]["id"],
                 "target": spec["target"]["name"],
-                "labs": len(spec["labs"]),
+                "labs": len(
+                    spec["labs"]
+                    if spec["schema_version"] in {2, 3}
+                    else [
+                        chapter
+                        for chapter in spec["chapters"]
+                        if chapter["kind"] in {"lab", "integration", "capstone"}
+                    ]
+                ),
             },
             ensure_ascii=False,
         )

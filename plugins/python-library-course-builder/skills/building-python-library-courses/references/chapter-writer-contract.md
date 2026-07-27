@@ -1,164 +1,108 @@
-# Clean-context chapter writer contract
+# Chapter Writer contract v4
 
-Use this contract after route design and before authoring learner-facing chapters. It keeps readiness evidence private, gives every chapter an independent writing context, and preserves parent-owned course invariants while allowing natural tutorial prose.
+This contract governs the parent Agent and the one Writer assigned to each chapter. It deliberately separates content depth from machine validation.
 
-## Contents
+## Parent ownership
 
-- [Separate the four roles](#separate-the-four-roles)
-- [Lock the course before writing](#lock-the-course-before-writing)
-- [Build a sanitized chapter packet](#build-a-sanitized-chapter-packet)
-- [Launch one clean writer per unit](#launch-one-clean-writer-per-unit)
-- [Write a tutorial, not a template](#write-a-tutorial-not-a-template)
-- [Return one exact fragment](#return-one-exact-fragment)
-- [Assemble deterministically](#assemble-deterministically)
-- [Review in another clean context](#review-in-another-clean-context)
-- [Handle failures without contaminating contexts](#handle-failures-without-contaminating-contexts)
+Before any Writer starts, the parent fixes:
 
-## Separate the four roles
+- course locale, pinned target version, track, official sources, and chapter order;
+- one core question and one cumulative project increment per chapter;
+- 3–6 required official facts and their guarantee-versus-implementation status;
+- component responsibility, dependency direction, and the caller-visible interface;
+- one concrete walkthrough case and one boundary case with symptom and recovery;
+- the chosen design, one credible alternative, and the reason for the choice;
+- stable task IDs, file paths, symbols, points, timeouts, test selectors, and non-overlapping owned paths; and
+- concise previous/next handoffs.
 
-Keep these responsibilities distinct:
+The parent records these in an ephemeral Depth Brief:
 
-1. The **parent author** performs official research and the private readiness preflight, selects the route, fixes the curriculum, and owns all cross-chapter invariants.
-2. A **chapter writer** receives one sanitized packet and writes exactly one `lab00`, `prepNN`, or `labNN` fragment.
-3. The deterministic **assembler** checks fragment cardinality and parent locks, then orders fragments without rewriting prose.
-4. A **whole-course reviewer** reads the assembled course in a separate clean context and reports unit-specific defects.
-
-Do not let a chapter writer choose course scope, diagnose the learner, redesign the Lab graph, change code or tests, or edit another chapter. Never reuse a writer for another unit, even when two chapters look similar.
-
-## Lock the course before writing
-
-The parent author fixes these values before launching any writer:
-
-- ordered unit IDs, concept IDs, outcome IDs, activity IDs, and their mappings;
-- selected locale, target version or range, and primary official source set;
-- each graded Lab's starter/reference code, public and hidden tests, files, points, and cumulative capstone increment;
-- dependencies, one-mainline boundary, teaching-equivalent module cycle, official bridge, target symbols, lower-level primitives, and anti-delegation rules;
-- runnable examples that must agree with the code and tests; and
-- the exact operational behavior and boundary witnesses the chapter must explain; and
-- for every `prepNN` and `labNN`, the component role, dependencies, interface ownership, selected design, credible alternative, and applicability/revisit boundary that deepen the existing mainline. `lab00` is exempt.
-
-Create a lock manifest for the assembler. The manifest orders every expected unit and records the complete JSON Pointer/value set for identity, discriminator, and mapping fields inside the writer-owned `lesson` and `quiz` payloads. A required pointer is any field named `id` or `kind`, or whose name ends in `_id` or `_ids`. This covers concept, outcome, prerequisite, example, trace, question, and choice identities; source and activity mappings; quiz kinds; and the correct-choice mapping. The expected-unit entry itself binds `unit_id`, so do not repeat it as a pointer. Everything outside `tutorial`, `lesson`, and `quiz` remains parent-owned by construction.
-
-The lock set is fail-closed: it must be non-empty and must equal the required pointer set for that fragment shape. Optional collections such as examples and traces contribute required pointers only when present. Build the manifest from the parent-owned course skeleton before launching writers; do not infer expected values from a returned writer fragment.
-
-## Build a sanitized chapter packet
-
-Create a new packet for each unit. Include only what that writer needs:
-
-- unit ID, locale, title, role in the cumulative route, and the previous/next chapter handoff;
-- the locked concept, outcome, example, and knowledge-check IDs plus their required mappings;
-- the fixed operational contract, concrete trace values, boundary witnesses, code behavior, expected outputs, and capstone increment;
-- for each non-orientation unit, the fixed **component responsibility and dependency direction**, **caller/implementer boundary**, concrete data/control flow, **credible alternative**, choice reason, benefits/tradeoffs, and **applicability boundary and revisit condition**;
-- only the official source excerpts or source facts needed for that chapter, with titles, URLs, version boundary, and guarantee-versus-implementation labels; and
-- the required fragment schema and relevant teaching-depth rules.
-
-Never include the learner's raw diagnostic answers, code evidence, readiness summary, route diagnostic questions, capability IDs, capability status, assumed/preparatory decisions, prerequisite profile, or any wording such as “you already know,” “your gap,” or “based on your level.” A prep writer receives the knowledge to teach as ordinary chapter subject matter, not the private reason it was selected.
-
-Do not include another writer's draft or the parent conversation. The packet may state an ordinary curricular dependency such as “the previous chapter established dictionary lookup,” but it must not expose how that dependency was assessed.
-
-## Launch one clean writer per unit
-
-For every expected `lab00`, `prepNN`, and `labNN`, launch a distinct sub-agent with `fork_turns="none"`. Give it only the sanitized packet, the selected-locale teaching example, and the exact output location or return format. Never reuse the same sub-agent for another unit or for a rewrite.
-
-Writers may run in parallel after the parent locks are complete. Preserve the one-writer/one-unit boundary even when batching launches. If the environment cannot create clean-context sub-agents, stop before learner-facing authoring and report the missing capability; do not generate every chapter in the parent's accumulated context.
-
-A writer prompt should say, in substance:
-
-> Write only the assigned unit from the attached packet. Preserve every locked ID and declared observable. Return exactly `unit_id`, `tutorial`, `lesson`, and `quiz`. Write the tutorial as a connected textbook chapter in the selected locale. Do not mention diagnostics, readiness, learner level, profiles, capabilities, or authoring machinery.
-
-For `prepNN` and `labNN`, the prompt also requires a subject-driven architecture and interface explanation after trace/boundary reasoning and before practice. It must compare the fixed selected design with the packet's alternative without creating a second mainline; `lab00` is exempt.
-
-## Write a tutorial, not a template
-
-Make `tutorial` the full learner-facing Markdown chapter. Use headings where they improve navigation, but let the subject determine the narrative. Do not repeat a fixed heading inventory merely to mirror schema fields, and do not enforce a word-count target.
-
-Develop the explanation slowly enough that the learner can predict the program:
-
-- open with the concrete project problem and connect it to the cumulative product;
-- define every professional term at first use in plain language, then immediately show why it matters here;
-- carry the same real input or state through each relevant intermediate representation, type, shape, ownership transfer, or lifecycle transition;
-- explain not only what the code does, but why the behavior follows, which public contract supports it, and which nearby mental model would be wrong;
-- execute a normal case and a boundary case, connect wrong code to symptom and cause, apply the recovery, and show the corrected observable; and
-- for `prepNN` and `labNN`, place the same concept in its component and dependency flow, close the caller/implementer interface, compare the fixed alternative, and state benefits, tradeoffs, applicability, and when to revisit the choice; and
-- lead naturally into the knowledge check and, for graded Labs, the coding/capstone increment.
-
-Use the structured `lesson` as a sidecar that preserves concepts, outcomes, contracts, traces, mappings, and source claims for validation. Its facts must be visible and explained in `tutorial`; do not render the sidecar as a rigid learner-facing card sequence. Keep quiz prompts and feedback specific to the same concrete value flow.
-
-Length follows the subject. A short chapter is acceptable only when it completely explains its mechanism, terminology, trace, boundary, and application. A long chapter still fails if it is repetitive, generic, or merely expands an authoring checklist.
-
-## Return one exact fragment
-
-Each writer returns one UTF-8 JSON object with exactly four top-level fields:
-
-```json
-{
-  "unit_id": "lab01",
-  "tutorial": "# A natural tutorial chapter\n\n...",
-  "lesson": {
-    "concepts": [],
-    "outcomes": []
-  },
-  "quiz": []
-}
+```text
+chapter_id
+chapter_kind
+core_question
+project_increment
+required_facts
+interface_boundary
+walkthrough_case
+boundary_case
+design_choice
+credible_alternative
+previous_handoff
+next_handoff
+official_sources
+task_contracts
+owned_paths
 ```
 
-`tutorial` is non-empty Markdown, `lesson` is the complete structured sidecar required by the curriculum contract, and `quiz` is the complete knowledge-check array. Do not return sources, code, tests, files, dependencies, module-cycle metadata, bridge metadata, readiness data, or commentary alongside the fragment.
+The brief is not part of schema v4, the generated course, the Web API, progress state, or verification receipt. Do not add a score, band, length range, concept/outcome mapping, trace schema, readiness evidence, or another chapter's prose.
 
-## Assemble deterministically
+## One complete package per Writer
 
-Create a parent lock manifest such as:
+Launch one fresh `fork_turns="none"` Writer per chapter. The Writer owns only:
 
-```json
-{
-  "schema_version": 1,
-  "expected_units": [
-    {
-      "unit_id": "lab01",
-      "locked": {
-        "/lesson/concepts/0/id": "lab01.c-parser",
-        "/lesson/outcomes/0/id": "lab01.o-trace",
-        "/quiz/0/id": "lab01.k-trace",
-        "/quiz/0/kind": "execution_trace",
-        "/quiz/0/choices/0/id": "a",
-        "/quiz/0/choices/1/id": "b",
-        "/quiz/0/choices/2/id": "c",
-        "/quiz/0/answer_id": "b",
-        "/quiz/0/concept_ids": ["lab01.c-parser"],
-        "/quiz/0/outcome_ids": ["lab01.o-trace"]
-      }
-    }
-  ]
-}
+```text
+packages/<chapter-id>/
+├── tutorial.md
+├── terms.json
+├── quiz.json
+├── starter/src/...       # graded chapter only
+├── solution/src/...      # graded chapter only
+├── tests/public/...      # graded chapter only
+├── tests/hidden/...      # graded chapter only
+└── examples/...          # optional
 ```
 
-Place writer fragments in a dedicated directory, then run:
+The same Writer produces prose, quiz, code, and tests so they share one case and one behavior boundary. `lab00` and `prepNN` produce no starter, solution, code tests, points, or submissions.
 
-```bash
-uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/assemble_chapter_fragments.py" /path/to/chapter-locks.json /path/to/fragments --output /tmp/assembled-chapters.json
-```
+The Writer may choose any Markdown headings, narrative order, and chapter length. `tutorial.md` is the only prose source of truth. `terms.json` only supplies the Web terminology rail; it is not proof that the body uses or covers each term.
 
-The assembler requires exactly one JSON fragment for every expected unit, emits units in manifest order, and rejects missing, duplicate, or unexpected units. It rejects empty locks, missing required locks, pointers outside the derived identity/mapping allowlist, extra top-level fields, and any value that differs from its parent-owned lock. A pointer for an optional item that the writer removed is also rejected, so omission cannot silently weaken a parent lock. Treat every rejection as an authoring failure; never weaken or remove a parent lock to accept a writer's drift.
+## Writer prompt
 
-Merge the validated fragments into the parent-owned course skeleton without changing sources, code, tests, files, points, dependencies, module cycles, bridges, or the capstone graph. Validate the complete specification after the merge.
+This section is the canonical content prompt contract. Give the Writer this instruction, localized to the chosen course language:
 
-## Review in another clean context
+> Write a natural, connected textbook chapter rather than a field manual. Organize it around the core question and carry the walkthrough case through the complete mechanism. Naturally explain the essential definitions, component responsibilities, caller/implementer interface, data or control flow, selected design, one credible alternative, benefits and costs, and the boundary case's symptom, cause, and recovery. Choose headings and length for the subject. Keep the quiz, code, and tests on the same case and behavior boundary.
 
-After assembly, launch one new whole-course reviewer with `fork_turns="none"`. Give it the assembled learner-visible chapters, parent locks, official claims, code/test observables, and the authoring rubric. Do not give it readiness evidence, writer conversations, or the intended review result.
+Do not provide a complete teaching example, other chapters' full text, depth score, prose band, word range, large rubric, raw readiness answer, capability status, or concept/outcome/trace mapping.
 
-Require the reviewer to check:
+## Silent single-call self-review
 
-- natural textbook progression and first-use definitions of professional terms;
-- one mainline per graded Lab, cumulative continuity, and correct official bridges;
-- tutorial/sidecar/quiz/code/test agreement for every concrete value and boundary;
-- architecture/interface coverage in every `prepNN` and `labNN`: component responsibility and dependency direction, caller/implementer boundary, the same value flow, a credible alternative, benefits/tradeoffs, and an applicability boundary plus revisit condition;
-- preservation of the same knowledge mainline, with no design-only concept, activity, points, or unsupported implementation claim;
-- absence of learner-facing readiness, diagnostic, profile, capability, and authoring metadata; and
-- enough explanatory depth that a locked knowledge check does not leave the reading surface thin.
+In the same call, the Writer:
 
-The reviewer reports findings by unit ID and lock or rubric rule. It does not rewrite chapters itself.
+1. designs a natural narrative around the core question;
+2. writes the complete package;
+3. silently checks whether a learner can:
+   - define the mechanism and its purpose;
+   - predict every step of the walkthrough case;
+   - identify component responsibility, dependency direction, and interface;
+   - explain the selected design versus the credible alternative;
+   - state the main benefit, cost, and invariant;
+   - diagnose and recover from the boundary case; and
+   - complete the coding task from the chapter;
+4. revises any insufficient part before returning; and
+5. emits only final files, never a checklist, score, critique, or chain of thought.
 
-## Handle failures without contaminating contexts
+This is a prompt-quality promise. No downstream script tries to prove semantic completeness.
 
-For each rejected fragment or reviewer finding, create a replacement sanitized packet containing the original locked packet plus only the concrete defect and required observable. Launch a new clean-context writer with `fork_turns="none"`; never ask the original writer or whole-course reviewer to repair the prose.
+## Mechanical repair
 
-Replace the failed fragment, rerun the assembler, and rerun a new clean whole-course review. Continue until every expected fragment passes its locks and the assembled course passes the semantic review. Keep temporary packets, fragments, locks, and reports outside the generated learner repository.
+Assembly may reject only:
+
+- mismatched chapter/task IDs;
+- missing or unparseable required files;
+- an invalid quiz answer reference;
+- conflicting, escaping, absolute, or symlinked owned paths;
+- invalid Python syntax;
+- a missing test selector or declared symbol; or
+- answer, solution, hidden-test, or private-selector leakage into the learner projection.
+
+Send the concise error list to the same Writer once. The Writer returns corrected package files only. If the second mechanical check fails, stop and report it. Do not launch a replacement Writer or a whole-course Reviewer.
+
+## Chapter kinds
+
+- `lab00`: setup, course use, and a demonstration of one complete learning loop; it owns no coding task. Do not force architecture analysis.
+- `prepNN`: one prerequisite mechanism taught deeply enough to predict the next Lab.
+- ordinary `labNN`: one implementable mechanism, its value/control flow, interface, design choice, credible alternative, boundary, and project increment.
+- integration/capstone: one end-to-end case composing earlier public interfaces, emphasizing dependency, failure propagation, and system tradeoffs.
+
+Depth means making one mechanism predictable, not adding more topics.

@@ -1,162 +1,140 @@
-# CourseKit project architecture
+# CourseKit v4 architecture
 
-Use this reference when designing or reviewing the generated repository. The objective is a content-driven learning product, not a bespoke demo for one library.
+CourseKit v4 follows the shape of hand-built teaching repositories: readable chapter files, one cumulative `src/` tree, ordinary tests, and a small shared runtime. The legacy v2/v3 compiler remains available only for existing projects.
 
-The generic template and bundled course infrastructure are independently authored for this project. Generated projects copy the engine files and retain no import, symlink, or runtime path back to the Skill or an originating course repository.
-
-## Contents
-
-- [Ownership map](#ownership-map)
-- [Data flow](#data-flow)
-- [Three-gate progression](#three-gate-progression)
-- [Responsive workspace layout](#responsive-workspace-layout)
-- [Course language ownership](#course-language-ownership)
-- [Runtime boundaries](#runtime-boundaries)
-- [Compilation and workspace rules](#compilation-and-workspace-rules)
-- [Generated-course provenance and regeneration](#generated-course-provenance-and-regeneration)
-- [Privacy model](#privacy-model)
-- [Git checkpoints](#git-checkpoints)
-
-## Ownership map
+## Authoring flow
 
 ```text
-project/
-├── README.md                       learner setup, start, stop, and course route
-├── package.json                    root setup/learn/test/build commands
-├── labs/                           the learner's obvious starting point
-│   ├── README.md
-│   ├── pyproject.toml
-│   ├── lab00/                      environment and learning-loop orientation
-│   ├── prep01/ ... prepNN/         knowledge-only preparatory units when needed
-│   ├── lab01/ ... labNN/           learner code plus public tests
-│   └── _course/coursekit/          generic CLI, progress, and pytest support
-└── platform/                       all non-learner engine and private artifacts
-    ├── coursekit-generation.json  generator provenance and authoring fingerprint
-    ├── coursekit-regeneration.json private route/readiness regeneration input
-    ├── app/                        content-driven Web shell and CodeMirror editor
-    ├── runner/                     FastAPI workspace and grading service
-    ├── coursekit/                  source loader, validator, and compiler
-    ├── course/
-    │   ├── source/                 canonical authored course inputs
-    │   ├── manifest.json           compiled navigation and grading metadata
-    │   ├── knowledge.json          compiled knowledge checks
-    │   ├── content.json            compiled Markdown lessons
-    │   ├── starter/                workspace projection
-    │   ├── reference/              private complete implementations
-    │   └── tests/hidden/           private grader tests
-    └── tests/                      engine, contract, Web, and Runner tests
+parent route + official facts + task/path locks
+                 |
+                 +--> ephemeral Depth Brief per chapter
+                              |
+                              +--> one Writer, one complete package
+                                           |
+                                           +--> mechanical v4 assembly
+                                                      |
+                           +--------------------------+------------------+
+                           |                                             |
+                    learner project                               author sibling
 ```
 
-`labs/` is the only directory learners need to edit. Configuration, services, generated metadata, reference answers, and hidden tests stay under `platform/`.
+The parent never writes chapter prose. A Writer never changes route order, task IDs, public interfaces, selectors, or owned paths. The assembler never rewrites prose or judges its depth.
 
-## Data flow
+## Ownership
 
-```text
-official sources
-      |
-      v
-private readiness plan -> course specification + canonical source tree
-      |
-      v
-CourseKit validation and deterministic compilation
-      |
-      +--> sanitized manifest/content/knowledge --> Web + CLI + Runner
-      +--> starter projection ---------> labs/
-      +--> reference + hidden tests ---> private verification/grader
-      +--> regeneration sidecar ------> future author-side regeneration
-```
+The learner root owns:
 
-There is one split authoring source of truth. New schema-v3 chapters store primary tutorial prose in `tutorial.md` and deterministic concept/activity metadata in `lesson.json`. Prep lessons live under `course/source/preparatory_units/`; formal Lab metadata, code, and tests stay under `course/source/labs/`. Schema-v2 `foundations/` and schema-v3 sources without tutorial Markdown remain compatibility inputs. Do not keep an editable source `authoring-spec.json`. Consumers traverse the sanitized compiled manifest; unit order, titles, dependencies, score totals, questions, and lesson paths are data.
+- `course.toml`;
+- `chapters/<id>/tutorial.md`, public terms, and redacted quiz questions;
+- cumulative starter `src/`;
+- public tests and examples;
+- the prebuilt static Web and Python runtime; and
+- local progress under ignored `.coursekit/` state.
 
-The readiness plan, audience prerequisite profile, capability mappings, readiness summary, and regeneration sidecar are author-side inputs. Validation and private authoring artifacts may inspect them; learner/runtime manifests, content payloads, generated README files, sidebar copy, and public APIs do not contain them. The curriculum ID may retain the readiness-derived suffix only as an opaque progress-isolation token.
+The sibling author root owns:
 
-Each coding question carries normalized `timeout_seconds` metadata in both internal and learner manifests. It must be an integer from 1 through 90 and defaults to 30 when omitted.
+- quiz answers and explanations;
+- the complete solution `src/`;
+- hidden tests and private selectors; and
+- the acceptance receipt.
 
-Each compiled question also carries compiler-owned `source_policy` metadata: its same-Lab root, all directly required official import roots, forbidden target roots, prior mini modules, and prior course roots. Both the copied CLI and the Runner call the same AST preflight before pytest. The preflight recognizes `import`, aliased `from ... import ...`, literal `importlib.import_module(...)`, and literal `__import__(...)`, follows reachable same-Lab helpers, and fails closed on missing policy, syntax errors, undeclared helpers, forbidden imports, or missing required imports.
+No learner file contains an answer key, solution byte, hidden selector, hidden test body, or private author path. The author root is not a security sandbox; publishing it publishes those materials.
 
-## Three-gate progression
+## Runtime contract
 
-Progression has three independent, cumulative decisions:
+One Python process on one port serves both:
 
-1. In schema v3 the **chapter navigation gate** makes only Lab 00 navigable initially. Each prep becomes navigable when its predecessor's knowledge is complete; Lab 01 follows the final prep or Lab 00. Formal-Lab dependencies still require verified completion. Schema v2 retains its original Lab 00 plus Lab 01 initial navigation.
-2. The **knowledge gate** makes each navigable unit's quiz answerable in order. Prep completion is derived from knowledge mastery and never enters `completed_labs`.
-3. The **coding verification gate** marks a Lab complete only after every declared coding question has passed verified submission. Passing one public test or one question cannot unlock the next Lab.
+- the prebuilt React/CodeMirror application; and
+- all `/api/*` routes.
 
-CLI and Web/Runner mutations update the same curriculum-scoped state under `labs/.coursekit/state.json`; direct pytest reads that state to enforce its gate. The Runner is the authority for Web progression and exposes `GET /api/state`, `GET /api/knowledge/{lab_id}`, `POST /api/knowledge/answer`, and `POST /api/run`. Knowledge GET responses normalize choices and redact answer keys plus unselected choice feedback. An answer POST returns only correctness, the selected choice feedback, and the explanation permitted after that attempt. The generic Web quiz renders only this public payload; it never imports course-specific question logic.
+The static application uses same-origin API requests. The Runner registers API routes before the SPA fallback; an unknown `/api/*` returns JSON 404 rather than `index.html`.
 
-The Web must fail closed while initial state is unavailable. Every orientation/prep unit is lesson-and-quiz only and has no code workspace; it never mounts or requests one. A graded Lab mounts code/results only after the complete prep chain and current-Lab knowledge are mastered. The Runner explicitly rejects prep file and execution APIs before path resolution. This is a workflow gate, not source secrecy: formal starter files remain locally inspectable.
+The generated course does not install Node. Shared engine CI builds the static application and runs the same mocked same-origin API journey in Chromium, Firefox, and WebKit. That matrix proves both locales, free-form Markdown navigation, terms, quiz gates, CodeMirror/save, public and hidden execution controls, restored progress, responsive three-column layout, Runner safety, timeouts, concurrency, and process cleanup.
 
-## Responsive workspace layout
+## Content API
 
-Before `codingReady`, use a focus-reading layout and never mount a disabled or empty editor. At widths of 1280px and above, the learning area contains a roughly 80-character narrative column plus a 300-360px rail. The rail derives stable heading links and a terminology index from the tutorial and structured concepts, then contains the still-reviewable knowledge check. Body prose is 15-16px with approximately 1.75 line height. From 1024px through 1279px, center the narrative as one column and place the rail after it. From 760px through 1023px, use the existing stacked learning surface. Below 760px, use natural document scrolling with no sticky or capped nested lesson surface.
+`GET /api/content/{id}` resolves the ID through the manifest and returns:
 
-After a graded chapter reaches `codingReady`, restore the IDE workspace at widths of 1024px and above: sidebar, lesson, and code/result columns with two keyboard-accessible separators. The sidebar defaults to 208px, remains between 160px and 320px while expanded, and can collapse to 64px. The lesson and work areas preserve minimum widths of 320px and 440px. Pointer drag adjusts widths; a focused separator supports Arrow keys in 16px steps plus Home and End, exposes `role="separator"` and current/min/max values, and keeps a usable focus target. The desktop shell is clamped to the dynamic viewport with no fixed minimum height; the lesson and code/result columns scroll vertically and independently so a short or resized browser window cannot hide their lower content. The knowledge check remains reachable for review rather than disappearing after unlock.
+- `id`, `title`, and the exact `tutorial.md` Markdown;
+- explicit `terms.json` records;
+- official sources referenced by the chapter;
+- study time; and
+- at most one practice link derived from the first task.
 
-Validated, clamped preferences live in per-course localStorage under `coursekit.layout.v1.<course_id>` so unrelated courses never share layout state. Invalid or stale values fall back safely. From 760px through 1023px the unlocked lesson and work areas stack inside the learning surface, and the inner lesson scroller permits scroll chaining to the outer stacked surface so a newly unlocked workspace remains reachable. Below 760px the compact chapter navigation uses explicit grid areas and the page returns to natural document scrolling. Medium and small layouts have no resize separators.
+It never returns `lesson_outline`. Markdown headings drive the chapter navigation rail; explicit terms drive the terminology rail.
 
-## Course language ownership
+The remaining routes keep their existing behavior:
 
-Every fresh Skill invocation asks for exactly one course locale before target discovery or readiness. The supported set is closed to `zh-CN` and `en`; an already worded language preference does not skip this first question. The accepted locale is immutable input to the route, readiness plan, schema-v3 source, compiled manifest, generated README and Markdown, Web catalog, CLI output, and handoff. Unknown, missing, mixed, or mismatched locale state fails closed instead of falling back.
+- `GET /api/course` and `GET /api/state`;
+- `GET /api/knowledge/{id}` and `POST /api/knowledge/answer`;
+- `GET/PUT /api/file`; and
+- `POST /api/run` with `public` or `submit`.
 
-Author-side readiness questions and all learner-facing prose, labels, feedback, and generated documentation use the selected locale. Code, shell commands, identifiers, target API names, and official source titles and URLs retain their original spelling. Locale selection is not capability evidence. Raw answers and completed diagnostic/profile metadata are not copied into learner-facing projections or prose.
+## Three gates
 
-## Runtime boundaries
+1. **Navigation gate** — only `lab00` is initially open; completing a chapter opens its declared successor.
+2. **Knowledge gate** — all quiz questions in the current chapter must be answered correctly before code becomes editable. A knowledge-only chapter completes here.
+3. **Coding verification gate** — a graded chapter completes only when all task hidden submissions pass.
 
-The Web application owns presentation and editor state. It fetches course content and workspace files from the Runner; it does not execute arbitrary Python in the browser. Frontend guards are feedback, not authority: the Runner repeats every progression check for direct requests. Workspace access is question-scoped: read with `GET /api/file?lab_id={lab_id}&question_id={question_id}` and write with `PUT /api/file`, whose JSON fields are `"lab_id", "question_id", and "content"`. The server derives the target path from the internal manifest instead of trusting a client path. Unknown Lab/question pairs return 404, unmet knowledge gates return 409, and unsafe or symlink targets return 400.
+Public tests give immediate diagnostics but do not complete the chapter. Progress persists locally and is scoped by course/curriculum identity.
 
-The Runner owns safe file access, pytest subprocesses, progress persistence, and grading APIs. Resolve every workspace path against the learner root and reject traversal, absolute paths, symlinks, and non-regular target files. Grading copies regular learner files into a disposable workspace, excludes learner tests and runtime artifacts, and projects each canonical public or hidden target plus regular same-directory helpers into the isolated run before invoking the trusted bootstrap. The target's parent directory is the explicit helper boundary; symlinks, special files, caches, and nested runtime/test roots are excluded. One monotonic deadline covers learner and canonical projection, and both projections have fixed size limits. Public and hidden phases share the question deadline; only one grading request runs per Runner process at a time.
+## Test execution
 
-Every grading subprocess starts in its own POSIX session with isolated home and temporary directories, `PWD` set to the disposable workspace, `OLDPWD` removed, bounded combined output, pytest plugin and `conftest.py` loading disabled, and trusted collection/outcome evidence for the projected targets. Reclaim the complete process group after success, failure, timeout, or output overflow. Never construct shell command strings from learner input and never use a machine-global cleanup command such as `ray stop --force`.
+The Runner accepts only a manifest chapter/task pair and the exact task file. It rejects absolute paths, traversal, path/symlink escapes, unknown selectors, and requests before the gates are satisfied.
 
-This is defense-in-depth for a local learner workflow, not an OS security sandbox. Deliberately hostile code running as the same user can introspect its Python process or detach from its process group. Keep the Runner bound to loopback; do not use it to execute untrusted remote submissions without a separate container or operating-system sandbox.
+Public mode executes public selectors. Submit mode executes public plus private hidden selectors against the learner's current `src/`. The solution tree is used only by course acceptance, never to grade the learner.
 
-The CLI reads the same manifest and state model. Its local `test` and `grade` commands resolve only relative, regular, symlink-free public selectors under `labs/`, then use the same copied isolation engine as the Runner. The engine projects the selected visible tests because test code can derive paths from `__file__`; copying only learner source is not enough to preserve the real workspace. Each question receives one deadline covering canonical projection and execution, diagnostics stay bounded, inherited `RAY_ADDRESS` is removed, and every outcome maps to a stable command exit code of 0 or 1. It must support:
+One bounded execution owns a declared timeout and output limit. Concurrent grading returns 409. The shared runtime CI—not each generated course—proves descendant cleanup and the full adversarial matrix.
 
-- `unlock LAB` for prerequisite knowledge checks;
-- `test EXERCISE` for the declared public selector;
-- `grade LAB` for local Lab scoring;
-- `submit LAB` for Runner-backed hidden grading;
-- `checkpoint LAB` for the declared Git milestone;
-- `score` for manifest-derived totals and completion state.
+## Transactional generation
 
-Optional library-specific capabilities are declared extensions. A course without an extension must render no empty extension panel and expose no dead command.
+The scaffolder validates and stages learner and author trees under one temporary parent. It exposes neither destination until both are complete. A failed second rename rolls the first back; it never leaves a half pair.
 
-## Compilation and workspace rules
+Existing destination files, non-empty directories, symlinks, containing paths, or a collision between learner and author targets fail before writes.
 
-Compilation is deterministic: the same canonical input yields byte-identical declared artifacts. Check mode performs no writes and reports drift. Compile mode updates only artifacts recorded by its artifact index, preserves unrelated files, and rolls back on replacement failure.
+## Acceptance receipt
 
-Curriculum schema is independent from runtime schemas. Schema v3 uses `<course-id>-v3-<readiness_summary>` and declares no compatibility across different summaries; public consumers treat the suffix as opaque. This does not itself bump progress-state, artifact-index, engine, or layout versions. The compiled authoring snapshot is private verification material and never appears in the learner starter projection or public APIs.
+One course-specific acceptance binds:
 
-Workspace initialization is empty-target-only and transactional. Reject files, symlinks, and non-empty destinations before the first write. Generated projects contain copied files, never symlinks or imports back to the Skill, template, or originating repository.
+- immutable course contract digest;
+- learner tree digest, excluding progress/caches;
+- author tree digest, excluding the receipt itself;
+- runtime digest;
+- verifier digest;
+- RED/GREEN and API-flow results; and
+- course/curriculum identity.
 
-Only allowlisted template tokens may be substituted. After rendering, scan every text file for unresolved tokens and every path for traversal or absolute source references.
+Regeneration check/apply recomputes these bindings instead of rerunning acceptance. Any material change fails closed.
 
-## Generated-course provenance and regeneration
+## Existing-course replacement
 
-Fresh scaffolds write tracked schema-v2 `platform/coursekit-generation.json` and private `platform/coursekit-regeneration.json` before the generated Git baseline. Generation provenance retains plugin/Skill versions, bundle/template/source digests, stable course identity, and managed-file hashes, and adds `authoring_contract.sha256` plus `regeneration_input.sha256`. Schema v1 is accepted only to recognize a legacy course and require regeneration; it never enables incremental migration. The retired migration registry and `applied_migrations` do not exist in schema v2.
+Apply reserves one validated, inode-bound sibling directory as transient
+rollback storage. It stages the old learner and author there, installs the
+receipt-bound candidate pair, and rechecks both old and new snapshots. Any
+handled failure before cleanup restores the original pair and removes the
+empty rollback directory while the bound paths remain intact. Path
+interference fails closed and reports manual recovery instead of deleting
+unverified trees.
 
-The authoring-contract fingerprint is deterministic and changes when course-writing capability changes. It covers `SKILL.md`, every teaching/architecture reference, readiness assessment, chapter assembly, validation, scaffolding, full verification, and the canonical-source compiler/model. Release prose, README files, and generic front-end/runtime-only files are excluded. Bundle, template, or runtime drift alone therefore does not trigger new course content. A recorded plugin version newer than the running plugin refuses downgrade; equal plugin versions with unequal fingerprints are a version collision rather than a silent rewrite.
+After post-swap validation, apply atomically writes and filesystem-syncs a
+result JSON with `replacement_committed=true` and
+`cleanup_status=pending`. Only then may it recursively delete the old pair.
+Once the rollback directory is absent, apply atomically upgrades the result to
+`cleanup_status=complete` and reports success. If that final result write
+fails, the earlier durable commit receipt remains, so the caller does not
+confuse the installed replacement with a rollback. An `os.replace` error
+raised after the result entry changed is accepted only when the exact expected
+JSON is present, followed by a successful directory sync.
 
-The regeneration sidecar is a closed author-only document containing `schema_version`, `language`, `target`, `route_intent`, `route_contract`, and `readiness_projection`. `target` locks name, version, and selected track. `route_intent` preserves course and route IDs/titles. `route_contract` retains validated `schema_version`, `language`, route, official sources, capabilities, and `capability_contracts` entries with exactly `id` plus definition `sha256`. `readiness_projection` retains only `status`, `route_digest`, `capability_dag`, required/mastered/missing IDs, privacy-safe capability decisions, preparatory-unit mapping/time, readiness summary, and plan digest. It never stores raw answers, code evidence, diagnostic responses, or learner-facing prose.
+Apply retains no backup after success, so a successful replacement is
+irreversible. If cleanup partially fails, apply keeps the verified new pair
+installed, records `cleanup_status=failed` when possible, and reports the
+residue rather than trying to restore an incomplete old pair.
 
-Regeneration mode accepts only an explicit course root and never scans. It locks locale, target/version, track, and route intent; it does not automatically upgrade the target. A matching current authoring fingerprint returns `up_to_date`. A changed or legacy fingerprint returns `regeneration_required`. For a valid v0.3+ sidecar, readiness conclusions may be reused only when both capability ID and definition hash are unchanged; new or changed capabilities receive current diagnostics. Missing, invalid, v0.1, or v0.2 sidecars require complete reassessment.
+This transaction handles in-process errors; it is not a crash journal.
+Termination or power loss between filesystem operations can leave the
+rollback directory for manual inspection.
 
-After current-route research, `regenerate_course.py readiness COURSE --route CURRENT_ROUTE_JSON --json OUTPUT` materializes the boundary. Trusted v0.3+ input writes `mode: reuse_unchanged` and a closed decision set consumable by `assess_readiness.py --trusted-prior-decisions OUTPUT --trusted-course COURSE`; the assessor rebinds it to verified course bytes. Legacy, missing, or tampered input writes `mode: full_readiness`, for which the assessor omits both flags and diagnoses the entire current DAG.
+## Compatibility
 
-The old course supplies only those locked route inputs and eligible readiness conclusions. Its tutorials, lesson prose, quizzes, learner code, tests, and reference implementation are not writer inputs. Research official sources again, build the current route, use a distinct clean writer for every unit, run a separate whole-course review, scaffold into an empty sibling directory, and pass normal schema-v3 validation, RED/GREEN checks, and `verify_learning_project.py --full` before candidate review.
-
-`regenerate_course.py check COURSE --candidate-course STAGING` binds the old and candidate snapshots. A `ready` plan requires a changed canonical-source hash and at least one substantive authored change among canonical tutorial, lesson, quiz, starter, compiled starter, or public-test paths; provenance-only changes and edits found only in the live learner workspace are `blocked`. Its digest binds the complete old tree, candidate tree, current fingerprint, verification report, course identity, route intent, and reserved backup path. Candidate validation failures are reported as `blocked`; unsafe roots, control-file symlinks, path containment, unrecognized formats, downgrade, or version collision fail closed. A provenance-free legacy course must own its Git top level rather than inherit an enclosing repository.
-
-`apply` accepts only that reviewed `ready` plan plus `--confirm-stopped` and `--accept-replacement`. It preflights the external result path, renames the complete old root to `<course>.coursekit-backup-<UTC>-<snapshot8>`, then renames the verified sibling candidate to the original path. Both roots must share a parent/filesystem. A first-rename error after mutation, failed second rename, or post-swap snapshot error immediately restores the old root. Stale bytes, candidate drift, backup collision, or replacement failure leaves or restores the old course byte-for-byte.
-
-Success means the new root is exactly the verified candidate with fresh progress and a new generated Git baseline. The old `.git`, state, learner code, custom files, and build residue remain intact only in the permanent backup; nothing is merged forward or automatically deleted. A repeated check against the new fingerprint is `up_to_date`. Regeneration does not install a Skill/plugin, commit the surrounding repository, or publish a release.
-
-## Privacy model
-
-Learner-visible `labs/` includes starter code, tutorials or links to tutorials, and public tests. It excludes reference implementations, hidden-test source, hidden selectors, private artifact paths, readiness/profile objects, capability decisions, and author-side diagnostic metadata. Generated README, manifest, content, Web, CLI, Runner, sidebar, and public API responses must not disclose them either.
-
-This separation prevents accidental hints during local study; it is not a secrecy guarantee when the full repository is published. State that limitation in the README and handoff.
-
-## Git checkpoints
-
-Git checkpoints are learning milestones, not a replacement for grading. The initial generated repository should have a clean verified baseline before learner changes. A checkpoint records the current Lab, test state, and commit identity when a Git repository is available. Missing Git must produce a clear recoverable message rather than corrupt progress.
+Existing schema-v2/v3 source, compiler, Web, and generated layout remain readable and unchanged. New authoring defaults to v4. Explicit regeneration is a complete new learner/author pair, not an in-place migration.

@@ -6,7 +6,6 @@ import re
 import tomllib
 from typing import Any
 
-import pytest
 import yaml
 
 
@@ -26,19 +25,19 @@ SKILL_DESCRIPTION = (
     "fully regenerating an explicitly located course after the Skill's authoring "
     "capability changes."
 )
-SHORT_DESCRIPTION = "Build or regenerate Python courses in Chinese or English"
+SHORT_DESCRIPTION = "Build deep Python courses in Chinese or English"
 DEFAULT_PROMPT = (
-    "Use $building-python-library-courses to create or fully regenerate a "
-    "source-backed course for a Python library or repository."
+    "Use $building-python-library-courses to build or selectively regenerate "
+    "a schema-v4 course for a Python library."
 )
 PLUGIN_DESCRIPTION = (
-    "Build source-backed hands-on learning repositories for Python libraries "
-    "in Simplified Chinese or English."
+    "Build deep, source-backed Python courses with runnable labs and a complete "
+    "local Web experience."
 )
 PLUGIN_LONG_DESCRIPTION = (
-    "Turn a Python library into a cumulative course in Simplified Chinese or "
-    "English, or fully regenerate an existing course when authoring capability "
-    "changes."
+    "Turn a Python library into a cumulative schema-v4 course with free-form "
+    "chapters, runnable labs, public tests, hidden submit, and a complete local "
+    "Web experience. Regenerate content only when authoring prompts change."
 )
 MARKETPLACE_COMMAND = (
     "codex plugin marketplace add I0G4N/python-library-course-builder "
@@ -53,13 +52,6 @@ CLONE_COMMAND = (
 )
 OFFICIAL_CODEX_DOCS = (
     "https://learn.chatgpt.com/docs/build-plugins#add-a-marketplace-from-the-cli"
-)
-NO_EXPORT_SENTENCE = (
-    f"Version {RELEASE_VERSION} does not provide an automated learner-only export."
-)
-PRIVATE_REPOSITORY_SENTENCE = (
-    "The supported secrecy path is to keep the complete teacher/authoring "
-    "repository private."
 )
 SECURITY_ADVISORY_URL = (
     "https://github.com/I0G4N/python-library-course-builder/security/advisories/new"
@@ -114,17 +106,6 @@ def _fenced_shell_blocks(document: str) -> tuple[str, ...]:
     )
 
 
-def _advertises_learner_only_artifact(document: str) -> bool:
-    remaining = document.replace(NO_EXPORT_SENTENCE, "")
-    return bool(
-        re.search(
-            r"(?i)\blearner-only\s+(?:export|projection|distribution)\b",
-            remaining,
-        )
-        or re.search(r"(?i)\bcourse\s+export\b", remaining)
-    )
-
-
 def test_language_selectable_metadata_and_skill_language_contract_are_exact() -> None:
     frontmatter, skill_body = _skill_frontmatter_and_body()
     manifest = _json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
@@ -139,15 +120,13 @@ def test_language_selectable_metadata_and_skill_language_contract_are_exact() ->
     assert manifest["interface"]["defaultPrompt"] == [DEFAULT_PROMPT]
 
     language_contract = (
-        "On every fresh invocation, make the first question a course-language "
-        "choice: ask the learner to choose exactly one course language before "
-        "any other question or action",
-        "Ask even when the request already names a language.",
-        "Support exactly `zh-CN` and `en`.",
-        "Write learner-facing lessons, readiness questions, quiz prompts, "
-        "feedback, generated documentation, and course prose in the selected language.",
-        "Keep code, shell commands, identifiers, target API names, and official "
-        "source titles and URLs in their original form.",
+        "For a fresh course, ask exactly one question before any other action: "
+        "choose Simplified Chinese (`zh-CN`) or English (`en`).",
+        "Ask even when the request already suggests a language.",
+        "Keep the accepted locale fixed through research, authoring, verification, "
+        "and handoff.",
+        "For an explicit existing course, read and lock its locale, target/version, "
+        "track, and route intent.",
     )
     for clause in language_contract:
         assert clause in skill_body
@@ -179,8 +158,8 @@ def test_root_readme_is_english_canonical_and_cross_links_complete_chinese_readm
         "`lab01`",
         "Codex",
         "Python 3.13",
-        "Node.js 22.13",
-        "authoring repository",
+        "uv",
+        "schema-v4",
     ):
         assert required.casefold() in readme.casefold()
     for required in (
@@ -190,8 +169,8 @@ def test_root_readme_is_english_canonical_and_cross_links_complete_chinese_readm
         "`lab01`",
         "Codex",
         "Python 3.13",
-        "Node.js 22.13",
-        "作者仓库",
+        "uv",
+        "schema-v4",
     ):
         assert required.casefold() in chinese_readme.casefold()
 
@@ -223,15 +202,31 @@ def test_public_install_commands_pin_the_synchronized_release_version() -> None:
     assert "codex plugin marketplace add I0G4N/python-library-course-builder" not in commands
     assert "git clone https://github.com/I0G4N/python-library-course-builder.git" not in commands
     assert changelog_match is not None
-    versions = {
+    public_versions = {
         project["project"]["version"],
-        manifest["version"],
         changelog_match.group("version"),
         re.search(r"--ref v([^ ]+)$", MARKETPLACE_COMMAND).group(1),
         re.search(r"--branch v([^ ]+)", CLONE_COMMAND).group(1),
     }
-    assert versions == {RELEASE_VERSION}
-    assert command_sets[0] == command_sets[1]
+    assert public_versions == {RELEASE_VERSION}
+    assert re.fullmatch(
+        rf"{re.escape(RELEASE_VERSION)}(?:\+codex\.[0-9]+)?",
+        manifest["version"],
+    )
+    install_prefixes = (
+        "codex plugin marketplace add ",
+        "codex plugin add ",
+        "git clone ",
+    )
+    install_command_sets = [
+        {
+            command
+            for command in command_set
+            if command.startswith(install_prefixes)
+        }
+        for command_set in command_sets
+    ]
+    assert install_command_sets[0] == install_command_sets[1]
 
     for template in ("bug.yml", "feature.yml"):
         issue_template = _text(ROOT / ".github" / "ISSUE_TEMPLATE" / template)
@@ -239,53 +234,23 @@ def test_public_install_commands_pin_the_synchronized_release_version() -> None:
         assert "placeholder: v0.1.1 or a full commit SHA" not in issue_template
 
 
-def test_all_secrecy_docs_publish_only_the_supported_private_repository_path() -> None:
-    documents = {
-        "README.md": _text(ROOT / "README.md"),
-        "SECURITY.md": _text(ROOT / "SECURITY.md"),
-        "SKILL.md": _text(SKILL_ROOT / "SKILL.md"),
-        "template README.md": _text(TEMPLATE_README),
-    }
-
-    for label, document in documents.items():
-        assert NO_EXPORT_SENTENCE in document, label
-        assert PRIVATE_REPOSITORY_SENTENCE in document, label
-        assert not _advertises_learner_only_artifact(document), label
-
+def test_v4_learner_author_pair_keeps_the_author_sibling_private() -> None:
+    readme = _text(ROOT / "README.md")
+    skill = _text(SKILL_ROOT / "SKILL.md")
     chinese_readme = _text(CHINESE_README)
-    assert "0.3.0 版本不提供自动化的仅学员导出" in chinese_readme
-    assert "完整的教师/作者仓库保持为私有仓库" in chinese_readme
 
-
-@pytest.mark.parametrize(
-    "advertisement",
-    (
-        "A learner-only export is available.",
-        "Ship a learner-only export when answers must remain secret.",
-        "A learner-only projection is supported.",
-        "A learner-only distribution is available.",
-        f"{NO_EXPORT_SENTENCE} A learner-only export is available.",
-        "Run `course export` before publication.",
-    ),
-)
-def test_secrecy_matcher_rejects_available_learner_only_artifacts(
-    advertisement: str,
-) -> None:
-    assert _advertises_learner_only_artifact(advertisement)
-
-
-@pytest.mark.parametrize(
-    "supported_statement",
-    (
-        NO_EXPORT_SENTENCE,
-        PRIVATE_REPOSITORY_SENTENCE,
-        f"{NO_EXPORT_SENTENCE} {PRIVATE_REPOSITORY_SENTENCE}",
-    ),
-)
-def test_secrecy_matcher_allows_the_supported_negative_boundary(
-    supported_statement: str,
-) -> None:
-    assert not _advertises_learner_only_artifact(supported_statement)
+    assert (
+        "A v4 generation creates a learner project and a separate sibling "
+        "author project."
+    ) in readme
+    assert "Keep the author sibling private." in readme
+    assert (
+        "The learner and sibling author directories are separate projections."
+    ) in skill
+    assert "The author directory contains answers, solutions, and hidden tests" in skill
+    assert "must remain private." in skill
+    assert "v4 会生成 learner 项目和独立的同级 author 项目" in chinese_readme
+    assert "author sibling 必须保持私有。" in chinese_readme
 
 
 def test_github_community_files_publish_structured_issue_and_pr_contracts() -> None:
@@ -367,12 +332,12 @@ def test_readme_publishes_badge_official_docs_boundaries_and_first_use_loop() ->
     assert (
         "After setup, mandatory examples and grading are CPU/offline."
     ) in readme
-    assert "cd /path/to/generated-course\nnpm run setup\nnpm run learn" in _fenced_shell_blocks(
-        readme
+    assert "cd /path/to/generated-course\nuv sync\nuv run course" in (
+        _fenced_shell_blocks(readme)
     )
 
 
-def test_readme_publishes_the_v3_readiness_and_course_learning_contract() -> None:
+def test_readme_publishes_the_v4_free_chapter_and_course_learning_contract() -> None:
     readme = _text(ROOT / "README.md").casefold()
 
     for promise in (
@@ -381,10 +346,11 @@ def test_readme_publishes_the_v3_readiness_and_course_learning_contract() -> Non
         "`prep01`, `prep02`, ...",
         "no code workspace, points, or submission",
         "`lab01` unlocks only after the final prep",
-        "schema v2 courses remain compatible",
-        "operational contracts",
-        "concrete execution traces",
-        "task-linked practice",
+        "existing schema-v2/v3 courses remain compatible",
+        "free-form markdown chapters",
+        "one clean-context writer",
+        "separate learner and sibling author projections",
+        "one final acceptance proves aggregate starter red",
     ):
         assert promise in readme
     assert "lab 00 adapts to the prerequisite gaps" not in readme

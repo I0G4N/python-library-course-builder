@@ -28,15 +28,15 @@
 
 这里的“CS61A-style”指累积练习、顺序解锁、机制理解和确定性反馈，不代表官方合作，也不复用 CS61A 的课程内容。面对大型框架或源码仓库，Skill 会先让学习者选择一条连贯路线，而不是假装一门课能覆盖所有 API。
 
-每门 schema-v3 课程包含：
+每门新生成的 schema-v4 课程包含：
 
 - 固定且不计分的 `lab00`，用于环境和学习流程；
 - 从评估出的先修缺口生成的零个或多个纯知识 `prep01` 到 `prepNN`；
 - 围绕同一个 capstone 扩展的 `lab01` 到 `labNN`；
-- 像教程/教科书一样展开的长篇讲义，包含渐进解释、专业名词首次定义、完整示例、边界、诊断和执行轨迹；
+- 可自由组织的 Markdown 讲义；深度来自一个讲透的机制、具体 walkthrough、接口与设计推理，以及可恢复的边界案例；
 - 每个正式 Lab 在解锁编码工作区前的知识检查；
-- 仅针对正式 Labs 的公开测试、验证测试、参考实现和确定性本地评分；
-- CLI、Web 和 Runner 共用的进度与知识状态；
+- 仅针对正式 Labs 的公开测试、hidden submit、私有解答和确定性本地评分；
+- Web 和 Runner 共用的进度与知识状态；
 - 知识关卡前的专注阅读布局，以及关卡后的可调讲义/代码工作区。
 
 ## 只学这条路线证明你需要的内容
@@ -51,37 +51,37 @@
 
 `lab00` 始终是环境与学习循环导览。需要先修时，课程按依赖顺序添加 `prep01`、`prep02`、……；当所有必需能力都被评估为已掌握时，不会虚构任何 prep。
 
-## 每一章都由新的干净上下文 writer 完成
+## 每个 Writer 一次生成完整章节包
 
-主课程作者会先固定路线、官方来源、章节 ID、concept/outcome 契约、代码接口、测试、机制循环、official bridge 和 capstone 增量，然后才开始写正文。每个 `lab00`、`prepNN` 和 `labNN` 都会启动一个全新的 clean-context sub-agent；writer 绝不跨章复用，也不会收到 readiness 原始回答或学习者画像字段。
+父 Agent 先固定路线、官方事实、章节目标、任务 ID、公开接口、测试 selector、owned paths 和 capstone 增量。它为每章准备一个私有、精简的 Depth Brief，只围绕一个核心问题、一个 walkthrough、一个边界案例、当前设计和一个可信替代方案。
 
-每个 writer 只返回自己章节的教程 fragment。确定性 assembler 要求每个预期章节恰好有一份输出，并拒绝缺失、重复、意外章节、ID 不匹配或修改主作者锁定契约的结果。随后由另一个干净上下文 reviewer 检查整门课程；不合格章节必须交给新的 writer 重写。如果无法启动干净 sub-agent，Skill 会停止，而不会悄悄在主上下文里一次写完所有章节。
+一个 clean-context Writer 只收到本章 brief、相关官方事实、锁定的任务契约和 owned paths。它在一次调用中完成规划、写作、静默检查和修订，并一次输出 `tutorial.md`、术语、quiz、starter、solution、公开测试、hidden tests 和可选 examples。
 
-最终的 Markdown 会根据本章内容自然组织，像教程或教科书一样循序渐进；结构化 lesson sidecar 继续保存来源声明、操作契约、trace 和活动映射，以支持确定性校验。质量门槛看的是解释是否连贯、具体值是否走完整、术语是否首次定义、边界和练习是否对齐，而不是固定标题模板或机械字数。
+流程不再包含整课 Reviewer、replacement Writer、深度评分、字数门槛、语义完整性检查或结构化 lesson sidecar。`tutorial.md` 是唯一讲义真源，标题、顺序和篇幅都由主题决定。深度是 prompt 中的写作责任，不再由输出 schema 假装证明。
 
-在不改变这套内容模型的前提下，未来生成的每个 `prepNN` 和正式 `labNN` 讲义还会解释本章主线中已有的架构：组件职责、依赖方向与数据/控制流、调用者/实现者接口、所选设计与可信备选方案、优缺点，以及该选择何时适用、何时应重新评估。`lab00` 仍只负责学习流程导览；这层设计讲解不会新增 schema 字段、活动或分值。
+assembler 只检查运行必需条件：ID、必需文件和可解析性、quiz 答案引用、owned-path 安全、Python 语法、测试 selector、声明符号，以及 learner/author 隔离。机械失败只回给原 Writer 修复一次；再次失败就停止，不启动审核循环。
 
 ## 从 Lab 00 到 capstone，一路只造一个东西
 
 路线在机制的小型教学等价实现和目标库官方 API 的计分 bridge 之间交替。后续 Labs 对已学能力使用官方 API，因此课程最终形成一个集成项目，而不是一组孤立练习。
 
-`lab01` 仅在最后一个 prep 后解锁。如果没有评估出先修缺口，它直接依赖 `lab00`。现有 schema v2 课程保持兼容，而 Skill 新创作的课程只使用 schema v3。
+`lab01` 仅在最后一个 prep 后解锁。如果没有评估出先修缺口，它直接依赖 `lab00`。现有 schema-v2/v3 课程保持兼容，新课程使用 schema v4。
 
-每章把学习目标转化为输入、输出、状态变化、错误和恢复的操作契约。具体执行轨迹在实现前先跟踪真实值穿过目标机制。作者编写的 `tutorial.md` 是主要阅读内容，结构化 `lesson.json` 则保留为校验和导航 sidecar。讲义把与任务关联的练习放在所检查的概念旁，每个计分任务都指回本章知识和 capstone 行为。
+每章只沿一条知识主线推进，讲义、quiz、代码和测试复用同一个具体案例与行为边界。integration 和 capstone 通过前章公开接口组合系统，不跨章依赖实现细节。
 
 ## Prep 只有知识区，这是有意的
 
 每个 `prepNN` 都是使用所选课程语言的独立讲义，包含具体执行轨迹、诊断示例和知识测验，但没有代码工作区、分数或提交。Runner 拒绝 prep 的文件和执行 API，prep 也永远不计入课程总分。
 
-CLI、Web 和 Runner 消费同一顺序和知识状态。初始只有 `lab00` 可导航；每个 prep 在前一单元掌握后解锁，正式 Labs 则在知识门之上增加编码验证。
+Web 和 Runner 消费同一顺序和知识状态。初始只有 `lab00` 可导航；每个 prep 在前一单元掌握后解锁，正式 Labs 则在知识门之上增加编码验证。
 
 ## 环境要求
 
 - 支持插件和 Skill 的 Codex。
 - 用于 Skill 自动化和发布验证的 Python 3.13。
 - 用于隔离 Python 环境的 [uv](https://docs.astral.sh/uv/)。
-- 用于生成 Web 工作区的 Node.js 22.13 或更高版本（包含 npm）。
-- 用于 checkpoint 和仓库流程的 Git。
+- Node.js 22.13 或更高版本（包含 npm）仅供插件贡献者重建或测试共享 Web runtime。
+- 用于课程历史和仓库流程的 Git。
 
 支持的本地环境是 macOS、Linux 和将项目放在 Linux 文件系统中的 WSL2。原生 Windows 不是已验证的执行路径。
 
@@ -122,19 +122,19 @@ Use $building-python-library-courses to create a beginner course for pathlib in 
 
 Skill 总是先问课程语言。获得回答后，它才检查本地目标并用主要官方来源验证声明。小型和中型目标得到有界的累积路线；广泛目标则在创建任何课程文件前先让学习者选择一条连贯 track。
 
-路线固定后，Skill 必须在创作新 schema-v3 规范或触碰目标目录前获得完整 readiness plan。验证和脚手架会在任何目标写入前拒绝缺失、未完成、被篡改、语言不匹配或其他不一致的计划。
+路线固定后，Skill 在创作 schema v4 或触碰目标目录前获得完整 readiness plan。父 Agent 锁定机械路线，然后每章由一个 Writer 生成完整章节包。
 
-生成仍仅允许空目标目录。匹配的 ready plan 存在时，Skill 会验证课程规范、复制独立 CourseKit 模板、编译规范源、证明 starter/reference RED-GREEN 契约，并在交付前检查 CLI、Web、Runner、进度、计分、语言和隐私边界。
+生成仍仅允许空目标目录。脚手架创建彼此分离的 learner 和同级 author 投影，直接复制预构建 Web runtime，不运行 npm，并只做最小机械检查。最终只做一次聚合验收：全部 starter 预期 RED、solution 对 public+hidden GREEN、三关可推进，以及真实 public-test/hidden-submit API 流程。
 
-生成后，进入生成仓库、安装锁定依赖并启动学习循环：
+生成后，进入生成仓库、安装依赖并启动学习循环：
 
 ```bash
 cd /path/to/generated-course
-npm run setup
-npm run learn
+uv sync
+uv run course
 ```
 
-## 用当前作者能力完整重生成旧课程
+## 只重新生成发生变化的部分
 
 向 Skill 明确提供一个现有课程路径，即可进入重生成模式：
 
@@ -142,7 +142,7 @@ npm run learn
 使用 $building-python-library-courses 重新生成 /path/to/course 中现有的生成课程。
 ```
 
-现有作者源固定课程语言、目标库版本、已选 track 和路线意图，因此这条路线不会再次询问新建课程的语言，也不会静默升级目标，更不会扫描其他目录。作者能力指纹覆盖 Skill、教学/架构 references、readiness 与 assembly 逻辑、验证/脚手架/完整校验以及 canonical compiler/model。指纹相同返回 `up_to_date`；指纹变化或旧版课程会要求完整重生成。通用 bundle、template 或 runtime 的变化本身不会改写课程正文。
+现有课程固定语言、目标库版本、已选 track、任务 ID、接口和路线意图。schema-v2/v3 课程保持原样；显式重生成会创建完整的 v4 learner/author pair。
 
 工作流先在课程目录外生成一份只读检查计划：
 
@@ -150,29 +150,29 @@ npm run learn
 uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/regenerate_course.py" check /path/to/course --json /tmp/course-regeneration-plan.json
 ```
 
-Skill 会重新研究官方来源，并在同级空目录中从头创作一门完整新课程。有效的 v0.3+ 私有 sidecar 只能复用 capability ID 和定义 hash 均未变化的 readiness 结论；旧版、缺失或无效 sidecar 必须完整重新评估。旧讲义、学习代码、测试和参考答案不会成为 writer 输入。每个单元由新的 clean writer 创作，整门候选课程另行 review，并通过 setup 和完整验证。
+schema v4 分别记录内容合同和 runtime 合同 digest。prompt 或 Depth Brief 合同变化才会重新调用章节 Writer；Web、Runner、exporter 或 verifier 变化只重新导出或验证已有内容。
 
-重新研究当前路线后，生成可信 readiness 边界：
+若只有一章过浅，生成一个窄范围请求：
 
 ```bash
-uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/regenerate_course.py" readiness /path/to/course --route /tmp/current-route.json --json /tmp/trusted-prior.json
+uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/regenerate_course.py" chapter /path/to/course --chapter lab03 --reason "把 ownership boundary 讲到可预测" --json /tmp/chapter-regeneration.json
 ```
 
-若输出为 `mode: reuse_unchanged`，把 `/tmp/trusted-prior.json` 通过 `assess_readiness.py --trusted-prior-decisions /tmp/trusted-prior.json --trusted-course /path/to/course` 传入；若为 `mode: full_readiness`，则省略这两个参数并重新评估当前 capability DAG 的全部能力。
+只有该章 Writer 会收到锁定路线、任务契约、selector 和 owned paths；其他章节保持不变。
 
-将完整同级候选课程与旧课程绑定。只有 canonical source 和面向学员的实质内容都发生变化时才返回 `ready`，否则返回 `blocked`：
+候选 learner/author pair 通过一次聚合验收并拥有有效 receipt 后，再绑定替换计划：
 
 ```bash
 uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/regenerate_course.py" check /path/to/course --candidate-course /path/to/course-staging --json /tmp/course-regeneration-plan.json
 ```
 
-审阅预留备份路径并停止课程服务后，接受整目录替换：
+审阅破坏性替换计划并停止课程服务后，接受整目录替换：
 
 ```bash
 uv run --cache-dir "${TMPDIR:-/tmp}/coursekit-skill-uv-cache" --python 3.13 --no-project python "$SKILL_DIR/scripts/regenerate_course.py" apply /path/to/course --candidate-course /path/to/course-staging --plan /tmp/course-regeneration-plan.json --confirm-stopped --accept-replacement --json /tmp/course-regeneration-result.json
 ```
 
-Apply 会先把完整旧目录重命名为永久同级备份，再把已经验证的候选课程移到原路径。新课程使用空进度和全新 Git baseline。旧进度、学习代码、自定义文件、构建残留和 Git 历史只原样留在备份中，不会自动合并进新课程。计划过期、候选变化、不安全路径、备份冲突或交换失败都会让旧课程保持不变或被逐字节恢复。
+Apply 把 learner 与 author 目录作为一个事务替换。旧 pair 只在 apply 期间暂存于一个临时回滚目录；若绑定路径仍完整，清理前可捕获的失败会恢复原始 pair，路径受到外部干扰时则会 fail closed 并报告需要人工恢复。新 pair 落位且交换后校验成功后，CourseKit 会先把 `replacement_committed=true`、`cleanup_status=pending` 持久写入指定结果 JSON，再删除旧 pair；只有临时回滚目录已不存在且结果被原子升级为 `cleanup_status=complete` 后才报告成功。如果清理或最终结果升级失败，已验证的新 pair 会保持落位，较早的结果凭据仍能说明替换已经提交，命令以非零状态在 stderr 报告后续处理。成功替换不保留备份，因此不可撤销。
 
 ## 仓库结构
 
@@ -185,6 +185,7 @@ Apply 会先把完整旧目录重命名为永久同级备份，再把已经验�
 |       |-- SKILL.md
 |       |-- agents/openai.yaml
 |       |-- assets/course-template/
+|       |-- assets/course-template-v4/
 |       |-- references/
 |       `-- scripts/
 `-- tests/
@@ -192,11 +193,11 @@ Apply 会先把完整旧目录重命名为永久同级备份，再把已经验�
 
 插件 bundle 只包含 Skill 及其本地 assets。它不声明 app、MCP server、云 connector 或直接 Codex capability。
 
-## 作者仓库与信任边界
+## Learner/author 信任边界
 
-生成项目是一个 **作者仓库**：它包含构建和审计课程所需的规范课程源、学员投影、参考实现和已验证评分材料。
+v4 会生成 learner 项目和独立的同级 author 项目。learner tree 包含讲义、已去答案的 quiz、starter、公开测试、Web 和 Runner；author tree 包含 quiz 答案、solution、hidden tests 和验收 receipt。
 
-当完整仓库可用时，隐藏测试不是秘密。它们从正常学员工作区分离以避免意外提示，但拥有文件系统访问权的用户仍可检查教师材料。0.3.0 版本不提供自动化的仅学员导出。唯一支持的保密路径是将完整的教师/作者仓库保持为私有仓库。
+author sibling 必须保持私有。hidden tests 是评测边界，不用于对抗可以直接读取该目录的人。
 
 本地 Runner 是学习工具，不是操作系统安全沙箱。它会降低普通评分副作用并绑定 loopback，但提交的 Python 代码仍以当前用户权限执行。只运行可信本地课程代码，绝不将 Runner 暴露为公开评测服务；评估恶意提交时使用独立加固沙箱。
 

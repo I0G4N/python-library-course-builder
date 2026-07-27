@@ -1,461 +1,180 @@
-# Curriculum contract v3
+# Curriculum contract v4
 
-Use one UTF-8 JSON specification to describe a completed author-side readiness decision, ordered preparatory teaching, the formal Lab route, exercises, and tests. Raw learner answers, code evidence, capability decisions, and the resulting learner profile remain private authoring inputs. They never become learner-facing course prose, README content, runtime metadata, or API data. Inside a generated project, the canonical source is the split tree under `platform/course/source/`; its compiler emits the private compiler-generated parity snapshot.
+Schema v4 uses a temporary `route.json` plus one complete package per chapter. The route stores only mechanical/runtime metadata. The parent Agent's Depth Brief remains ephemeral prompt context and is never embedded in the route or generated course.
 
-Run the assessor, validator, scaffolder, and verifier through the uv-managed Python 3.13 commands in `SKILL.md`. New authoring uses schema v3 and requires a matching `ready` plan. Schema v2 remains compatibility input. Both schemas require Python 3.13 and exclude Python 3.14.
+Existing schema-v2/v3 specifications and generated projects remain compatibility inputs. Do not rewrite or migrate them in place. Explicit regeneration produces a complete new v4 learner/author pair.
 
-## Contents
-
-- [Course language](#course-language)
-- [Top-level shape](#top-level-shape)
-- [Stable identity and evidence](#stable-identity-and-evidence)
-- [Private assessed readiness and duration](#private-assessed-readiness-and-duration)
-- [Private regeneration contract](#private-regeneration-contract)
-- [Tutorial Markdown and structured lesson sidecar](#tutorial-markdown-and-structured-lesson-sidecar)
-- [Knowledge checks](#knowledge-checks)
-- [The mechanism and official bridge cycle](#the-mechanism-and-official-bridge-cycle)
-- [Coding interfaces](#coding-interfaces)
-- [Split canonical source and compilation](#split-canonical-source-and-compilation)
-- [Adaptive size](#adaptive-size)
-
-## Course language
-
-`course.language` is exactly `zh-CN` or `en` and matches the fresh-invocation choice, readiness route, ready plan, split source, manifest, README, Markdown, Web, and handoff. Unknown locales and mismatches fail closed; no component silently falls back. The JSON below illustrates `zh-CN`; localize every learner-facing string for `en` while preserving IDs, code, commands, API names, source titles, and URLs.
-
-## Top-level shape
-
-The exact field validation lives in `scripts/validate_course.py`. This abbreviated example shows ownership and nesting; authored strings and code must be complete.
+## Route shape
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "course": {
-    "id": "pathlib-practice",
-    "title": "用 pathlib 构建本地文件整理器",
-    "description": "逐步构建一个可测试的本地文件整理器。",
+    "id": "pathlib-organizer",
+    "curriculum_id": "pathlib-organizer-v4",
+    "title": "用 pathlib 构建文件整理器",
+    "description": "一条累计、可运行的学习路线。",
     "language": "zh-CN",
-    "lesson_format": "tutorial-markdown-v1",
     "python_requires": ">=3.13,<3.14",
-    "size": "small",
     "dependencies": [],
-    "capstone": "一个确定、可测试的本地文件整理器",
-    "audience": {
-      "level": "assessed",
-      "prerequisite_profile": {
-        "assessment": "evidence-dialogue",
-        "route_id": "pathlib-core-route",
-        "readiness_summary": "4ac6e2c00d91",
-        "capabilities": [
-          {
-            "id": "python-functions",
-            "kind": "python",
-            "subject": "Python 函数",
-            "title": "定义并调用 Python 函数",
-            "status": "known",
-            "decision": "assume",
-            "basis": "code-evidence",
-            "source_ids": ["python-language"],
-            "first_used_in": "lab01",
-            "preparatory_unit_id": null,
-            "preparatory_concept_ids": []
-          },
-          {
-            "id": "path-value-boundary",
-            "kind": "library",
-            "subject": "路径值与文件系统效果",
-            "title": "区分路径表示与文件系统操作",
-            "status": "missing",
-            "decision": "preparatory",
-            "basis": "diagnostic-answer",
-            "source_ids": ["python-pathlib"],
-            "first_used_in": "lab01",
-            "preparatory_unit_id": "prep01",
-            "preparatory_concept_ids": ["prep01.c-path-boundary"]
-          }
-        ]
-      }
-    }
+    "capstone": "一个可测试的本地文件整理器"
   },
   "target": {
     "name": "pathlib",
     "kind": "stdlib",
     "version": "Python 3.13",
-    "breadth": "focused",
     "track": "core filesystem workflows",
-    "import_roots": ["pathlib"],
     "official_sources": [
-      {
-        "id": "python-language",
-        "title": "Python 3.13 tutorial",
-        "url": "https://docs.python.org/3.13/tutorial/",
-        "kind": "documentation",
-        "version": "3.13"
-      },
       {
         "id": "python-pathlib",
         "title": "Python 3.13 pathlib documentation",
-        "url": "https://docs.python.org/3.13/library/pathlib.html",
-        "kind": "documentation",
-        "version": "3.13"
+        "url": "https://docs.python.org/3.13/library/pathlib.html"
       }
     ]
   },
   "research": {
     "status": "complete",
     "version_basis": "Pinned to Python 3.13 documentation.",
-    "notes": ["Filesystem effects are graded only under pytest tmp_path."]
+    "notes": ["The route uses only documented pathlib behavior."]
   },
-  "preparatory_units": [
+  "chapters": [
     {
       "id": "lab00",
-      "title": "Lab 00：环境与学习流程导览",
-      "category": "orientation",
-      "dag_level": 0,
+      "title": "环境与学习循环",
+      "kind": "orientation",
       "depends_on": null,
-      "capability_ids": [],
-      "study_minutes": {"tier": "orientation", "min": 15, "max": 30},
-      "tutorial": "# 环境与学习流程导览\n\n从一次完整的学习循环开始……\n",
-      "lesson": {"prerequisites": [], "problem": {}, "outcomes": [], "concepts": [], "examples": [], "capstone_bridge": {}, "summary": []},
-      "quiz": []
+      "study_minutes": {"min": 15, "max": 30},
+      "sources": ["python-pathlib"],
+      "owned_paths": [],
+      "task_contracts": []
     },
     {
-      "id": "prep01",
-      "title": "Prep 01：路径值与文件系统效果",
-      "category": "library",
-      "dag_level": 1,
+      "id": "lab01",
+      "title": "路径值与文件系统边界",
+      "kind": "lab",
       "depends_on": "lab00",
-      "capability_ids": ["path-value-boundary"],
-      "study_minutes": {"tier": "standard", "min": 30, "max": 45},
-      "tutorial": "# 路径值与文件系统效果\n\n先区分地址描述和值得观察的磁盘变化……\n",
-      "lesson": {"prerequisites": [], "problem": {}, "outcomes": [], "concepts": [], "examples": [], "capstone_bridge": {}, "summary": []},
-      "quiz": []
-    }
-  ],
-  "labs": []
-}
-```
-
-## Stable identity and evidence
-
-Course, source, preparatory-unit, Lab, prerequisite, outcome, concept, example, quiz, choice, and coding-question IDs are stable. Preparatory IDs are `lab00`, then contiguous `prep01` through `prepNN`. Formal Lab IDs remain contiguous `lab01` through `labNN`. Dependencies form one chain across prep units and then formal Labs.
-
-Every official source is a primary HTTPS source with a title and applicable version or revision. Concepts cite registry IDs through `source_claims`, never an unregistered free-form URL. Each claim is marked `documented` for a public contract or `implementation` for a version-pinned implementation observation. Do not turn an implementation detail into a promised API.
-
-`target.import_roots` lists the top-level Python packages whose use is controlled by the mechanism cycle. Third-party targets require pinned or bounded PEP 508 dependencies. Standard-library courses may leave dependencies empty.
-
-## Private assessed readiness and duration
-
-New Skill-authored specifications use `course.audience.level: assessed`. The profile contains `assessment: evidence-dialogue`, the selected `route_id`, the plan's 12-character `readiness_summary`, and a nonempty `capabilities` array. Validation also receives the complete readiness plan and rejects any mismatch before scaffolding can write.
-
-This profile is private authoring and validation state. It may be preserved in the canonical source and compiler-generated private parity snapshot, but public manifests, learner manifests, `content.json`, README files, lesson Markdown, Web/CLI/Runner course payloads, and sidebar copy omit `audience`, `readiness`, route and readiness summaries, capability IDs, status/decision/basis fields, and assumed/preparatory capability lists. Preparatory chapters are presented as ordinary chapters in the course route; their prose must teach the subject directly and must not say that a diagnostic, answer, profile, or deficiency caused the chapter to exist.
-
-Each capability contains exactly `"id"`, `"kind"`, `"subject"`, `"title"`, `"status"`, `"decision"`, `"basis"`, `"source_ids"`, `"first_used_in"`, `"preparatory_unit_id"`, and `"preparatory_concept_ids"`:
-
-- `kind` is `python`, `library`, or `domain`;
-- `status` is the completed decision `known` or `missing`;
-- `decision` is `assume` or `preparatory`;
-- `basis` records the privacy-safe evidence class, never the raw answer or code.
-
-Capability IDs are stable and unique. A `known` capability uses `assume`, a null prep ID, and no prep concepts. A `missing` capability uses `preparatory`, names exactly the prep unit allocated by the plan, and maps to at least one concept inside it. Source IDs resolve to the official registry, `first_used_in` resolves to a formal Lab, and each mapped concept cites at least one capability source.
-
-`lab00` is always the 15-30 minute environment and learning-loop orientation. Missing capabilities are grouped into the smallest necessary `prepNN` units by DAG level and then `python -> library -> domain`. Each prep covers **curricular anchor -> define the term -> why the current route needs it now -> complete concrete example and value flow -> common misconception or applicability boundary -> recovery and check** without turning those checks into mandatory learner-facing headings. It contains tutorials, runnable teaching examples, traces, diagnostics, and quizzes, but no coding questions, points, submissions, reference projection, or hidden tests.
-
-There is no hard prep-count ceiling. Cover only capabilities actually used by the selected route. Multiple dependency layers become multiple ordered prep units in the same course rather than forcing an artificial stop or separate prerequisite course.
-
-Every assessed unit owns an exact `study_minutes` object:
-
-- `lab00`: `{"tier": "orientation", "min": 15, "max": 30}`;
-- ordinary prep or formal Lab: `{"tier": "standard", "min": 30, "max": 45}`;
-- derivation- or lifecycle-heavy prep or Lab: `{"tier": "extended", "min": 45, "max": 60, "reason": "..."}`.
-
-In learner-facing estimates these are 15-30, 30-45, and 45-60 minutes respectively.
-
-`min` and `max` are JSON integers, not booleans or numeric strings. `reason` is nonempty where required, and the closed shapes above allow no extra fields.
-
-Schema-v2 `basic-python` and `assessed/learner-self-report` specifications remain readable compatibility inputs with their original single-`foundation` behavior. They are not new authoring defaults.
-
-## Private regeneration contract
-
-Fresh scaffolding derives `platform/coursekit-regeneration.json`; authors do not hand-maintain it. The closed document has exactly `schema_version`, `language`, `target`, `route_intent`, `route_contract`, and `readiness_projection`:
-
-- `language` equals `course.language`;
-- `target` contains the pinned target `name`, `version`, and selected `track`;
-- `route_intent` contains `course_id`, `course_title`, `route_id`, and `route_title`;
-- `route_contract` contains validated `schema_version`, `language`, route, official sources, capabilities, and `capability_contracts` entries with exactly `id` plus deterministic definition `sha256`; and
-- `readiness_projection` contains `status`, `route_digest`, `capability_dag`, required/mastered/missing capability IDs, privacy-safe capability records, preparatory units/time, `readiness_summary`, and `plan_digest`.
-
-The sidecar and its digest are private authoring provenance. They may support a later readiness delta only when both a capability ID and its definition hash still match. They never enter learner/runtime manifests, `content.json`, generated README files, tutorials, Web/CLI/Runner payloads, public APIs, or scoring state. Raw diagnostic answers, submitted code, response text, and other evidence are forbidden even in this sidecar. Legacy schema-v2 courses may use null prep-time/summary compatibility values, but any course without a valid v0.3+ sidecar must complete full readiness assessment before regeneration.
-
-Materialize reuse only through `regenerate_course.py readiness COURSE --route CURRENT_ROUTE_JSON --json OUTPUT`. Pass `mode: reuse_unchanged` output with `--trusted-prior-decisions OUTPUT --trusted-course COURSE`; the assessor must rebind it to verified course bytes. Treat `mode: full_readiness` as an instruction to omit both flags and collect current evidence for every capability; never convert it into assumed mastery.
-
-Regeneration locks language, pinned target/version, selected track, and route intent from the old course. It creates a complete new schema-v3 specification after current-source research and readiness, not a patch to the old split source. Old tutorials, structured lessons, quizzes, starter/reference code, and tests are never inputs to the new chapter writers. A valid replacement must therefore have a different canonical-source digest and a substantive learner-facing change, while preserving the locked route identity inputs.
-
-## Tutorial Markdown and structured lesson sidecar
-
-New Skill-authored schema-v3 specifications set `course.lesson_format` to exactly `tutorial-markdown-v1`. Every `lab00`, `prepNN`, and formal Lab then owns a nonempty `tutorial` Markdown string. The tutorial is the primary learner-facing chapter: it uses a natural hierarchy chosen for that subject, defines professional terms at first use, builds ideas step by step, carries concrete values through complete examples, and explains boundaries and recovery without exposing the authoring schema as a list of fields. Do not use a universal heading inventory, repeated paragraph shell, or prose word count as a substitute for teaching quality.
-
-The structured `lesson` remains a required sidecar. It is the deterministic source for concept/outcome IDs, operational contracts, official-source claims, activity mappings, traces, and semantic validation. It supports the chapter guide and terminology index, but Web presentation must not turn it back into the primary fixed card sequence when authored tutorial Markdown is present.
-
-Except `lab00`, every `prepNN` and graded `labNN` tutorial also explains the existing concept through an architecture and design lens after trace/boundary diagnosis and before practice. Using only existing lesson fields, cover the component responsibility and dependency direction, caller/implementer boundary, the same value's data or control flow, one credible alternative, the selected design's benefits and tradeoffs, its applicability boundary, and a concrete revisit condition. Keep this on the same knowledge mainline in subject-driven prose; add no schema fields, concept IDs, outcomes, activities, or points.
-
-Schema v2 and existing schema-v3 sources that omit `course.lesson_format` and unit `tutorial` remain compatibility inputs. They use the legacy structured Markdown renderer. Do not silently relabel a legacy lesson as `tutorial-markdown-v1`.
-
-Every `lab00`, `prepNN`, and formal Lab uses the same structured `lesson` object:
-
-Every `lab00`, `prepNN`, and formal Lab uses the same `lesson` object:
-
-```json
-{
-  "prerequisites": [
-    {
-      "id": "lab01.p-functions",
-      "title": "函数与返回值",
-      "why": "本练习通过一个函数边界暴露可观察行为。",
-      "refresh": "函数接收明确的输入，并返回一个明确的结果。"
-    }
-  ],
-  "problem": {
-    "context": "文件整理器需要安全地表示根目录和子文件。",
-    "naive_approach": "直接用斜杠拼接字符串。",
-    "failure": "分隔符、路径类型和文件系统效果混在了一起。"
-  },
-  "outcomes": [
-    {"id": "lab01.o-trace", "text": "追踪输入、操作和输出的所有权。"},
-    {"id": "lab01.o-diagnose", "text": "解释并修复一个错误的路径边界。"}
-  ],
-  "concepts": [
-    {
-      "id": "lab01.c-path-model",
-      "name": "词法路径组合",
-      "definition": "路径对象描述一个路径，但组合路径本身不执行文件系统 I/O。",
-      "purpose": "它把路径表示与文件系统效果分开。",
-      "mechanism": ["接收根路径和子名称。", "创建一个新的路径值。", "返回新值而不访问磁盘。"],
-      "mental_model": "先把路径看成一张地址配方，而不是已经创建的文件。",
-      "design_reasons": ["值对象让效果边界保持显式。"],
-      "benefits": ["无需创建文件就能测试组合行为。"],
-      "tradeoffs": ["真正读写文件时仍需要后续的显式 I/O。"],
-      "invariants": ["仅组合路径不会写入文件系统。"],
-      "boundaries": ["不同平台的路径规范化结果可能不同。"],
-      "pitfalls": ["不要从组合后的路径推断文件一定存在。"],
-      "source_claims": [
-        {"source_id": "python-pathlib", "claim": "Path 提供词法路径组合操作。", "status": "documented"}
+      "study_minutes": {"min": 30, "max": 45},
+      "sources": ["python-pathlib"],
+      "owned_paths": [
+        "src/pathlib_organizer/paths.py"
       ],
-      "operational_contract": {
-        "kind": "api",
-        "forms": ["PurePath(root) / child"],
-        "inputs": [
-          {
-            "name": "root_and_child",
-            "meaning": "要组合的根路径值与一个子名称。",
-            "form": "PurePath 与 str",
-            "example": "PurePath('root'), 'a.txt'",
-            "constraints": ["子名称必须是本路线允许的相对路径片段。"]
-          }
-        ],
-        "outputs": [
-          {
-            "name": "destination",
-            "meaning": "组合后得到的新路径值。",
-            "form": "PurePath",
-            "example": "PurePath('root/a.txt')"
-          }
-        ],
-        "effects": ["返回新路径值，不创建文件，也不修改输入。"],
-        "failure_modes": [
-          {
-            "condition": "调用者把路径组合误当成文件创建。",
-            "observable": "磁盘上没有出现对应文件。",
-            "recovery": "在后续步骤显式调用文件系统写入 API。"
-          }
-        ]
-      }
-    }
-  ],
-  "examples": [
-    {
-      "id": "lab01.e-run",
-      "title": "组合一个子路径",
-      "kind": "runnable",
-      "path": "examples/01_compose.py",
-      "code": "from pathlib import PurePath\nprint(PurePath('root') / 'a.txt')\n",
-      "command": "python examples/01_compose.py",
-      "expected_output": "root/a.txt",
-      "explanation": "这个完整示例可以在 CPU/离线环境直接运行。",
-      "concept_ids": ["lab01.c-path-model"],
-      "outcome_ids": ["lab01.o-trace"],
-      "trace": [
+      "task_contracts": [
         {
-          "id": "lab01.t-root",
-          "concept_ids": ["lab01.c-path-model"],
-          "input_state": "root = PurePath('root')，child = 'a.txt'",
-          "operation": "读取两个调用输入，但不访问文件系统。",
-          "output_state": "root.parts == ('root',)，child 仍是 str。",
-          "explanation": "这一步确认输入形式和调用者仍拥有原值。"
-        },
-        {
-          "id": "lab01.t-compose",
-          "concept_ids": ["lab01.c-path-model"],
-          "input_state": "root = PurePath('root')，child = 'a.txt'",
-          "operation": "计算 root / child。",
-          "output_state": "destination = PurePath('root/a.txt')，磁盘未发生变化。",
-          "explanation": "组合产生一个新路径值；它没有创建文件。"
+          "id": "lab01.q1",
+          "title": "实现 normalize_path",
+          "file": "src/pathlib_organizer/paths.py",
+          "symbol": "normalize_path",
+          "prompt": "实现讲义中的路径规范化边界。",
+          "points": 10,
+          "timeout_seconds": 30,
+          "public_tests": ["test_paths.py::test_normalize_path"],
+          "hidden_tests": ["test_paths.py::test_rejects_empty_path"]
         }
       ]
-    },
-    {
-      "id": "lab01.e-bug",
-      "title": "把路径表示与 I/O 分开",
-      "kind": "diagnostic",
-      "wrong_code": "open('root/' + name, 'w')\n",
-      "symptom": "一个本应只返回路径的辅助函数却创建了文件。",
-      "cause": "路径表示和文件系统效果被藏在同一个操作里。",
-      "fix_code": "from pathlib import PurePath\ndef target(name):\n    return PurePath('root') / name\n",
-      "explanation": "这个例子沿着 wrong -> symptom -> cause -> fix 解释效果边界。",
-      "concept_ids": ["lab01.c-path-model"],
-      "outcome_ids": ["lab01.o-diagnose"]
     }
-  ],
-  "capstone_bridge": {
-    "input": "一个已验证的根路径和子名称。",
-    "output": "一个词法目标路径值。",
-    "increment": "为整理器加入安全的目标路径表示。",
-    "next": "下一课用官方 Path API 替换手写的表示边界。"
-  },
-  "summary": ["路径表示不同于文件系统效果。", "下一课会考查官方 bridge。"]
+  ]
 }
 ```
 
-Use the private readiness result only to select the necessary unit sequence and depth. Write each resulting chapter as a self-contained tutorial from its subject and unit-specific `study_minutes`, not as a report about what the learner knows or lacks and not from a universal beginner label. Each concept still defines the term, purpose, mechanism, mental model, design reasons, benefits, tradeoffs, invariants, boundaries, pitfalls, and source claims.
+Allowed chapter kinds are `orientation`, `preparatory`, `lab`, `integration`, and `capstone`. IDs and dependencies follow the parent-owned route. `lab00` and preparatory chapters have no task contracts or code/test owned paths. Graded chapters have at least one task.
 
-Every graded lesson expands one new knowledge mainline through the existing fields in this order: **project problem**, **plain-language predictive model**, **precise inputs, outputs, effects, and failures**, **same concrete value through the complete flow**, **valid case and boundary case**, **diagnosis and recovery**, then **quiz, coding question, and capstone increment**. Those practice surfaces map to the same concept and outcome. Render them as connected natural prose in the selected language, not as an author-field inventory.
+`owned_paths` are safe, relative, exact final paths. No two chapters own the same path. A task file must be owned by its chapter. Public and hidden selectors refer to files inside that chapter package's respective test directory.
 
-In assessed mode every concept also has a closed `operational_contract` with exactly:
+The route does not contain `core_question`, required facts, walkthrough, boundary, design choice, alternative, concepts, outcomes, traces, depth metadata, readiness answers, or prose.
 
-- `kind`: `api`, `mechanism`, `formula`, `lifecycle`, or `data-model`;
-- nonempty `forms` and `effects` string arrays;
-- nonempty `inputs`, each with `name`, `meaning`, `form`, `example`, and nonempty `constraints`;
-- nonempty `outputs`, each with `name`, `meaning`, `form`, and `example`;
-- nonempty `failure_modes`, each with `condition`, `observable`, and `recovery`.
+## Chapter package shapes
 
-Every assessed runnable example adds a `trace` of at least two steps. Each step has exactly a stable unique `id`, nonempty mapped `concept_ids`, `input_state`, `operation`, `output_state`, and `explanation`. Step concept IDs stay within both the lesson and the runnable example's concept mappings. Carry the same concrete value or state across the steps and match the convention graded by the tests.
+`tutorial.md` is arbitrary nonempty UTF-8 Markdown. No title, section, keyword, or length is required.
 
-Every lesson has at least two examples. One is a complete runnable file with an exact command and expected output. One is a diagnostic with wrong code, visible symptom, root cause, and fixed code: wrong -> symptom -> cause -> fix. Accelerator-only surfaces use metadata, configuration, source traces, or preflight examples; mandatory examples and grading stay CPU/offline runnable.
-
-For a runnable example whose lesson-relative file is `{path}`, the command is exactly `python {path}`. Shell wrappers, `python -m`, chained commands, alternate interpreters, and extra flags are outside this deterministic example contract.
-
-The rule against prerequisite leakage is strict: a prerequisite may refresh only material introduced in an earlier course unit. New syntax, framework concepts, and mathematics belong in the current prep or Lab's open definitions and runnable trace. Every exact formula graded by public or hidden tests needs a worked numeric derivation visible before the exercise.
-
-Assessed coverage is exact across authored surfaces:
-
-- every orientation/prep concept maps to a runnable trace, quiz, and diagnosis;
-- every graded-Lab concept maps to a runnable trace, quiz, coding question, and diagnosis;
-- diagnosis coverage may come from a diagnostic example or diagnostic quiz;
-- every outcome maps to an example and to an assessment: a quiz in a prep unit, or a quiz/coding question in a graded Lab.
-
-Examples, quiz items, and coding questions carry forward `concept_ids` and `outcome_ids`. Authors order those activities intentionally. The compiler derives each concept's first-practice link from that authored order; do not serialize reverse `practice_links` into the specification.
-
-The cumulative capstone must carry meaningful values through the promised route. A stage-name-only tuple, callback log, or fake plumbing trace is not integration. Capstone tests perturb identities, masks, values, configuration branches, and ordering so bypassing an earlier responsibility fails observably.
-
-## Knowledge checks
-
-Each preparatory unit and formal Lab has both an execution-trace and a diagnostic question. A question has:
-
-- a stable ID and `kind` (`execution_trace` or `diagnostic`);
-- a prompt and explanation;
-- three or four choices with stable IDs, text, and misconception-specific feedback;
-- `answer_id`, which references one choice ID rather than a numeric array position;
-- `concept_ids` and `outcome_ids` that resolve inside the same lesson.
-
-Use every available answer position across the whole course; no position may hold more than 40% of correct answers. Choice order is authored data and must stay stable through compilation. Learner-facing GET responses redact `answer_id` and all unselected feedback. An answer POST returns correctness and only the selected feedback plus the post-answer explanation allowed by the progression contract.
-
-## The mechanism and official bridge cycle
-
-Every graded Lab declares `module_cycle.reimplementation`:
+`terms.json` is a presentation-only object:
 
 ```json
 {
-  "module_cycle": {
-    "reimplementation": {
-      "module_id": "lab01.mini-path",
-      "title": "Teaching-equivalent path value",
-      "target_symbols": ["pathlib.PurePath"],
-      "lower_level_dependencies": ["strings", "tuples", "dataclasses"],
-      "learner_file": "lab01/mini_path.py",
-      "question_ids": ["lab01.q1"],
-      "forbidden_imports": ["pathlib"]
-    }
-  }
+  "terms": [
+    {"term": "路径值", "definition": "一个描述位置但不执行 I/O 的值。"}
+  ]
 }
 ```
 
-The reimplementation is a teaching-equivalent: it reveals one mechanism with lower-level primitives and explicitly omits production breadth and optimization. Both starter and reference implementations must avoid target import roots and the declared forbidden imports.
+Validation checks only record shape, nonempty strings, and unique term names.
 
-Lab 01 has no official bridge. Every later Lab starts with a graded `official_bridge` coding question for the mechanism handwritten in the previous Lab:
+`quiz.json` contains a `questions` array. Each question has a stable `id`, prompt, two or more choices with stable `id` and text, `answer_id` referencing one choice, and optional explanation/feedback. Validation does not inspect topic coverage or answer-position distribution.
 
-```json
-{
-  "official_bridge": {
-    "from_lab": "lab01",
-    "mini_module": "lab01.mini_path",
-    "official_symbols": ["pathlib.PurePath"],
-    "required_imports": ["pathlib"],
-    "question_id": "lab02.q1",
-    "observables": [{"id": "parts", "description": "The ordered path components."}],
-    "comparison_cases": [
-      {"input": "official_parts('root/a.txt')", "expected": ["root", "a.txt"], "observable_ids": ["parts"]}
-    ]
-  }
-}
-```
-
-The bridge question is first, has `kind: "official_bridge"`, imports the pinned target API, and makes its declared observables testable. The same Lab then contains at least one `reimplementation` question for the next mechanism. The `mini_module` is comparison metadata only: no downstream starter, reference, public/hidden test, or capstone may import a prior mini implementation. When a previous capability is needed, the current lesson teaches the official API call directly.
-
-The next bridge's `official_symbols` is responsibility-complete: its set exactly equals the immediately previous reimplementation's `target_symbols`. Every declared `required_imports` root appears directly in both starter and reference bridge files. Every `reimplementation` question points to the declared `learner_file`; that file and its reachable declared helpers reject target roots, prior-Lab helpers, prior mini modules, aliased imports, and literal `importlib.import_module(...)` or `__import__(...)` delegation.
-
-The bridge belongs in the immediately next Lab and covers every conceptual responsibility named by the previous Lab's reimplementation questions and target symbols. Metadata, lesson comparison, official calls, observables, comparison cases, and tests must all describe that same mechanism.
-
-## Coding interfaces
-
-Each graded Lab contains one to three coding questions. Every question declares a stable ID, `kind`, title, learner file, symbol, prompt, positive points, timeout from 1 through 90 seconds, concept/outcome mappings, one worked input/output explanation, and public plus hidden test selectors. Starter and reference code both declare the named symbol.
-
-`files[].path` is a POSIX path rooted under its Lab. Reject absolute paths, backslashes, `..`, Windows-reserved names, duplicate paths, unresolved tokens, syntax errors, and cross-Lab destinations. Public and hidden tests are valid Python, define their selector, and cannot conflict when shared by questions.
-
-The compiler emits a learner-safe `source_policy` for every coding question. Its fields are `local_root`, `required_imports`, `forbidden_imports`, `prior_mini_modules`, and `forbidden_course_roots`. This is generated metadata, never an author-supplied escape hatch. Learner question objects use an explicit public allowlist; unknown authoring fields are rejected and cannot flow into the learner manifest.
-
-Reference code is a clean solution, not a patched starter. Hidden tests add boundary, invalid-input, mutation, ordering, anti-delegation, and cleanup cases; they do not redefine the public contract. Points are the sum of declared questions, never a fixed course total.
-
-## Split canonical source and compilation
-
-The scaffolder writes a human-reviewable source tree:
+Graded packages mirror final owned paths:
 
 ```text
-platform/course/source/
-├── course.json
-├── sources.json
-├── preparatory_units/
-│   └── {lab00,prepNN}/
-│       ├── tutorial.md              tutorial-markdown-v1 only
-│       ├── lesson.json              structured validation sidecar
-│       ├── quiz.json
-│       └── examples/*.py
-└── labs/labNN/
-    ├── lab.json
-    ├── tutorial.md                  tutorial-markdown-v1 only
-    ├── lesson.json                  structured validation sidecar
-    ├── examples/*.py
-    ├── starter/**
-    ├── reference/**
-    └── tests/{public,hidden}/**
+starter/src/<package>/...
+solution/src/<package>/...
+tests/public/...
+tests/hidden/...
 ```
 
-There is no editable `source/authoring-spec.json`. The compiler independently validates direct split-source edits. For `tutorial-markdown-v1`, it preserves the authored `tutorial.md` bytes as the compiled lesson, records the format, and also preserves the reconstructable `lesson_outline`; for legacy inputs, it renders the existing complete Markdown fallback from the outline. It emits `compiled/authoring-spec.json` as a private compiler-generated parity snapshot. Scaffolding then checks that snapshot is structurally equal to the validated input specification.
+Starter and solution Python files must parse and declare each task's named symbol. Selectors must resolve to collected test functions. The validator does not inspect implementation strategy or prose semantics.
 
-A schema-v3 curriculum ID is exactly `<course-id>-v3-<readiness_summary>`. Treat the suffix as an opaque progress-isolation token in learner-visible runtime data; never label or decode it as a readiness result. A different token is intentionally incompatible and resets learner progress. Schema-v2 IDs keep their original `-v2` form. Do not automatically bump progress-state `version`, artifact-index `schema_version`, `engine_version`, or `layout_version`; those are separate runtime contracts.
+## Learner projection
 
-## Adaptive size
+```text
+<slug>/
+├── course.toml
+├── chapters/<id>/{tutorial.md,terms.json,quiz.json}
+├── src/<package>/
+├── tests/public/<chapter-id>/...
+├── examples/<chapter-id>/...
+├── coursekit_runtime/static/
+└── .coursekit/course.json
+```
 
-- `small`: 3-5 graded Labs.
-- `medium`: 6-8 graded Labs.
-- `large`: select one coherent track first, then 6-10 graded Labs.
+Learner quiz files omit answers, explanations, author feedback, solutions, hidden selectors, and hidden tests.
 
-Count public capabilities and product surfaces before choosing. Every selected route must fit one environment and one cumulative capstone. If a broad target still has multiple plausible tracks, stop before creating files and ask for the one material choice.
+## Author projection
+
+```text
+<slug>-author/
+├── author.json
+├── quiz-answers.json
+├── solution/src/<package>/
+├── tests/hidden/<chapter-id>/...
+└── verification.json
+```
+
+`author.json` binds course ID, curriculum ID, and the immutable course contract digest. The local Runner discovers this sibling by default or uses `COURSEKIT_AUTHOR_ROOT`. A mismatch fails closed.
+
+## Readiness and locale
+
+The evidence-based readiness preflight still determines the minimum prerequisite chain. Raw evidence remains temporary. Learner-facing prep is ordinary teaching and contains no diagnostic framing.
+
+The course locale is exactly `zh-CN` or `en`. Localize prose, quiz, feedback, and generated documentation while preserving code, identifiers, commands, API names, and official source titles/URLs.
+
+## Regeneration
+
+Content-prompt or Depth-Brief contract changes may recall chapter Writers. Runtime, Web, verifier, or exporter changes must only re-export or revalidate existing v4 packages.
+
+`regenerate_course.py chapter COURSE --chapter <id> --reason ... --json REQUEST`
+recalls only the named Writer with the fixed route, facts, task IDs, public
+interfaces, and owned paths. All other chapter packages remain byte-identical.
+Selectors in `REQUEST` are package-relative and task examples use the original
+nested package shape. The request does not reconstruct semantic teaching
+context from old prose: it explicitly requires the parent Agent to supply a new
+ephemeral Depth Brief.
+
+After the rebuilt learner/author candidate passes acceptance, bind the request
+to that candidate:
+
+```bash
+regenerate_course.py check COURSE --candidate-course CANDIDATE \
+  --chapter-request REQUEST --json PLAN
+regenerate_course.py apply COURSE --candidate-course CANDIDATE \
+  --plan PLAN --confirm-stopped --accept-replacement --json RESULT
+```
+
+Targeted check allows only the named chapter's `tutorial.md`, `terms.json`,
+`quiz.json`, owned source files, public/hidden tests, examples, and the derived
+binding/receipt files to change. Other chapter artifacts and unrelated material
+files must be byte-identical. It validates the candidate receipt offline;
+targeted apply stages the old learner/author roots in one transient rollback
+directory, restores both originals together on handled pre-cleanup failures
+while their bound paths remain intact, and records zero Writer calls during
+apply. Path interference fails closed. After successful post-swap validation,
+it deletes the previous pair and rollback directory and retains no backup.
+Partial cleanup failure keeps the verified new pair installed and reports
+possible partial residue; a successful replacement is irreversible.

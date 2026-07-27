@@ -248,7 +248,7 @@ def test_optional_fragment_collections_contribute_required_locks_when_present(
         assert pointer in message
 
 
-def test_skill_requires_one_clean_context_writer_per_unit_and_clean_replacements() -> None:
+def test_skill_requires_one_complete_package_writer_and_single_mechanical_repair() -> None:
     skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
     contract = (SKILL_ROOT / "references/chapter-writer-contract.md").read_text(
         encoding="utf-8"
@@ -256,21 +256,23 @@ def test_skill_requires_one_clean_context_writer_per_unit_and_clean_replacements
 
     for phrase in (
         'fork_turns="none"',
-        "Never reuse a writer for another unit",
-        "one-writer/one-unit boundary",
-        "exactly `unit_id`, `tutorial`, `lesson`, and `quiz`",
-        "component responsibility and dependency direction",
-        "caller/implementer boundary",
-        "credible alternative",
-        "applicability boundary and revisit condition",
-        "`lab00` is exempt",
-        "replacement sanitized packet",
-        "whole-course reviewer",
-        "If the environment cannot create clean-context sub-agents, stop",
+        "One complete package per Writer",
+        "tutorial.md",
+        "terms.json",
+        "quiz.json",
+        "starter/src/",
+        "solution/src/",
+        "tests/public/",
+        "tests/hidden/",
+        "Silent single-call self-review",
+        "Send the concise error list to the same Writer once",
+        "Do not launch a replacement Writer or a whole-course Reviewer",
     ):
         assert phrase in contract
-    assert "one sanitized packet per `lab00`, `prepNN`, and `labNN`" in skill
-    assert "assemble_chapter_fragments.py" in skill
+    assert "one fresh `fork_turns=\"none\"` sub-Agent per chapter" in skill
+    assert "Do not run a whole-course Reviewer" in skill
+    assert "assemble_chapter_fragments.py" not in skill
+    assert "tutorial_depth.py" not in skill
 
 
 def test_examples_model_subject_driven_tutorials_without_diagnostic_framing() -> None:

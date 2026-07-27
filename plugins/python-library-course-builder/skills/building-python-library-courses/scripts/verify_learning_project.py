@@ -14,9 +14,12 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from typing import Any, Mapping
 from urllib import error as urllib_error
 from urllib import request as urllib_request
+
+from verify_v4_course import V4VerificationError, verify_v4_course
 
 
 RESIDUE_PATTERN = re.compile(
@@ -1531,6 +1534,20 @@ def cli_learning_workflow(project: Path, learner_python: str) -> tuple[bool, str
 
 def verify(project: Path, *, full: bool = False) -> dict[str, Any]:
     root = project.resolve()
+    course_toml = root / "course.toml"
+    if course_toml.is_file() and not course_toml.is_symlink():
+        try:
+            metadata = tomllib.loads(course_toml.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+            raise ValueError(f"invalid course.toml: {error}") from error
+        if metadata.get("schema_version") == 4:
+            report = verify_v4_course(root)
+            report["shared_engine_conformance"] = "bound-by-runtime-digest"
+            report["per_course_node_checks"] = False
+            if full:
+                report["full_requested"] = True
+                report["full_reused_shared_engine_conformance"] = True
+            return report
     platform = root / "platform"
     platform_python = environment_python(root, "platform")
     learner_python = environment_python(root, "labs")
@@ -1669,7 +1686,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         report = verify(args.project, full=args.full)
-    except (OSError, subprocess.TimeoutExpired, ValueError) as error:
+    except (
+        OSError,
+        subprocess.TimeoutExpired,
+        ValueError,
+        V4VerificationError,
+    ) as error:
         rendered = json.dumps(
             {"passed": False, "error": str(error)},
             ensure_ascii=False,

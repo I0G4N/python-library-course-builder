@@ -266,6 +266,25 @@ def test_npm_lock_validation_accepts_complete_platform_graph() -> None:
     )
 
 
+def test_npm_lock_validation_accepts_schema_v4_web_graph() -> None:
+    validator = load_validator()
+    web = (
+        ROOT
+        / "plugins"
+        / "python-library-course-builder"
+        / "skills"
+        / "building-python-library-courses"
+        / "assets"
+        / "course-template-v4"
+        / "web-src"
+    )
+
+    assert validator.npm_lock_errors(
+        web / "package.json",
+        web / "package-lock.json",
+    ) == []
+
+
 def test_npm_lock_validation_rejects_missing_transitive_dependency(
     tmp_path: Path,
 ) -> None:

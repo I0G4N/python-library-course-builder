@@ -26,10 +26,10 @@ SKILL_DESCRIPTION = (
     "fully regenerating an explicitly located course after the Skill's authoring "
     "capability changes."
 )
-SKILL_SHORT_DESCRIPTION = "Build or regenerate Python courses in Chinese or English"
+SKILL_SHORT_DESCRIPTION = "Build deep Python courses in Chinese or English"
 SKILL_DEFAULT_PROMPT = (
-    "Use $building-python-library-courses to create or fully regenerate a "
-    "source-backed course for a Python library or repository."
+    "Use $building-python-library-courses to build or selectively regenerate a "
+    "schema-v4 course for a Python library."
 )
 RELEASE_VERSION = "0.3.0"
 PLUGIN_ROOT = ROOT / "plugins" / PLUGIN_NAME
@@ -130,7 +130,11 @@ def test_plugin_manifest_and_marketplace_publish_exact_skill_only_metadata() -> 
     manifest = _required_json(PLUGIN_ROOT / ".codex-plugin" / "plugin.json")
 
     assert manifest["name"] == PLUGIN_NAME
-    assert manifest["version"] == RELEASE_VERSION
+    assert manifest["version"].split("+", 1)[0] == RELEASE_VERSION
+    assert re.fullmatch(
+        rf"{re.escape(RELEASE_VERSION)}(?:\+codex\.\d+)?",
+        manifest["version"],
+    )
     assert manifest["author"]["name"] == "I0G4N"
     assert manifest["author"]["url"] == "https://github.com/I0G4N"
     assert "email" not in manifest["author"]
@@ -178,9 +182,10 @@ def test_skill_discovery_and_ui_metadata_are_synchronized() -> None:
 
     reference_names = (
         "architecture.md",
-        "authoring-rubric.md",
+        "chapter-writer-contract.md",
         "curriculum-contract.md",
         "forward-test-rubric.md",
+        "teaching-depth-contract.md",
     )
     for name in reference_names:
         assert f"](references/{name})" in body, f"SKILL.md must route readers to {name}"
@@ -203,79 +208,86 @@ def test_skill_discovery_and_ui_metadata_are_synchronized() -> None:
 
 def test_skill_routes_references_at_point_of_use() -> None:
     _, body = _skill_frontmatter_and_body()
-    point_of_use_routes = (
-        "Read [curriculum-contract.md](references/curriculum-contract.md) "
-        "before writing the specification.",
-        "Apply [authoring-rubric.md](references/authoring-rubric.md) while "
-        "designing lessons, exercises, and tests.",
-        "Read [architecture.md](references/architecture.md) before validating "
-        "the generated runtime and ownership boundaries.",
-        "Use [forward-test-rubric.md](references/forward-test-rubric.md) for "
-        "the required local generated-project acceptance matrix.",
-    )
-    for route in point_of_use_routes:
-        assert route in body, f"SKILL.md needs point-of-use routing: {route}"
-
-
-def test_existing_course_contract_requires_complete_regeneration() -> None:
-    documents = {
-        "SKILL.md": _required_text(SKILL_ROOT / "SKILL.md"),
-        "architecture.md": _required_text(SKILL_ROOT / "references" / "architecture.md"),
-        "curriculum-contract.md": _required_text(
-            SKILL_ROOT / "references" / "curriculum-contract.md"
+    routes = {
+        "curriculum": (
+            "Run the evidence-based readiness flow in "
+            "[curriculum-contract.md](references/curriculum-contract.md)."
         ),
-        "forward-test-rubric.md": _required_text(
-            SKILL_ROOT / "references" / "forward-test-rubric.md"
+        "depth": (
+            "Read [teaching-depth-contract.md](references/teaching-depth-contract.md) "
+            "and [chapter-writer-contract.md](references/chapter-writer-contract.md)."
         ),
-        "README.md": _required_text(ROOT / "README.md"),
-        "README.zh-CN.md": _required_text(ROOT / "README.zh-CN.md"),
+        "architecture": "Read [architecture.md](references/architecture.md).",
+        "acceptance": (
+            "Use [forward-test-rubric.md](references/forward-test-rubric.md) "
+            "for the split between per-course acceptance and shared engine conformance."
+        ),
     }
+    for label, route in routes.items():
+        assert route in body, f"SKILL.md needs point-of-use routing for {label}"
 
-    for label, document in documents.items():
-        folded = document.casefold()
-        assert "regenerat" in folded or "重生成" in document, label
-        assert "authoring" in folded or "作者能力" in document, label
+    assert body.index(routes["curriculum"]) < body.index(
+        "The parent Agent owns the one cumulative route"
+    )
+    assert body.index(routes["depth"]) < body.index(
+        "Build an ephemeral brief with exactly"
+    )
+    assert body.index(routes["architecture"]) < body.index("Scaffold once")
+    assert body.index(routes["acceptance"]) < body.index("### 6. Hand off")
 
-    skill = documents["SKILL.md"]
-    for clause in (
-        "readiness COURSE --route CURRENT_ROUTE_JSON --json /tmp/trusted-prior.json",
-        "assess_readiness.py --trusted-prior-decisions",
-        "--candidate-course STAGING",
-        "--confirm-stopped --accept-replacement",
-        "fresh progress/Git",
-        "whole old root",
-        "never prose, code, or tests",
+
+def test_v4_regeneration_separates_content_runtime_and_targeted_chapters() -> None:
+    skill = _required_text(SKILL_ROOT / "SKILL.md")
+    architecture = _required_text(SKILL_ROOT / "references" / "architecture.md")
+    curriculum = _required_text(
+        SKILL_ROOT / "references" / "curriculum-contract.md"
+    )
+    forward = _required_text(
+        SKILL_ROOT / "references" / "forward-test-rubric.md"
+    )
+    authoring_contract = _required_text(SCRIPTS_ROOT / "authoring_contract.py")
+    regeneration = _required_text(SCRIPTS_ROOT / "regenerate_course.py")
+
+    assert "Existing schema-v2/v3 courses remain readable and unchanged" in skill
+    assert "Existing schema-v2/v3 source, compiler, Web, and generated layout" in architecture
+    assert "Do not rewrite or migrate them in place" in curriculum
+    assert "v2/v3 input remains byte-identical until explicit replacement" in forward
+
+    assert (
+        "Content-prompt or Depth-Brief contract drift regenerates chapter packages"
+        in skill
+    )
+    assert (
+        "Web/runtime/verifier drift re-exports or revalidates without recalling Writers"
+        in skill
+    )
+    assert (
+        "`regenerate_course.py chapter COURSE --chapter <id> --reason ... --json REQUEST`"
+        in curriculum
+    )
+    assert "All other chapter packages remain byte-identical" in curriculum
+
+    for helper in (
+        "v4_content_contract_manifest",
+        "v4_content_contract_sha256",
+        "v4_runtime_contract_manifest",
+        "v4_runtime_contract_sha256",
     ):
-        assert clause in skill
-
-    architecture = documents["architecture.md"]
-    for clause in (
-        "authoring_contract.sha256",
-        "regeneration_input.sha256",
-        "platform/coursekit-regeneration.json",
-        "changed canonical-source hash",
-        "fresh progress and a new generated Git baseline",
-    ):
-        assert clause in architecture
-
-    assert not (SKILL_ROOT / "references" / "course-migrations.json").exists()
-    for label, document in documents.items():
-        for retired in (
-            "--candidate-source",
-            "--accept-progress-reset",
-            "course_impacting",
-            "update_course.py check",
-        ):
-            assert retired not in document, f"{label}: retired contract {retired}"
+        assert f"def {helper}" in authoring_contract
+    assert "plan_v4_chapter_regeneration" in regeneration
+    assert '"mechanical_repair_limit": 1' in regeneration
 
 
 def test_forward_acceptance_is_local_generated_project_only() -> None:
     forward = _required_text(SKILL_ROOT / "references" / "forward-test-rubric.md")
 
-    assert "acceptance gate for a **local generated project**" in forward
-    assert "scripts/verify_learning_project.py" in forward
-    assert "## Required fail-closed negative tests" in forward
-    assert "## Required generated-project acceptance matrix" in forward
+    assert "## Chapter-package mechanical validation" in forward
+    assert "## Per-course acceptance" in forward
+    assert "## Shared engine conformance" in forward
+    assert "Run once for the final learner/author candidate" in forward
+    assert "The course acceptance must not invoke npm" in forward
+    assert "Generated v4 courses copy the certified static/runtime assets" in forward
+    assert "They do not repeat this matrix" in forward
     for removed_gate in (
         "fresh-agent",
         "fresh agent",
@@ -289,14 +301,18 @@ def test_forward_acceptance_is_local_generated_project_only() -> None:
         assert removed_gate not in forward.lower()
 
 
-def test_skill_preserves_specification_to_split_source_boundary() -> None:
+def test_skill_preserves_route_to_chapter_package_assembly_boundary() -> None:
     _, body = _skill_frontmatter_and_body()
-    authoring_contract = "Author one UTF-8 schema-v3 JSON specification"
-    generation_contract = "The scaffolder creates the split canonical source"
+    route_contract = "Author a temporary schema-v4 `route.json`"
+    generation_contract = "Scaffold once"
 
-    assert authoring_contract in body
+    assert route_contract in body
     assert generation_contract in body
-    assert body.index(authoring_contract) < body.index(generation_contract)
+    assert body.index(route_contract) < body.index(generation_contract)
+    assert "--chapter-packages /tmp/packages" in body
+    assert "containing only runtime/mechanical metadata" in body
+    assert "lesson.json" not in body
+    assert "lesson_outline" not in body
 
 
 def test_changelog_publishes_the_release_version_from_project_metadata() -> None:
@@ -315,7 +331,7 @@ def test_changelog_publishes_the_release_version_from_project_metadata() -> None
     assert changelog_version == RELEASE_VERSION
     assert release.group("date") == "2026-07-18"
     assert project["project"]["version"] == changelog_version
-    assert manifest["version"] == changelog_version
+    assert manifest["version"].split("+", 1)[0] == changelog_version
 
 
 def test_release_docs_link_the_changelog_and_publish_exact_validation_commands() -> None:
@@ -424,45 +440,41 @@ def test_public_docs_are_neutral_navigable_and_state_runtime_boundaries() -> Non
     invalid_contents: list[str] = []
     for path in sorted((SKILL_ROOT / "references").glob("*.md")):
         text = path.read_text(encoding="utf-8")
-        if len(text.splitlines()) <= 100:
-            continue
         contents = re.search(
             r"^## (?:Table of contents|Contents)\s*$\n(?P<body>.*?)(?=^## |\Z)",
             text,
             re.IGNORECASE | re.MULTILINE | re.DOTALL,
         )
+        if contents is None:
+            continue
         headings = {
             _github_anchor(match.group(1))
             for match in re.finditer(r"^#{2,6}\s+(.+?)\s*$", text, re.MULTILINE)
             if match.group(1).casefold() not in {"table of contents", "contents"}
         }
-        links = (
-            re.findall(r"\[[^\]]+\]\(#([^)]+)\)", contents.group("body"))
-            if contents is not None
-            else []
-        )
+        links = re.findall(r"\[[^\]]+\]\(#([^)]+)\)", contents.group("body"))
         if not links or not any(link.casefold() in headings for link in links):
             invalid_contents.append(path.name)
     assert not invalid_contents, (
-        "long references need a TOC with a real heading anchor: "
+        "a reference that includes a TOC needs a real heading anchor: "
         f"{invalid_contents}"
     )
 
-    documents = {
-        "README.md": _required_text(ROOT / "README.md"),
-        "SKILL.md": _required_text(SKILL_ROOT / "SKILL.md"),
-    }
-    for name, document in documents.items():
-        lowered = document.casefold()
-        assert re.search(
-            r"^## (?:prerequisites|requirements)$",
-            document,
-            re.MULTILINE | re.IGNORECASE,
-        ), name
-        for prerequisite in ("python 3.13", "uv", "node.js 22.13", "git"):
-            assert prerequisite in lowered, f"{name} does not state {prerequisite}"
-        assert "authoring repository" in lowered, name
-        assert "hidden tests are not secret" in lowered, name
+    readme = _required_text(ROOT / "README.md")
+    skill = _required_text(SKILL_ROOT / "SKILL.md")
+    assert re.search(r"^## Prerequisites$", readme, re.MULTILINE)
+    assert re.search(r"^## Requirements and privacy$", skill, re.MULTILINE)
+
+    for prerequisite in ("python 3.13", "uv", "node.js 22.13", "git"):
+        assert prerequisite in readme.casefold()
+    for prerequisite in ("python 3.13", "uv", "git"):
+        assert prerequisite in skill.casefold()
+
+    assert "only for plugin contributors who rebuild or test the shared Web runtime" in readme
+    assert "A generated v4 course uses one Python environment and one local port" in skill
+    assert "it does not install Node" in skill
+    assert "Keep the author sibling private" in readme
+    assert "Hidden tests are an assessment boundary" in skill
 
 
 def test_direct_dependencies_and_official_sources_require_safe_immutable_urls(
@@ -868,6 +880,48 @@ def test_ci_is_read_only_pinned_and_runs_the_root_release_validator() -> None:
     for action in uses:
         assert re.fullmatch(r"[^/\s]+/[^@\s]+@[0-9a-fA-F]{40}", action), action
 
+    v4_web_steps = [
+        step
+        for step in steps
+        if step.get("working-directory")
+        == (
+            "plugins/python-library-course-builder/skills/"
+            "building-python-library-courses/assets/course-template-v4/web-src"
+        )
+    ]
+    assert len(v4_web_steps) == 2
+    v4_web_commands = [str(step.get("run", "")) for step in v4_web_steps]
+    v4_web_command = "\n".join(v4_web_commands)
+    for command in (
+        "npm ci",
+        "npm run check",
+        "git diff --exit-code -- ../coursekit_runtime/static",
+    ):
+        assert command in v4_web_command
+
+    browser = jobs.get("browser")
+    assert isinstance(browser, dict)
+    assert browser.get("needs") == "validate"
+    strategy = browser.get("strategy")
+    assert isinstance(strategy, dict)
+    assert strategy.get("fail-fast") == "false"
+    matrix = strategy.get("matrix")
+    assert isinstance(matrix, dict)
+    assert matrix.get("browser") == ["chromium", "firefox", "webkit"]
+    browser_steps = browser.get("steps")
+    assert isinstance(browser_steps, list)
+    browser_runs = "\n".join(
+        str(step.get("run", ""))
+        for step in browser_steps
+        if isinstance(step, dict)
+    )
+    for command in (
+        'npx playwright install --with-deps "${{ matrix.browser }}"',
+        "npm run build",
+        'npm run test:browser -- --project="${{ matrix.browser }}"',
+    ):
+        assert command in browser_runs
+
     uv_steps = [
         step
         for step in steps
@@ -956,7 +1010,7 @@ def test_dependabot_covers_every_release_lock_ecosystem_and_path() -> None:
     assert isinstance(dependabot, dict)
     assert dependabot.get("version") == "2"
     updates = dependabot.get("updates")
-    assert isinstance(updates, list) and len(updates) == 4
+    assert isinstance(updates, list) and len(updates) == 5
 
     matrix = {
         (update.get("package-ecosystem"), update.get("directory"))
@@ -967,10 +1021,15 @@ def test_dependabot_covers_every_release_lock_ecosystem_and_path() -> None:
         "/plugins/python-library-course-builder/skills/"
         "building-python-library-courses/assets/course-template/platform"
     )
+    v4_web = (
+        "/plugins/python-library-course-builder/skills/"
+        "building-python-library-courses/assets/course-template-v4/web-src"
+    )
     assert matrix == {
         ("uv", "/"),
         ("uv", platform),
         ("npm", platform),
+        ("npm", v4_web),
         ("github-actions", "/"),
     }
     intervals = {
@@ -986,5 +1045,6 @@ def test_dependabot_covers_every_release_lock_ecosystem_and_path() -> None:
         ("uv", "/"): "weekly",
         ("uv", platform): "weekly",
         ("npm", platform): "weekly",
+        ("npm", v4_web): "weekly",
         ("github-actions", "/"): "monthly",
     }

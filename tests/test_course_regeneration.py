@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 import importlib.util
 import json
 import os
@@ -238,7 +239,32 @@ def test_same_version_collision_and_downgrade_fail_closed(
         )
 
 
-def test_ready_plan_binds_full_diff_and_atomically_replaces_whole_course(
+def test_local_cachebuster_allows_authoring_drift_without_release_bump(
+    regenerator: ModuleType,
+) -> None:
+    runtime = regenerator.RuntimeContract(
+        "0.3.0+codex.20260723082125",
+        "a" * 64,
+    )
+    state = regenerator._regeneration_state(
+        regenerator.CourseBaseline("provenance", 2, "0.3.0", "b" * 64),
+        runtime,
+    )
+    assert state == ("regeneration_required", "authoring contract changed")
+
+    with pytest.raises(regenerator.CourseRegenerationError, match="collision"):
+        regenerator._regeneration_state(
+            regenerator.CourseBaseline(
+                "provenance",
+                2,
+                "0.3.0+codex.20260723082125",
+                "b" * 64,
+            ),
+            runtime,
+        )
+
+
+def test_ready_plan_replaces_whole_course_and_deletes_displaced_tree(
     regenerator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -271,17 +297,239 @@ def test_ready_plan_binds_full_diff_and_atomically_replaces_whole_course(
         accept_replacement=True,
     )
 
-    backup = Path(result["backup_path"])
+    rollback = Path(result["rollback_path"])
     assert result["status"] == "applied"
-    assert backup.parent == live.parent
-    assert backup.name.startswith("course.coursekit-backup-")
-    assert regenerator._snapshot(backup) == old_snapshot
-    assert (backup / "learner-note.txt").read_text(encoding="utf-8") == "keep me exactly\n"
-    assert (backup / "labs/.coursekit/state.json").is_file()
+    assert plan["schema_version"] == 2
+    assert plan["replacement_policy"] == "delete-old-after-success"
+    assert rollback.parent == live.parent
+    assert rollback.name.startswith(".course.coursekit-rollback-")
+    assert not rollback.exists()
+    assert result["rollback_retained"] is False
+    assert result["backup_retained"] is False
+    assert result["old_project_deleted"] is True
+    assert result["replacement_irreversible"] is True
+    assert result["old_snapshot_sha256"] == old_snapshot
+    assert list(tmp_path.glob("*.coursekit-backup-*")) == []
     assert regenerator._snapshot(live) == candidate_snapshot
     assert not (live / "labs/.coursekit/state.json").exists()
     assert not candidate.exists()
     assert _git(live, "rev-list", "--count", "HEAD") == "1"
+
+
+def test_cleanup_failure_keeps_verified_new_course_and_reports_residue(
+    regenerator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    live = _make_course(
+        tmp_path / "course",
+        tutorial="old tutorial\n",
+        with_git=False,
+        progress=True,
+    )
+    candidate = _make_course(
+        tmp_path / "candidate",
+        tutorial="new tutorial\n",
+        with_git=True,
+    )
+    _install_contract_fakes(regenerator, monkeypatch)
+    plan_path = tmp_path / "cleanup-plan.json"
+    plan = regenerator.plan_regeneration(live, candidate_course=candidate)
+    regenerator._write_json(plan_path, plan)
+    rollback = Path(plan["rollback_path"])
+    old_snapshot = regenerator._snapshot(live)
+    candidate_snapshot = regenerator._snapshot(candidate)
+
+    def fail_cleanup(*_args: object, **_kwargs: object) -> None:
+        assert rollback.is_dir()
+        raise OSError("injected cleanup failure")
+
+    monkeypatch.setattr(
+        regenerator,
+        "_delete_bound_rollback_contents",
+        fail_cleanup,
+    )
+    with pytest.raises(
+        regenerator.CourseRegenerationError,
+        match="new course remains installed",
+    ):
+        regenerator.apply_regeneration(
+            live,
+            candidate_course=candidate,
+            plan_path=plan_path,
+            confirm_stopped=True,
+            accept_replacement=True,
+        )
+
+    assert regenerator._snapshot(live) == candidate_snapshot
+    assert not candidate.exists()
+    assert regenerator._snapshot(
+        rollback / regenerator.ROLLBACK_LEARNER_NAME
+    ) == old_snapshot
+
+
+def test_cleanup_root_swap_after_validation_preserves_foreign_tree(
+    regenerator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    live = _make_course(
+        tmp_path / "course",
+        tutorial="old tutorial\n",
+        with_git=False,
+    )
+    candidate = _make_course(
+        tmp_path / "candidate",
+        tutorial="new tutorial\n",
+        with_git=True,
+    )
+    _install_contract_fakes(regenerator, monkeypatch)
+    plan_path = tmp_path / "root-swap-plan.json"
+    plan = regenerator.plan_regeneration(live, candidate_course=candidate)
+    regenerator._write_json(plan_path, plan)
+    rollback = Path(plan["rollback_path"])
+    captured_rollback = tmp_path / "captured-old-rollback"
+    old_snapshot = regenerator._snapshot(live)
+    candidate_snapshot = regenerator._snapshot(candidate)
+    real_validate = regenerator._validate_rollback_root
+
+    def swap_root_after_validation(*args: object, **kwargs: object) -> object:
+        bound = real_validate(*args, **kwargs)
+        os.replace(rollback, captured_rollback)
+        rollback.mkdir()
+        (rollback / "foreign-marker.txt").write_text(
+            "must survive\n",
+            encoding="utf-8",
+        )
+        return bound
+
+    monkeypatch.setattr(
+        regenerator,
+        "_validate_rollback_root",
+        swap_root_after_validation,
+    )
+    with pytest.raises(
+        regenerator.CourseRegenerationError,
+        match="new course remains installed",
+    ):
+        regenerator.apply_regeneration(
+            live,
+            candidate_course=candidate,
+            plan_path=plan_path,
+            confirm_stopped=True,
+            accept_replacement=True,
+        )
+
+    assert regenerator._snapshot(live) == candidate_snapshot
+    assert not candidate.exists()
+    assert (rollback / "foreign-marker.txt").read_text(
+        encoding="utf-8"
+    ) == "must survive\n"
+    assert regenerator._snapshot(
+        captured_rollback / regenerator.ROLLBACK_LEARNER_NAME
+    ) == old_snapshot
+
+
+def test_nested_mount_preflight_fails_before_candidate_installation(
+    regenerator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    live = _make_course(
+        tmp_path / "course",
+        tutorial="old tutorial\n",
+        with_git=False,
+    )
+    candidate = _make_course(
+        tmp_path / "candidate",
+        tutorial="new tutorial\n",
+        with_git=True,
+    )
+    _install_contract_fakes(regenerator, monkeypatch)
+    plan_path = tmp_path / "nested-mount-plan.json"
+    plan = regenerator.plan_regeneration(live, candidate_course=candidate)
+    regenerator._write_json(plan_path, plan)
+    rollback = Path(plan["rollback_path"])
+    old_snapshot = regenerator._snapshot(live)
+    candidate_snapshot = regenerator._snapshot(candidate)
+    mounted_identity = (
+        (live / "platform").stat().st_dev,
+        (live / "platform").stat().st_ino,
+    )
+    real_mount_identity = regenerator._fd_mount_identity
+
+    def fake_nested_mount(fd: int) -> tuple[int, ...]:
+        identity = (os.fstat(fd).st_dev, os.fstat(fd).st_ino)
+        mount_identity = real_mount_identity(fd)
+        if identity == mounted_identity:
+            return (*mount_identity, 999_999)
+        return mount_identity
+
+    monkeypatch.setattr(
+        regenerator,
+        "_fd_mount_identity",
+        fake_nested_mount,
+    )
+    with pytest.raises(
+        regenerator.CourseRegenerationError,
+        match="nested mountpoint",
+    ):
+        regenerator.apply_regeneration(
+            live,
+            candidate_course=candidate,
+            plan_path=plan_path,
+            confirm_stopped=True,
+            accept_replacement=True,
+        )
+
+    assert regenerator._snapshot(live) == old_snapshot
+    assert regenerator._snapshot(candidate) == candidate_snapshot
+    assert not rollback.exists()
+
+
+def test_schema1_permanent_backup_plan_must_be_rechecked(
+    regenerator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    live = _make_course(
+        tmp_path / "course",
+        tutorial="old tutorial\n",
+        with_git=False,
+    )
+    candidate = _make_course(
+        tmp_path / "candidate",
+        tutorial="new tutorial\n",
+        with_git=True,
+    )
+    _install_contract_fakes(regenerator, monkeypatch)
+    plan = regenerator.plan_regeneration(live, candidate_course=candidate)
+    old_snapshot = regenerator._snapshot(live)
+    candidate_snapshot = regenerator._snapshot(candidate)
+    stale = dict(plan)
+    stale.pop("plan_digest")
+    stale["schema_version"] = 1
+    stale.pop("replacement_policy")
+    stale["backup_path"] = stale.pop("rollback_path")
+    stale = regenerator._finish_plan(stale)
+    plan_path = tmp_path / "schema1-plan.json"
+    regenerator._write_json(plan_path, stale)
+
+    with pytest.raises(
+        regenerator.CourseRegenerationError,
+        match="ready regeneration plan",
+    ):
+        regenerator.apply_regeneration(
+            live,
+            candidate_course=candidate,
+            plan_path=plan_path,
+            confirm_stopped=True,
+            accept_replacement=True,
+        )
+
+    assert regenerator._snapshot(live) == old_snapshot
+    assert regenerator._snapshot(candidate) == candidate_snapshot
+    assert not Path(plan["rollback_path"]).exists()
 
 
 def test_failed_second_rename_restores_old_course_and_candidate(
@@ -327,7 +575,7 @@ def test_failed_second_rename_restores_old_course_and_candidate(
     assert injected is True
     assert regenerator._snapshot(live) == old_snapshot
     assert regenerator._snapshot(candidate) == candidate_snapshot
-    assert not Path(plan["backup_path"]).exists()
+    assert not Path(plan["rollback_path"]).exists()
 
 
 def test_failed_first_rename_after_mutation_restores_old_course_and_candidate(
@@ -347,14 +595,15 @@ def test_failed_first_rename_after_mutation_restores_old_course_and_candidate(
     regenerator._write_json(plan_path, plan)
     old_snapshot = regenerator._snapshot(live)
     candidate_snapshot = regenerator._snapshot(candidate)
-    backup = Path(plan["backup_path"])
+    rollback = Path(plan["rollback_path"])
+    staged = rollback / regenerator.ROLLBACK_LEARNER_NAME
     original_replace: Callable[..., object] = regenerator.os.replace
     injected = False
 
     def replace_then_fail(source: object, destination: object) -> object:
         nonlocal injected
         result = original_replace(source, destination)
-        if Path(source) == live and Path(destination) == backup and not injected:
+        if Path(source) == live and Path(destination) == staged and not injected:
             injected = True
             raise OSError("injected first rename failure after mutation")
         return result
@@ -372,7 +621,7 @@ def test_failed_first_rename_after_mutation_restores_old_course_and_candidate(
     assert injected is True
     assert regenerator._snapshot(live) == old_snapshot
     assert regenerator._snapshot(candidate) == candidate_snapshot
-    assert not backup.exists()
+    assert not rollback.exists()
 
 
 def test_stale_candidate_is_rejected_before_live_rename(
@@ -400,7 +649,7 @@ def test_stale_candidate_is_rejected_before_live_rename(
             accept_replacement=True,
         )
     assert regenerator._snapshot(live) == before
-    assert not Path(plan["backup_path"]).exists()
+    assert not Path(plan["rollback_path"]).exists()
 
 
 def test_verifier_failure_blocks_and_candidate_must_be_a_sibling(
@@ -738,7 +987,7 @@ def test_forged_failed_verification_plan_is_rechecked_during_apply(
             accept_replacement=True,
         )
 
-    assert not Path(plan["backup_path"]).exists()
+    assert not Path(plan["rollback_path"]).exists()
 
 
 def test_forged_nonmaterial_plan_is_rejected_during_apply(
@@ -791,7 +1040,7 @@ def test_forged_nonmaterial_plan_is_rejected_during_apply(
             accept_replacement=True,
         )
 
-    assert not Path(plan["backup_path"]).exists()
+    assert not Path(plan["rollback_path"]).exists()
 
 
 @pytest.mark.parametrize(
@@ -933,7 +1182,7 @@ def test_apply_accepts_verifier_refresh_of_ignored_runtime_artifacts(
     assert not candidate.exists()
 
 
-def test_candidate_hardlink_cannot_couple_new_course_to_permanent_backup(
+def test_candidate_hardlink_cannot_couple_new_course_to_displaced_tree(
     regenerator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -959,7 +1208,7 @@ def test_candidate_hardlink_cannot_couple_new_course_to_permanent_backup(
         item for item in plan["blockers"] if item["code"] == "candidate-not-fresh"
     )
     assert "hard-linked files" in blocker["message"]
-    assert not Path(plan["backup_path"]).exists()
+    assert not Path(plan["rollback_path"]).exists()
 
 
 def test_candidate_allows_hardlinks_fully_contained_in_runtime_artifacts(
@@ -1060,7 +1309,7 @@ def test_apply_rejects_mode_change_hidden_by_git_configuration(
 
     assert verifier_calls == 2
     assert regenerator._snapshot(live) == old_snapshot
-    assert not Path(plan["backup_path"]).exists()
+    assert not Path(plan["rollback_path"]).exists()
 
 
 def test_apply_rejects_arbitrary_git_ignored_file_created_by_verifier(
@@ -1120,7 +1369,7 @@ def test_apply_rejects_arbitrary_git_ignored_file_created_by_verifier(
 
     assert verifier_calls == 2
     assert regenerator._snapshot(live) == old_snapshot
-    assert not Path(plan["backup_path"]).exists()
+    assert not Path(plan["rollback_path"]).exists()
 
 
 def test_apply_rejects_git_hook_created_by_verifier(
@@ -1165,7 +1414,7 @@ def test_apply_rejects_git_hook_created_by_verifier(
 
     assert verifier_calls == 2
     assert regenerator._snapshot(live) == old_snapshot
-    assert not Path(plan["backup_path"]).exists()
+    assert not Path(plan["rollback_path"]).exists()
 
 
 def test_apply_rejects_semantic_git_index_flags_created_by_verifier(
@@ -1215,7 +1464,7 @@ def test_apply_rejects_semantic_git_index_flags_created_by_verifier(
 
     assert verifier_calls == 2
     assert regenerator._snapshot(live) == old_snapshot
-    assert not Path(plan["backup_path"]).exists()
+    assert not Path(plan["rollback_path"]).exists()
 
 
 def test_legacy_course_must_own_its_git_repository(
@@ -1260,7 +1509,8 @@ def test_post_swap_snapshot_error_rolls_back_both_roots(
     plan_path = tmp_path / "plan.json"
     plan = regenerator.plan_regeneration(live, candidate_course=candidate)
     regenerator._write_json(plan_path, plan)
-    backup = Path(plan["backup_path"])
+    rollback = Path(plan["rollback_path"])
+    staged = rollback / regenerator.ROLLBACK_LEARNER_NAME
     old_snapshot = regenerator._snapshot(live)
     candidate_snapshot = regenerator._snapshot(candidate)
     original_snapshot = regenerator._snapshot
@@ -1268,7 +1518,7 @@ def test_post_swap_snapshot_error_rolls_back_both_roots(
 
     def fail_once_after_swap(root: Path) -> str:
         nonlocal injected
-        if Path(root) == backup and backup.exists() and not injected:
+        if Path(root) == staged and staged.exists() and not injected:
             injected = True
             raise regenerator.CourseRegenerationError("injected snapshot read failure")
         return original_snapshot(root)
@@ -1286,7 +1536,7 @@ def test_post_swap_snapshot_error_rolls_back_both_roots(
     assert injected is True
     assert original_snapshot(live) == old_snapshot
     assert original_snapshot(candidate) == candidate_snapshot
-    assert not backup.exists()
+    assert not rollback.exists()
 
 
 def test_invalid_result_output_is_rejected_before_swap(
@@ -1327,10 +1577,10 @@ def test_invalid_result_output_is_rejected_before_swap(
     assert exit_code == 1
     assert regenerator._snapshot(live) == old_snapshot
     assert regenerator._snapshot(candidate) == candidate_snapshot
-    assert not Path(plan["backup_path"]).exists()
+    assert not Path(plan["rollback_path"]).exists()
 
 
-def test_result_under_planned_backup_is_rejected_without_creating_backup(
+def test_result_under_planned_rollback_is_rejected_without_creating_it(
     regenerator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1345,7 +1595,7 @@ def test_result_under_planned_backup_is_rejected_without_creating_backup(
     plan_path = tmp_path / "plan.json"
     plan = regenerator.plan_regeneration(live, candidate_course=candidate)
     regenerator._write_json(plan_path, plan)
-    backup = Path(plan["backup_path"])
+    rollback = Path(plan["rollback_path"])
     old_snapshot = regenerator._snapshot(live)
     candidate_snapshot = regenerator._snapshot(candidate)
 
@@ -1360,14 +1610,203 @@ def test_result_under_planned_backup_is_rejected_without_creating_backup(
             "--confirm-stopped",
             "--accept-replacement",
             "--json",
-            str(backup / "result.json"),
+            str(rollback / "result.json"),
         ]
     )
 
     assert exit_code == 1
-    assert not backup.exists()
+    assert not rollback.exists()
     assert regenerator._snapshot(live) == old_snapshot
     assert regenerator._snapshot(candidate) == candidate_snapshot
+
+
+def test_commit_receipt_write_failure_restores_before_cleanup(
+    regenerator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    live = _make_course(
+        tmp_path / "course",
+        tutorial="old tutorial\n",
+        with_git=False,
+        progress=True,
+    )
+    candidate = _make_course(
+        tmp_path / "candidate",
+        tutorial="new tutorial\n",
+        with_git=True,
+    )
+    _install_contract_fakes(regenerator, monkeypatch)
+    plan_path = tmp_path / "plan.json"
+    result_path = tmp_path / "result.json"
+    plan = regenerator.plan_regeneration(live, candidate_course=candidate)
+    regenerator._write_json(plan_path, plan)
+    rollback = Path(plan["rollback_path"])
+    old_snapshot = regenerator._snapshot(live)
+    candidate_snapshot = regenerator._snapshot(candidate)
+    real_write_json = regenerator._write_json
+
+    def fail_pending_receipt(
+        path: Path,
+        value: Mapping[str, object],
+    ) -> None:
+        if value.get("cleanup_status") == "pending":
+            raise OSError("injected commit receipt failure")
+        real_write_json(path, value)
+
+    monkeypatch.setattr(regenerator, "_write_json", fail_pending_receipt)
+    exit_code = regenerator.main(
+        [
+            "apply",
+            str(live),
+            "--candidate-course",
+            str(candidate),
+            "--plan",
+            str(plan_path),
+            "--confirm-stopped",
+            "--accept-replacement",
+            "--json",
+            str(result_path),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "cannot persist the replacement commit receipt" in capsys.readouterr().err
+    assert regenerator._snapshot(live) == old_snapshot
+    assert regenerator._snapshot(candidate) == candidate_snapshot
+    assert not rollback.exists()
+    assert not result_path.exists()
+
+
+def test_final_result_write_failure_leaves_durable_commit_receipt(
+    regenerator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    live = _make_course(
+        tmp_path / "course",
+        tutorial="old tutorial\n",
+        with_git=False,
+        progress=True,
+    )
+    candidate = _make_course(
+        tmp_path / "candidate",
+        tutorial="new tutorial\n",
+        with_git=True,
+    )
+    _install_contract_fakes(regenerator, monkeypatch)
+    plan_path = tmp_path / "plan.json"
+    result_path = tmp_path / "result.json"
+    plan = regenerator.plan_regeneration(live, candidate_course=candidate)
+    regenerator._write_json(plan_path, plan)
+    rollback = Path(plan["rollback_path"])
+    candidate_snapshot = regenerator._snapshot(candidate)
+    real_write_json = regenerator._write_json
+
+    def fail_complete_receipt(
+        path: Path,
+        value: Mapping[str, object],
+    ) -> None:
+        if value.get("cleanup_status") == "complete":
+            raise OSError("injected final result failure")
+        real_write_json(path, value)
+
+    monkeypatch.setattr(regenerator, "_write_json", fail_complete_receipt)
+    exit_code = regenerator.main(
+        [
+            "apply",
+            str(live),
+            "--candidate-course",
+            str(candidate),
+            "--plan",
+            str(plan_path),
+            "--confirm-stopped",
+            "--accept-replacement",
+            "--json",
+            str(result_path),
+        ]
+    )
+
+    assert exit_code == 1
+    assert "finalizing result output failed" in capsys.readouterr().err
+    assert regenerator._snapshot(live) == candidate_snapshot
+    assert not candidate.exists()
+    assert not rollback.exists()
+    receipt = json.loads(result_path.read_text(encoding="utf-8"))
+    assert receipt["status"] == "applied"
+    assert receipt["replacement_committed"] is True
+    assert receipt["transaction_state"] == "replacement_committed"
+    assert receipt["cleanup_status"] == "pending"
+    assert "old_project_deleted" not in receipt
+    assert "rollback_retained" not in receipt
+
+
+def test_final_result_replace_mutates_then_raises_is_recognized_as_success(
+    regenerator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    live = _make_course(
+        tmp_path / "course",
+        tutorial="old tutorial\n",
+        with_git=False,
+        progress=True,
+    )
+    candidate = _make_course(
+        tmp_path / "candidate",
+        tutorial="new tutorial\n",
+        with_git=True,
+    )
+    _install_contract_fakes(regenerator, monkeypatch)
+    plan_path = tmp_path / "plan.json"
+    result_path = tmp_path / "result.json"
+    plan = regenerator.plan_regeneration(live, candidate_course=candidate)
+    regenerator._write_json(plan_path, plan)
+    rollback = Path(plan["rollback_path"])
+    candidate_snapshot = regenerator._snapshot(candidate)
+    real_replace = regenerator.os.replace
+    result_replacements = 0
+
+    def replace_then_raise_on_final(source: object, destination: object) -> None:
+        nonlocal result_replacements
+        real_replace(source, destination)
+        if Path(destination) == result_path:
+            result_replacements += 1
+            if result_replacements == 2:
+                raise OSError("injected post-replace result failure")
+
+    monkeypatch.setattr(
+        regenerator.os,
+        "replace",
+        replace_then_raise_on_final,
+    )
+    exit_code = regenerator.main(
+        [
+            "apply",
+            str(live),
+            "--candidate-course",
+            str(candidate),
+            "--plan",
+            str(plan_path),
+            "--confirm-stopped",
+            "--accept-replacement",
+            "--json",
+            str(result_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert result_replacements == 2
+    assert regenerator._snapshot(live) == candidate_snapshot
+    assert not candidate.exists()
+    assert not rollback.exists()
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result["status"] == "applied"
+    assert result["transaction_state"] == "complete"
+    assert result["cleanup_status"] == "complete"
+    assert result["old_project_deleted"] is True
 
 
 def test_incremental_updater_is_a_fail_closed_deprecation_wrapper() -> None:
