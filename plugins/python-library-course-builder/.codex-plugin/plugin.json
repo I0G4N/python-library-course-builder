@@ -1,6 +1,6 @@
 {
   "name": "python-library-course-builder",
-  "version": "0.3.0+codex.20260727050002",
+  "version": "0.3.0",
   "description": "Build deep, source-backed Python courses with runnable labs and a complete local Web experience.",
   "author": {
     "name": "I0G4N",
